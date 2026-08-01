@@ -1,23 +1,24 @@
 <div align="center">
 
-# 🧵 pi-fabric
+# ⚙️ Ultra Fabric
 
-**A programmable tool and agent runtime for [Pi](https://github.com/earendil-works/pi-coding-agent)**
+**A resilient, adaptive orchestration runtime for [Pi](https://github.com/earendil-works/pi-coding-agent)**
 
-_One type-checked program for tools, MCP, agents, workflows, actors, mesh, councils, and recursion._
+_One typed control plane for tools, models, agents, actors, workflows, recovery, verification, and learning._
 
 <p>
   <img src="https://raw.githubusercontent.com/monotykamary/pi-fabric/main/media/cover.jpg" alt="Pi Fabric composing tools and agents in the Pi TUI" width="1100">
 </p>
 
-[![npm version](https://img.shields.io/npm/v/pi-fabric?style=for-the-badge&logo=npm&color=cb3837)](https://www.npmjs.com/package/pi-fabric)
-[![checks](https://img.shields.io/github/actions/workflow/status/monotykamary/pi-fabric/test.yml?branch=main&style=for-the-badge&label=checks)](https://github.com/monotykamary/pi-fabric/actions/workflows/test.yml)
+[![checks](https://img.shields.io/github/actions/workflow/status/ryan-brosas/ultra-fabric/test.yml?branch=main&style=for-the-badge&label=checks)](https://github.com/ryan-brosas/ultra-fabric/actions/workflows/test.yml)
 [![pi extension](https://img.shields.io/badge/pi-extension-8b5cf6?style=for-the-badge)](https://github.com/earendil-works/pi-coding-agent)
 [![license](https://img.shields.io/badge/license-MIT-f4c430?style=for-the-badge)](LICENSE)
 
 </div>
 
 ---
+
+> **Development status:** Ultra Fabric is an experimental fork of [monotykamary/pi-fabric](https://github.com/monotykamary/pi-fabric), currently based on upstream 0.31.1. It preserves Fabric's programmable runtime while developing continuous Prewalk, supervised actors, durable workflows, adaptive routing, context QoS, and outcome-based learning. See the [Ultra Fabric architecture](docs/ultra-fabric.md) and [fork-boundary ADR](docs/adr/0001-fork-boundary.md).
 
 You keep talking to Pi the way you always do. Fabric gives the model **one programmable tool** — `fabric_exec` — that it uses to compose Pi's core tools, MCP servers, captured extension tools, child agents, persistent actors, and durable coordination into a single type-checked TypeScript program. The program runs in a QuickJS sandbox by default; an explicit unsafe Node-process executor is available for trusted workloads that exceed WASM32 memory. Only the final result comes back to the conversation. Branching, loops, fan-out, and data flow become code the model writes and type-checks — not a stack of separate tool calls you have to orchestrate.
 
@@ -58,30 +59,24 @@ Independent calls run in parallel; only the returned object enters the model con
 Requires Node.js 24+ and Pi 0.80.6+. Fabric also checks a detectable Pi host version at startup and warns when an older host may ignore continuation APIs such as actor `triggerTurn`.
 
 ```bash
-pi install npm:pi-fabric
+pi install git:github.com/ryan-brosas/ultra-fabric
 ```
 
 <details>
 <summary>Other install methods</summary>
-
-From GitHub:
-
-```bash
-pi install git:github.com/monotykamary/pi-fabric
-```
 
 From a local checkout:
 
 ```bash
 pnpm install
 pnpm build
-pi install /absolute/path/to/pi-fabric
+pi install /absolute/path/to/ultra-fabric
 ```
 
 For one development run:
 
 ```bash
-pi -e /absolute/path/to/pi-fabric
+pi -e /absolute/path/to/ultra-fabric
 ```
 
 </details>
@@ -118,6 +113,8 @@ See the [interface & commands reference](docs/interface.md) for every view, keyb
 
 ## Reference
 
+- [Ultra Fabric architecture](docs/ultra-fabric.md) — the power wheel, verified gaps, delivery slices, and acceptance criteria.
+- [Fork boundary](docs/adr/0001-fork-boundary.md) — what stays upstream-shaped and what becomes Ultra-native.
 - [Configuration](docs/configuration.md) — `fabric.json`, code modes, tool capture, approvals, and budgets.
 - [Interface & commands](docs/interface.md) — dashboard, settings, keybindings, slash commands, and headless runs.
 - [Agents, actors & mesh](docs/agents.md) — agents, trajectory-preserving model handoff and `/fabric prewalk`, the Claude runner, transports, steering, persistent actors, global templates, councils, recursive queries, and durable coordination.
@@ -138,4 +135,4 @@ The test suite covers configuration, schema validation, provider dispatch, regis
 
 ## License
 
-MIT
+MIT. Ultra Fabric retains the original pi-fabric copyright and license; see [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
