@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   activeBudgetState,
   appendBudgetLedger,
@@ -12,6 +12,10 @@ import {
 } from "../src/agents/budget-ledger.js";
 
 const temporaryFiles: string[] = [];
+
+beforeEach(() => {
+  clearOwnedBudgetEnv();
+});
 
 afterEach(() => {
   clearOwnedBudgetEnv();

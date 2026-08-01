@@ -181,13 +181,16 @@ describe("fabric-exec skill provider contracts", () => {
   });
 
   it("packs every skill and required progressive reference", () => {
-    const packed = JSON.parse(execFileSync(
+    type PackRecord = { files: Array<{ path: string }> };
+    const payload = JSON.parse(execFileSync(
       process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "npm",
       process.platform === "win32"
         ? ["/d", "/s", "/c", "npm", "pack", "--ignore-scripts", "--dry-run", "--json"]
         : ["pack", "--ignore-scripts", "--dry-run", "--json"],
       { cwd: process.cwd(), encoding: "utf8" },
-    )) as Array<{ files: Array<{ path: string }> }>;
+    )) as PackRecord[] | Record<string, PackRecord>;
+    const packed = Array.isArray(payload) ? payload : Object.values(payload);
+    expect(packed).not.toHaveLength(0);
     const files = new Set(packed[0]!.files.map((entry) => entry.path));
     expect(files).toContain("docs/skills.md");
     expect(files).toContain("skills/fabric-ambient/references/setup.md");
