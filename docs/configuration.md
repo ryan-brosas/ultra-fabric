@@ -111,6 +111,14 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
   "compaction": {
     "engine": "fabric"
   },
+  "quality": {
+    "mode": "off",
+    "maxOutputChars": 20000,
+    "maxProbeBytes": 8192,
+    "ignoredLanguages": ["binary"],
+    "languageOverrides": {},
+    "checks": []
+  },
   "outcomes": {
     "enabled": true,
     "maxRecords": 1000,
@@ -182,6 +190,14 @@ Set `prewalk.verificationMode` to `"gated"` to require an identity-owned verific
 Every `fabric_exec` creates one bounded run envelope with run, trace, span, optional parent, objective digest, deadline, and cancellation-owner identity. The envelope crosses provider and child-agent boundaries; recursive Pi children and direct persistent Agent ask/tell activations inherit the same trace. Host calls that legitimately extend the sandbox timeout also extend the immutable envelope snapshot monotonically before provider invocation. `executor.maxRunEvidence` bounds evidence refs; `executor.maxRunTransitions` bounds both typed transitions and ordered gate results, with terminal entries replacing the last non-terminal entry when necessary. `executor.maxGateRevisions` bounds failed `revise` dispositions; an unresolved revision prevents successful settlement, while a crashed gate aborts as infrastructure failure.
 
 A finite per-call `tokenBudget` is admission-enforced rather than merely observed. Concurrent agent calls reserve before invocation and each child receives a hard `maxTokens` ceiling. Sequential calls reclaim unused reserved tokens. The existing `agents.budgetUsd` ledger remains settlement-based because model cost has no defensible hard pre-run estimate.
+
+## Quality enforcement
+
+`quality.mode` is `"off"`, `"audit"`, or `"enforce"`. The default is `"off"`. Valid checks name one executable, an argv array, one or more detected language IDs, `fileMode: "append" | "none"`, and a bounded timeout. Commands from a project file load only when Pi trusts that project.
+
+After an eligible successful `fabric_exec` mutation, Fabric detects the final changed-file languages, runs matching checks serially with no shell, and records a host-owned `quality` gate. Audit failures add a warning while enforce failures make the result unsuccessful. Uncovered languages block enforce mode. Binary files are ignored by default and unknown text is not.
+
+Automatic attribution is limited to successful `pi.write`, `pi.edit`, and committed `schema.commit` paths inside the execution cwd. Shell effects, direct orchestration-only tools, child-agent writes, and concurrent processes are not guessed. See [quality enforcement](quality.md) for the full configuration, HTML and CSS examples, built-in language IDs, bounds, and limitations.
 
 ## Result formatting
 

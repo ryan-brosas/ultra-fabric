@@ -7,7 +7,7 @@
 
 ## Adoption status
 
-Slices 0-7 now have tested backend contracts. Prewalk v2 owns typed continuity, configurable effect triggers, identity-checked continuation, and bounded execute → verify → revise. Persistent Agents own durable inbox/outbox replay, retry/dead-letter/circuit behavior, quotas, telemetry, root traces, and outcomes. Fabric propagates run identity, gates, reservations, durable phase leases, cooperative path leases, deterministic Context QoS, capability/auth routing, explicit delegation intent, capability profiles, and a prompt-free outcome ledger with confidence-bounded recommendations. Automatic policy promotion remains disabled until the Slice 8 benchmark and soak gates are run on representative real tasks.
+Slices 0-7 now have tested backend contracts. Prewalk v2 owns typed continuity, configurable effect triggers, identity-checked continuation, and bounded execute → verify → revise. Persistent Agents own durable inbox/outbox replay, retry/dead-letter/circuit behavior, quotas, telemetry, root traces, and outcomes. Fabric propagates run identity, gates, reservations, durable phase leases, cooperative path leases, deterministic Context QoS, capability/auth routing, explicit delegation intent, capability profiles, and a prompt-free outcome ledger with confidence-bounded recommendations. Automatic policy promotion remains disabled until the Slice 8 benchmark and soak gates are run on representative real tasks. The quality increment adds opt-in host-owned changed-file gates with broad language detection, trusted shell-free checks, explicit coverage failure, and distinct failed, timed-out, and crashed outcomes.
 
 ## Thesis
 
@@ -78,6 +78,7 @@ The audit covered current source, tests, and configuration. The broad CodeGraphC
 | Evaluation | Terminal Fabric and ambient persistent Agent runs persist prompt-free duration/token/cost/verification/route records. Deterministic fixtures and optional model-judge scores feed sample-gated route reports with Wilson confidence bounds. | The 20-task comparative benchmark remains a rollout gate, not a fabricated in-repository result. |
 | Trace correlation | One run/trace/span envelope crosses providers, recursive children, direct and ambient persistent Agent activations; durable phase leases retain owner run/trace/span; final details persist bounded evidence, gates, transitions, and reservations. | External systems still need to propagate the public envelope explicitly. |
 | Shared writes | `leases.acquire/release/list` atomically owns file/tree paths per run; active foreign leases reject `pi.edit`/`pi.write` before mutation. Worktrees remain available for stronger isolation. | Shell commands are opaque and must use worktrees or explicit coordination. |
+| Quality enforcement | Successful `pi.write`, `pi.edit`, and committed `schema.commit` paths are language-classified and routed to trusted bounded checks. Audit warns; enforce aborts on failed checks or uncovered languages. | Shell, direct orchestration-only, child-agent, and foreign-process writes remain outside exact attribution. Subjective cleanliness requires concrete project rules. |
 | Policy extensibility | Bounded configuration now controls triggers, admission, profiles, routing downgrade, retry, gates, quotas, and Context QoS; providers contribute declared risk/capability facts. | Arbitrary third-party policy callbacks remain deferred until the stable config contracts are measured. |
 
 ## Design principles
@@ -320,7 +321,7 @@ Host limits validate shape and budget. Semantic judgment initially remains advis
 
 ## Delivery slices
 
-Current adoption on `prewalk-continuity`: Slices 0-7 and the Ultra Consult context-delegation increment are implemented and tested. Slice 1 adds configurable effect-aware continuity and gated revision. Slice 2 adds durable persistent Agents, delivery recovery, quotas, overload telemetry, and ambient outcomes. Slice 3 propagates run identity, evidence/gates, and atomic reservations. Slice 4 provides durable phase/DAG execution plus owner spans and cooperative write leases. Slice 5 provides deterministic pre-threshold Context QoS. Slice 6 provides explicit admission, capability profiles, and capability/auth-aware routing. Slice 7 provides live health surfaces, derived outcomes, deterministic/model-judge scoring, and confidence-bounded recommendations. The context increment adds one typed `consult.run` surface with context-aware zero-agent admission, bounded fresh read-only workers, Partition/Challenge/Compare semantics, host-resolved file evidence, explicit partial coverage, and prompt-free outcome metrics. Slice 8 remains operational rollout and benchmark evidence, not another backend feature slice.
+Current adoption on `prewalk-continuity`: Slices 0-7 and the Ultra Consult context-delegation increment are implemented and tested. Slice 1 adds configurable effect-aware continuity and gated revision. Slice 2 adds durable persistent Agents, delivery recovery, quotas, overload telemetry, and ambient outcomes. Slice 3 propagates run identity, evidence/gates, and atomic reservations. Slice 4 provides durable phase/DAG execution plus owner spans and cooperative write leases. Slice 5 provides deterministic pre-threshold Context QoS. Slice 6 provides explicit admission, capability profiles, and capability/auth-aware routing. Slice 7 provides live health surfaces, derived outcomes, deterministic/model-judge scoring, and confidence-bounded recommendations. The context increment adds one typed `consult.run` surface with context-aware zero-agent admission, bounded fresh read-only workers, Partition/Challenge/Compare semantics, host-resolved file evidence, explicit partial coverage, and prompt-free outcome metrics. The quality increment adds broad file-language detection, trusted command normalization, contained mutation attribution, serial argv execution, and host-owned audit or enforce gates. Slice 8 remains operational rollout and benchmark evidence, not another backend feature slice.
 
 ### Slice 0: establish the fork
 
@@ -408,6 +409,14 @@ This increment closes the context-capacity and fresh-subagent gap identified aft
 - Hard agent/token reservations cannot be oversubscribed by concurrent admission; cost remains observed until a defensible ceiling exists.
 - Cancellation stops new admission, aborts owned work, and settles leases within a bounded grace period.
 
+### Quality enforcement
+
+- A successful attributed source mutation records one host-owned quality gate when quality mode is active.
+- Audit mode reports controlled failures without converting the Fabric result to failure.
+- Enforce mode blocks failed, timed-out, crashed, missing, and uncovered checks.
+- Commands receive literal argv, run without a shell, have bounded output and time, and execute serially.
+- Opaque or foreign writes are documented as unverified rather than guessed.
+
 ### Context and learning
 
 - Recent turns and unresolved evidence are never retired.
@@ -462,6 +471,14 @@ The context increment uses **Adapt** mode: behavior was independently rewritten 
 **Reviewed:** pure pipeline, priority ranking, pruning logic, turn-protection and structural-pairing tests, package metadata.
 **Useful invariant:** protect recent turns, rank context by replacement value, preserve errors, and maintain tool-call/result structure.
 **Rejected:** direct adoption of its mutable raw-message pipeline. Fabric already owns typed trace normalization and compaction QA, which must remain authoritative.
+
+### Quality-gate precedents
+
+The quality increment uses Adapt mode and copies no implementation bytes.
+
+- **MegaLinter** at `3feb08dac95a08084b52ce20dcd45ba559a9d30b` was reviewed through its language descriptors, `linter_factory.py`, `utils.filter_files`, filter tests, and dependency manifest. Ultra adopts descriptor-like language routing and explicit file versus project invocation, but not its container image, dynamic linter installation, or Python runtime.
+- **pre-commit** at `242ce8a25657be59f2770b50de41fe0fd508820d` was reviewed through `commands/run.py`, `lang_base.py`, config validation, regression tests, and dependency manifest. Ultra adopts validated file classification, literal argument passing, serial capability, and controlled failure, but not hook environments or repository caching.
+- **reviewdog** at `04461841471c037c240d8358e0498e8c2401c07d` was reviewed through diff filtering, parser boundaries, project runners, tests, and `go.mod`. Ultra adopts explicit changed-file ownership while preserving failure detail. Its shell-string command runner is incompatible with Ultra's trusted argv boundary and was rejected.
 
 ## Non-goals
 

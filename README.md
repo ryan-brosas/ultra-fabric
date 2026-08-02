@@ -31,7 +31,7 @@ You keep talking to Pi the way you always do. Fabric gives the model **one progr
 | 🧑‍🤝‍🧑 | **Agent runtime** | One-shot and persistent agents, councils, and bounded recursive queries. |
 | 🧠 | **Ultra Consult** | Zero-agent-by-default context offload through host-scoped read-only fresh workers and byte-bounded validated evidence. |
 | 🕸️ | **Workflows + mesh** | Phased progress plus durable topics, shared tasks, and compare-and-swap state. |
-| 🛡️ | **Guardrails** | Approvals, isolation, timeouts, concurrency, recursion depth, and shared cost budgets. |
+| 🛡️ | **Guardrails** | Approvals, isolation, language-aware quality gates, timeouts, concurrency, recursion depth, and shared cost budgets. |
 | 🎛️ | **Native TUI** | Live activity, an interactive dashboard, and settings without leaving Pi. |
 
 ## How it works
@@ -125,6 +125,7 @@ See the [interface & commands reference](docs/interface.md) for every view, keyb
 - [Ultra Fabric architecture](docs/ultra-fabric.md) — the power wheel, verified gaps, delivery slices, and acceptance criteria.
 - [Fork boundary](docs/adr/0001-fork-boundary.md) — what stays upstream-shaped and what becomes Ultra-native.
 - [Configuration](docs/configuration.md) — `fabric.json`, code modes, tool capture, approvals, and budgets.
+- [Quality enforcement](docs/quality.md). Configure trusted changed-file checks for programming languages, HTML, CSS, and custom formats.
 - [Interface & commands](docs/interface.md) — dashboard, settings, keybindings, slash commands, and headless runs.
 - [Agents & mesh](docs/agents.md) — Ultra Consult, agents, trajectory-preserving model handoff and `/fabric prewalk`, the Claude runner, transports, steering, persistent agents, global templates, councils, recursive queries, and durable coordination.
 - [External providers](docs/providers.md) — the versioned provider protocol for extensions.
@@ -140,7 +141,7 @@ pnpm test
 pnpm build
 ```
 
-The test suite covers configuration, schema validation, provider dispatch, registered-tool interception and execution, QuickJS isolation, Pi built-in invocation, Ultra Consult admission/evidence/reduction, agents, fake Claude stream-JSON and model discovery, workflows, durable mesh state, persistent-agent mailboxes and subscriptions, and Pi/Claude runner restoration. Claude fixtures never make a billable request.
+The test suite covers configuration, schema validation, language-aware quality enforcement, provider dispatch, registered-tool interception and execution, QuickJS isolation, Pi built-in invocation, Ultra Consult admission/evidence/reduction, agents, fake Claude stream-JSON and model discovery, workflows, durable mesh state, persistent-agent mailboxes and subscriptions, and Pi/Claude runner restoration. Claude fixtures never make a billable request.
 
 ## License
 

@@ -67,6 +67,7 @@ import {
   type FabricRunTransition,
 } from "./run/context.js";
 import type { FabricConsultOutcome, FabricOutcomeInput } from "./outcomes/store.js";
+import { runQualityEnforcement } from "./quality/enforcer.js";
 
 let runtimeDependencies:
   | Promise<{
@@ -1308,6 +1309,64 @@ export class FabricExecutionService {
     }
 
     const runtimeOutcome = executionOutcomeFromTermination(sandboxResult.terminationReason);
+    let qualityWarning: string | undefined;
+    const qualityEligible =
+      runtimeOutcome === "succeeded" &&
+      this.config.quality.mode !== "off" &&
+      run.gates.terminal() === undefined &&
+      run.gates.pending().length === 0;
+    if (qualityEligible) {
+      try {
+        const quality = await runQualityEnforcement({
+          cwd: options.context.cwd,
+          audits,
+          config: this.config.quality,
+        });
+        if (quality) {
+          const evidence: FabricEvidenceRef[] = [];
+          for (const execution of quality.executions) {
+            const ref = `quality:${execution.checkId}:${execution.outcome}`;
+            const entry: FabricEvidenceRef = { kind: "command", ref };
+            const recorded = run.evidence.record(entry);
+            if (!recorded.ok) {
+              throw new Error(`Fabric run evidence limit exhausted (${recorded.limit})`);
+            }
+            evidence.push(entry);
+          }
+          const passed = quality.evaluation.decision === "pass";
+          const gate = run.gates.record({
+            gate: "quality",
+            passed,
+            disposition: this.config.quality.mode === "enforce" ? "abort" : "advise",
+            evidence,
+            reason: quality.summary,
+          });
+          run.transitions.record(`gate:${gate.gate}:${gate.decision}`);
+          if (!passed && this.config.quality.mode === "audit") {
+            qualityWarning = `Quality warning: ${quality.summary}`;
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const summary = `quality infrastructure crashed: ${message.slice(0, 4_000)}`;
+        if (this.config.quality.mode === "enforce") {
+          const gate = run.gates.crash("quality", summary);
+          run.transitions.record(`gate:${gate.gate}:${gate.decision}`);
+        } else {
+          qualityWarning = `Quality warning: ${summary}`;
+          try {
+            const gate = run.gates.record({
+              gate: "quality",
+              passed: false,
+              disposition: "advise",
+              evidence: [],
+              reason: summary,
+            });
+            run.transitions.record(`gate:${gate.gate}:${gate.decision}`);
+          } catch {}
+        }
+      }
+    }
     const pendingRevisions = run.gates.pending();
     const terminalGate = run.gates.terminal();
     const terminalGateError = terminalGate
@@ -1326,7 +1385,7 @@ export class FabricExecutionService {
     return this.#recordOutcome({
       success: succeeded,
       value: terminalGateError || gateRevisionError ? undefined : sandboxResult.value,
-      logs: sandboxResult.logs,
+      logs: qualityWarning ? [...sandboxResult.logs, qualityWarning] : sandboxResult.logs,
       audits,
       phases,
       trace: traceRecorder.seal(runOutcome, phases, runError),

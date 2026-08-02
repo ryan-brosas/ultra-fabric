@@ -141,6 +141,26 @@ export interface FabricSchemaConfig {
   trustedCommands: Record<string, FabricSchemaTrustedCommand>;
 }
 
+export type FabricQualityMode = "off" | "audit" | "enforce";
+
+export interface FabricQualityCheckConfig {
+  id: string;
+  languages: string[];
+  command: string;
+  args: string[];
+  fileMode: "append" | "none";
+  timeoutMs: number;
+}
+
+interface FabricQualityConfig {
+  mode: FabricQualityMode;
+  maxOutputChars: number;
+  maxProbeBytes: number;
+  ignoredLanguages: string[];
+  languageOverrides: Record<string, string>;
+  checks: FabricQualityCheckConfig[];
+}
+
 interface FabricUiConfig {
   enabled: boolean;
   widget: FabricUiWidgetMode;
@@ -235,6 +255,7 @@ export interface FabricConfig {
   retention: FabricRetentionConfig;
   mesh: FabricMeshConfig;
   memory: FabricMemoryConfig;
+  quality: FabricQualityConfig;
   schema: FabricSchemaConfig;
 }
 
@@ -401,6 +422,14 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     regexMaxHaystackBytes: 2 * 1024 * 1024,
     regexTimeoutMs: 250,
   },
+  quality: {
+    mode: "off",
+    maxOutputChars: 20_000,
+    maxProbeBytes: 8_192,
+    ignoredLanguages: ["binary"],
+    languageOverrides: {},
+    checks: [],
+  },
   schema: {
     mode: "off",
     certificateTtlMs: 30_000,
@@ -553,6 +582,63 @@ const persistentAgentOverflowPolicyValue = (
 const schemaModeValue = (value: unknown, fallback: FabricSchemaMode): FabricSchemaMode =>
   value === "off" || value === "audit" || value === "enforce" ? value : fallback;
 
+const qualityModeValue = (value: unknown, fallback: FabricQualityMode): FabricQualityMode =>
+  value === "off" || value === "audit" || value === "enforce" ? value : fallback;
+
+const qualityLanguages = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? [...new Set(value.flatMap((entry) => {
+        if (typeof entry !== "string") return [];
+        const language = entry.trim().toLowerCase();
+        return /^(?:\*|[a-z0-9][a-z0-9+._-]{0,63})$/.test(language) ? [language] : [];
+      }))].slice(0, 64)
+    : [];
+
+const qualityChecksValue = (value: unknown): FabricQualityCheckConfig[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((entry) => {
+    const check = objectValue(entry);
+    const id = stringValue(check.id)?.trim();
+    const command = stringValue(check.command)?.trim();
+    const languages = qualityLanguages(check.languages);
+    if (
+      !id ||
+      !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(id) ||
+      seen.has(id) ||
+      !command ||
+      command.length > 4_096 ||
+      languages.length === 0
+    ) return [];
+    seen.add(id);
+    const args = Array.isArray(check.args)
+      ? check.args.filter((arg): arg is string =>
+          typeof arg === "string" && arg.length <= 4_096
+        ).slice(0, 128)
+      : [];
+    return [{
+      id,
+      languages,
+      command,
+      args,
+      fileMode: check.fileMode === "none" ? "none" : "append",
+      timeoutMs: boundedInteger(check.timeoutMs, 30_000, 1_000, 10 * 60_000),
+    } satisfies FabricQualityCheckConfig];
+  }).slice(0, 128);
+};
+
+const qualityOverridesValue = (value: unknown): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(objectValue(value)).flatMap(([rawKey, rawLanguage]) => {
+      const key = rawKey.trim().toLowerCase();
+      const language = typeof rawLanguage === "string" ? rawLanguage.trim().toLowerCase() : "";
+      return /^[a-z0-9._-]{1,256}$/.test(key)
+        && /^[a-z0-9][a-z0-9+._-]{0,63}$/.test(language)
+        ? [[key, language]]
+        : [];
+    }).slice(0, 256),
+  );
+
 const riskValue = (value: unknown, fallback: FabricRisk): FabricRisk =>
   value === "read" ||
   value === "write" ||
@@ -578,6 +664,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
   const retention = objectValue(input.retention);
   const mesh = objectValue(input.mesh);
   const memory = objectValue(input.memory);
+  const quality = objectValue(input.quality);
   const schema = objectValue(input.schema);
   const schemaMode = schemaModeValue(schema.mode, DEFAULT_FABRIC_CONFIG.schema.mode);
   const configuredExecutorRuntime = executorRuntimeValue(
@@ -696,6 +783,11 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       } satisfies FabricSchemaTrustedCommand]];
     }),
   );
+  const configuredIgnoredLanguages = Array.isArray(quality.ignoredLanguages)
+    ? qualityLanguages(quality.ignoredLanguages).filter((language) => language !== "*")
+    : DEFAULT_FABRIC_CONFIG.quality.ignoredLanguages;
+  const configuredQualityChecks = qualityChecksValue(quality.checks);
+  const configuredLanguageOverrides = qualityOverridesValue(quality.languageOverrides);
   const risks = Object.fromEntries(
     Object.entries(configuredRisks)
       .filter(([name]) => Boolean(name.trim()))
@@ -1195,6 +1287,24 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         10,
         10_000,
       ),
+    },
+    quality: {
+      mode: qualityModeValue(quality.mode, DEFAULT_FABRIC_CONFIG.quality.mode),
+      maxOutputChars: boundedInteger(
+        quality.maxOutputChars,
+        DEFAULT_FABRIC_CONFIG.quality.maxOutputChars,
+        256,
+        1_000_000,
+      ),
+      maxProbeBytes: boundedInteger(
+        quality.maxProbeBytes,
+        DEFAULT_FABRIC_CONFIG.quality.maxProbeBytes,
+        64,
+        1024 * 1024,
+      ),
+      ignoredLanguages: configuredIgnoredLanguages,
+      languageOverrides: configuredLanguageOverrides,
+      checks: configuredQualityChecks,
     },
     schema: {
       mode: schemaMode,
