@@ -28,7 +28,7 @@ const filesBelow = (relativeRoot: string): string[] => {
       const child = path.join(absolutePath, entry.name);
       if (entry.isDirectory()) visit(child);
       else if (entry.isFile() && /\.(?:ts|md|json)$/.test(entry.name)) {
-        files.push(path.relative(ROOT, child));
+        files.push(path.relative(ROOT, child).split(path.sep).join("/"));
       }
     }
   };

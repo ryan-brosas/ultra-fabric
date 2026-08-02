@@ -101,7 +101,9 @@ describe("effectiveAgentTimeoutMs", () => {
 
 afterEach(async () => {
   await Promise.all(managers.splice(0).map((manager) => manager.close()));
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
 });
 
 describe("AgentManager", () => {
