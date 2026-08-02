@@ -18,7 +18,7 @@ type GraphNodeKind =
   | "main"
   | "peer"
   | "agent"
-  | "actor"
+  | "persistentAgent"
   | "participant"
   | "group"
   | "topic"
@@ -68,7 +68,7 @@ export interface FabricGraphAnimation {
 
 const kindRank: Record<GraphNodeKind, number> = {
   agent: 0,
-  actor: 1,
+  persistentAgent: 1,
   participant: 2,
   peer: 3,
   group: 4,
@@ -85,14 +85,14 @@ const nodeKind = (entity: Entity): GraphNodeKind => {
   if (entity.kind === "meshParticipant") return "participant";
   if (entity.kind === "meshTopic") return "topic";
   if (entity.kind === "meshRoute") return "route";
-  if (entity.kind === "globalActor" || entity.kind === "call" || entity.kind === "item") {
+  if (entity.kind === "agentTemplate" || entity.kind === "call" || entity.kind === "item") {
     return "state";
   }
   return entity.kind;
 };
 
 const rawIdentity = (entity: Entity): Array<string | undefined> => {
-  if (entity.kind === "main" || entity.kind === "peer" || entity.kind === "agent" || entity.kind === "actor") {
+  if (entity.kind === "main" || entity.kind === "peer" || entity.kind === "agent" || entity.kind === "persistentAgent") {
     return [entity.value.id, entity.value.name];
   }
   if (entity.kind === "meshParticipant") {
@@ -129,7 +129,7 @@ const graphGlyph = (node: GraphNode, animation: FabricGraphAnimation): string =>
   const frame = Math.floor(animation.now / 160);
   const active = isActiveStatus(node.status);
   if (node.kind === "main") return active && !animation.reducedMotion ? ["◇", "◈", "◆", "◈"][frame % 4]! : "◆";
-  if (node.kind === "actor") {
+  if (node.kind === "persistentAgent") {
     if ((node.queued ?? 0) > 0 && !animation.reducedMotion) return ["◇", "◈", "◆", "◈"][frame % 4]!;
     return "◇";
   }
@@ -167,10 +167,9 @@ export interface FabricTopologyGroupSegment {
 }
 
 export const topologyParticipantGroup = (
-  kind: "root" | "peer" | "agent" | "actor",
+  kind: "root" | "peer" | "agent" | "persistentAgent",
 ): FabricTopologyGroupSegment & { order: number } => {
-  if (kind === "actor") return { id: "actors", label: "Actors", order: 2 };
-  if (kind === "agent") return { id: "agents", label: "Agents", order: 1 };
+  if (kind === "persistentAgent" || kind === "agent") return { id: "agents", label: "Agents", order: 1 };
   return { id: "sessions", label: "Sessions", order: 0 };
 };
 
@@ -242,7 +241,7 @@ export const topologyStateGroupPath = (key: string): FabricTopologyGroupSegment[
 };
 
 const parentReference = (entity: Entity): string | undefined => {
-  if (entity.kind === "agent") return entity.value.parentId ?? entity.value.actorId;
+  if (entity.kind === "agent") return entity.value.parentId ?? entity.value.persistentAgentId;
   if (entity.kind === "meshParticipant") return entity.value.participant?.parentId;
   if (entity.kind === "meshRoute") return entity.value.fromId;
   return undefined;
@@ -300,7 +299,7 @@ const buildLayout = (
     return parentId;
   };
   const participantCategory = (entity: Entity): FabricTopologyGroupSegment & { order: number } => {
-    if (entity.kind === "actor") return topologyParticipantGroup("actor");
+    if (entity.kind === "persistentAgent") return topologyParticipantGroup("persistentAgent");
     if (entity.kind === "agent") return topologyParticipantGroup("agent");
     if (entity.kind === "peer") return topologyParticipantGroup("peer");
     return topologyParticipantGroup(
@@ -315,7 +314,7 @@ const buildLayout = (
       let parentId = explicitParentId;
       if (entity.kind !== "main") {
         if (
-          ["agent", "actor", "peer", "meshParticipant"].includes(entity.kind) &&
+          ["agent", "persistentAgent", "peer", "meshParticipant"].includes(entity.kind) &&
           (!parentId || parentId === mainId)
         ) {
           ensureGroup(PARTICIPANTS_GROUP_ID, "Participants", mainId, 0);
@@ -340,7 +339,7 @@ const buildLayout = (
       }
       const activityAt = entity.kind === "meshTopic" ? entity.value.lastEventAt : undefined;
       const startedAt = entity.kind === "agent" ? entity.value.startedAt : undefined;
-      const queued = entity.kind === "actor" ? entity.value.queued : undefined;
+      const queued = entity.kind === "persistentAgent" ? entity.value.queued : undefined;
       const stale = entity.kind === "meshParticipant"
         ? entity.value.participant?.stale
         : entity.kind === "agent"
@@ -783,7 +782,7 @@ const inspectorLines = (
       if (entity.value.currentTool) content.push(`tool  ${safeText(entity.value.currentTool)}`);
       if (entity.value.model) content.push(`model ${safeText(entity.value.model)}`);
       if (entity.value.task) content.push(...wrapInspector(theme, "task", entity.value.task, inner - 2));
-    } else if (entity.kind === "actor") {
+    } else if (entity.kind === "persistentAgent") {
       content.push(`runner ${entity.value.runner}`);
       content.push(`queue  ${entity.value.queued}`);
       if (entity.value.topics.length > 0) content.push(`${entity.value.topics.length} subscriptions`);
@@ -923,7 +922,7 @@ export const renderFabricTopologyPanel = ({
       `${active} active`,
       "◆ Main",
       "■ agent",
-      "◇ actor",
+      "◇ persistent Agent",
       "◎ topic",
       "▱ group",
       animation.replayRouteId ? "▶ replay" : animation.showHistory ? "history" : "live decay",

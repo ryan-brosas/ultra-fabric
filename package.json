@@ -17,6 +17,7 @@
   },
   "files": [
     "dist/",
+    "agents/",
     "skills/",
     "docs/",
     "README.md",
@@ -40,7 +41,6 @@
     "codemode",
     "mcp",
     "agents",
-    "actors",
     "steering",
     "mesh",
     "swarm",

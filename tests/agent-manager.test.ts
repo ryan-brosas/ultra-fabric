@@ -466,10 +466,12 @@ describe("AgentManager", () => {
       task: "Use native tools",
       transport: "process",
       tools: ["read", "grep"],
+      model: "makora/deepseek-ai/DeepSeek-V4-Pro",
     })) as ObservedResult;
     expect(direct.fullCodeMode).toBe("false");
     expect(direct.tools).toEqual(["read", "grep"]);
     expect(direct.extensions).toBe("true");
+    expect(direct.model).toBe("makora/deepseek-ai/DeepSeek-V4-Pro");
     expect(direct.mainAgentId).toBe("session:root-main");
 
     const scoped = (await manager.run({
@@ -545,10 +547,10 @@ describe("AgentManager", () => {
     const result = await manager.run({
       task: "Return a directive",
       transport: "process",
-      systemPrompt: "You are a test actor.",
-      sessionFile: path.join(root, "actor-session.jsonl"),
-      actorId: "actor-test",
-      actorName: "test-actor",
+      systemPrompt: "You are a test persistentAgent.",
+      sessionFile: path.join(root, "persistentAgent-session.jsonl"),
+      persistentAgentId: "persistentAgent-test",
+      persistentAgentName: "test-persistentAgent",
       meshRoot: path.join(root, "mesh"),
       schema: {
         type: "object",
@@ -563,7 +565,7 @@ describe("AgentManager", () => {
     expect(result.status).toBe("completed");
     expect(result.value).toEqual({
       action: "message",
-      message: "validated actor response:false",
+      message: "validated persistentAgent response:false",
     });
     expect(result.usage).toMatchObject({ input: 3, output: 4 });
   });
@@ -698,6 +700,39 @@ describe("AgentManager", () => {
     });
     expect(result.status).toBe("completed");
     expect(result.model).toBe("gpt-override");
+  });
+
+  it("stops a Pi child after its hard turn boundary and preserves natural completion", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-turn-budget-"));
+    roots.push(root);
+    const fakePi = path.resolve("tests/fixtures/fake-pi-rpc.mjs");
+    fs.chmodSync(fakePi, 0o755);
+    const manager = new AgentManager(process.cwd(), DEFAULT_FABRIC_CONFIG.agents, {
+      workerPath: path.resolve("src/worker.ts"),
+      piBinary: fakePi,
+      runRoot: root,
+    });
+    managers.push(manager);
+
+    const exceeded = await manager.run({
+      task: "EXCEED_TURN_BUDGET",
+      turnBudget: { maxTurns: 1, graceTurns: 0 },
+    });
+    expect(exceeded).toMatchObject({
+      status: "timed_out",
+      turns: 2,
+      turnBudget: { maxTurns: 1, graceTurns: 0, outcome: "exceeded" },
+    });
+    expect(exceeded.error).toMatch(/turn budget reached/i);
+
+    const completed = await manager.run({
+      task: "Finish normally",
+      turnBudget: { maxTurns: 1, graceTurns: 0 },
+    });
+    expect(completed).toMatchObject({
+      status: "completed",
+      turnBudget: { maxTurns: 1, graceTurns: 0, outcome: "within-budget" },
+    });
   });
 
   it("forwards the configured default thinking when a call omits one", async () => {
@@ -884,20 +919,20 @@ describe("AgentManager", () => {
       const result = await manager.run({
         task: "anything",
         transport: "process",
-        actorId: "actor-test",
-        actorName: "attr-test",
+        persistentAgentId: "persistentAgent-test",
+        persistentAgentName: "attr-test",
       });
       expect(result.status).toBe("completed");
 
       const usageEvents = life.filter((entry) => entry.event === "tokens.usage");
       expect(usageEvents).toHaveLength(1);
       const payload = usageEvents[0]!.data as {
-        runId: string; runner: string; depth: number; actorId?: string; cumulativeTokens: number;
+        runId: string; runner: string; depth: number; persistentAgentId?: string; cumulativeTokens: number;
         input: number; output: number; cost: number;
       };
       expect(payload.runner).toBe("pi");
       expect(payload.depth).toBe(1);
-      expect(payload.actorId).toBe("actor-test");
+      expect(payload.persistentAgentId).toBe("persistentAgent-test");
       expect(payload.cumulativeTokens).toBe(13);
       expect(payload.input).toBe(4);
       expect(payload.output).toBe(6);
@@ -911,7 +946,7 @@ describe("AgentManager", () => {
       expect(totalCost).toBeCloseTo(0.0015);
       expect(detail.byRunner.pi?.tokens).toBe(23);
       expect(detail.byRunner.pi?.cost).toBeCloseTo(0.0015);
-      expect(detail.byActor["actor-test"]?.tokens).toBe(23);
+      expect(detail.byPersistentAgent["persistentAgent-test"]?.tokens).toBe(23);
     } finally {
       clearOwnedBudgetEnv();
     }
@@ -1175,10 +1210,10 @@ describe("AgentManager Claude runner", () => {
     ).rejects.toThrow(/does not support recursive Fabric/);
     await expect(
       manager.run({ task: "unknown tool", runner: "claude", tools: ["custom"] }),
-    ).rejects.toThrow(/does not support Fabric tool/);
+    ).rejects.toThrow(/does not allow tools/);
     await expect(
       manager.run({ task: "prototype tool", runner: "claude", tools: ["__proto__"] }),
-    ).rejects.toThrow(/does not support Fabric tool/);
+    ).rejects.toThrow(/does not allow tools/);
     await expect(
       manager.run({ task: "blank model", runner: "claude", model: "claude/" }),
     ).rejects.toThrow(/must include a runtime model value/);

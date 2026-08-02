@@ -38,7 +38,7 @@ export interface FabricNestedToolPreview {
   name: string;
   status: string;
   runner?: "pi" | "claude";
-  owner: "agent" | "actor";
+  owner: "agent" | "persistentAgent";
   text?: string;
   tools: FabricTranscriptEntry[];
 }

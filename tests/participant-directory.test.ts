@@ -171,7 +171,7 @@ describe("ParticipantDirectory", () => {
     expect(directory.mesh.get("sessions/quiesce")).toBeUndefined();
   });
 
-  it("does not claim an actor still owned by a live legacy root", async () => {
+  it("does not claim an persistentAgent still owned by a live legacy root", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-topology-"));
     roots.push(root);
     const meshRoot = path.join(root, "mesh");
@@ -201,10 +201,10 @@ describe("ParticipantDirectory", () => {
       identity: oldIdentity,
     });
     await mesh.put({
-      key: "actors/old-session/actor:legacy",
+      key: "persistentAgents/old-session/persistentAgent:legacy",
       value: {
-        id: "actor:legacy",
-        name: "legacy actor",
+        id: "persistentAgent:legacy",
+        name: "legacy persistentAgent",
         status: "idle",
         runner: "pi",
         createdAt: 1,
@@ -220,14 +220,14 @@ describe("ParticipantDirectory", () => {
     const directory = createDirectory(meshRoot, identity, identity.id, () => [
       rootRecord(identity.id, identity.id, "new-session"),
       {
-        ...agentRecord("actor:legacy", identity.id, identity.id, identity.id),
-        kind: "actor",
+        ...agentRecord("persistentAgent:legacy", identity.id, identity.id, identity.id),
+        kind: "persistentAgent",
         transport: "host",
       },
     ]);
 
     await directory.start();
-    expect(directory.get("actor:legacy")).toMatchObject({
+    expect(directory.get("persistentAgent:legacy")).toMatchObject({
       ownerHostId: oldIdentity.id,
       controlProtocol: "legacy",
       local: false,
@@ -235,7 +235,7 @@ describe("ParticipantDirectory", () => {
 
     await mesh.delete({ key: session.key, ifVersion: session.version });
     await directory.refresh();
-    expect(directory.get("actor:legacy")).toMatchObject({
+    expect(directory.get("persistentAgent:legacy")).toMatchObject({
       ownerHostId: identity.id,
       controlProtocol: "v1",
       local: true,
@@ -316,8 +316,8 @@ describe("ParticipantDirectory", () => {
       sessionId: "beta",
     };
     const shared = (identity: MeshIdentity): FabricParticipantRecord => ({
-      ...agentRecord("actor:shared", identity.id, identity.id, identity.id),
-      kind: "actor",
+      ...agentRecord("persistentAgent:shared", identity.id, identity.id, identity.id),
+      kind: "persistentAgent",
       transport: "host",
     });
     const alpha = createDirectory(meshRoot, alphaIdentity, alphaIdentity.id, () => [
@@ -331,11 +331,11 @@ describe("ParticipantDirectory", () => {
 
     await alpha.start();
     await beta.start();
-    expect(beta.get("actor:shared")).toMatchObject({ ownerHostId: "session:alpha" });
+    expect(beta.get("persistentAgent:shared")).toMatchObject({ ownerHostId: "session:alpha" });
 
     await alpha.close();
     await beta.refresh();
-    expect(beta.get("actor:shared")).toMatchObject({ ownerHostId: "session:beta" });
+    expect(beta.get("persistentAgent:shared")).toMatchObject({ ownerHostId: "session:beta" });
   });
 
   it("hides every participant owned by an expired host lease", async () => {

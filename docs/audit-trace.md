@@ -109,7 +109,7 @@ Identifiers (`ref`, `provider`, `action`), the resolved declared `risk` and opti
 
 ## Derived outcomes
 
-The outcome ledger is separate from final session details. It derives terminal run identity digest, duration, token/cost totals, gate verdict, evidence count, route downgrade, admission reasons, and score verdicts. It never copies prompt/result bodies, media, gate reasons, errors, or judge prose. Ambient actors synthesize a root trace when no parent run exists; durable workflow claims retain owner run/trace/span on the active phase.
+The outcome ledger is separate from final session details. It derives terminal run identity digest, duration, token/cost totals, gate verdict, evidence count, route downgrade, admission reasons, and score verdicts. It never copies prompt/result bodies, media, gate reasons, errors, or judge prose. Ambient persistent Agents synthesize a root trace when no parent run exists; durable workflow claims retain owner run/trace/span on the active phase.
 
 ## Reading and rendering traces
 

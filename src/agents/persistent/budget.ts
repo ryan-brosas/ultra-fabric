@@ -1,18 +1,18 @@
-export interface FabricActorBudgetInput {
+export interface FabricPersistentAgentBudgetInput {
   lifetimeActivations?: number;
   windowActivations?: number;
   windowMs?: number;
 }
 
-export interface FabricActorBudgetPolicy {
+export interface FabricPersistentAgentBudgetPolicy {
   lifetimeActivations: number;
   windowActivations: number;
   windowMs: number;
 }
 
-export type FabricActorBudgetRejection = "lifetime_exhausted" | "window_exhausted";
+export type FabricPersistentAgentBudgetRejection = "lifetime_exhausted" | "window_exhausted";
 
-export interface FabricActorBudgetUsage {
+export interface FabricPersistentAgentBudgetUsage {
   lifetimeActivations: number;
   lifetimeTokens: number;
   windowStartedAt: number;
@@ -20,13 +20,13 @@ export interface FabricActorBudgetUsage {
   windowTokens: number;
   rejectedActivations: number;
   lastRejectedAt?: number;
-  lastRejection?: FabricActorBudgetRejection;
+  lastRejection?: FabricPersistentAgentBudgetRejection;
 }
 
-export interface FabricActorBudgetSnapshot {
-  policy: FabricActorBudgetPolicy;
-  usage: FabricActorBudgetUsage;
-  admission: "open" | FabricActorBudgetRejection;
+export interface FabricPersistentAgentBudgetSnapshot {
+  policy: FabricPersistentAgentBudgetPolicy;
+  usage: FabricPersistentAgentBudgetUsage;
+  admission: "open" | FabricPersistentAgentBudgetRejection;
 }
 
 const boundedInteger = (value: unknown, fallback: number, min: number, max: number): number =>
@@ -34,15 +34,15 @@ const boundedInteger = (value: unknown, fallback: number, min: number, max: numb
     ? Math.min(max, Math.max(min, Math.floor(value)))
     : fallback;
 
-export const normalizeActorBudgetPolicy = (
-  input: FabricActorBudgetInput | undefined,
-): FabricActorBudgetPolicy => ({
+export const normalizePersistentAgentBudgetPolicy = (
+  input: FabricPersistentAgentBudgetInput | undefined,
+): FabricPersistentAgentBudgetPolicy => ({
   lifetimeActivations: boundedInteger(input?.lifetimeActivations, 0, 0, 1_000_000),
   windowActivations: boundedInteger(input?.windowActivations, 0, 0, 1_000_000),
   windowMs: boundedInteger(input?.windowMs, 3_600_000, 1_000, 30 * 86_400_000),
 });
 
-export const createActorBudgetUsage = (now: number): FabricActorBudgetUsage => ({
+export const createPersistentAgentBudgetUsage = (now: number): FabricPersistentAgentBudgetUsage => ({
   lifetimeActivations: 0,
   lifetimeTokens: 0,
   windowStartedAt: now,
@@ -52,10 +52,10 @@ export const createActorBudgetUsage = (now: number): FabricActorBudgetUsage => (
 });
 
 const currentWindow = (
-  policy: FabricActorBudgetPolicy,
-  usage: FabricActorBudgetUsage,
+  policy: FabricPersistentAgentBudgetPolicy,
+  usage: FabricPersistentAgentBudgetUsage,
   now: number,
-): FabricActorBudgetUsage =>
+): FabricPersistentAgentBudgetUsage =>
   now < usage.windowStartedAt || now - usage.windowStartedAt >= policy.windowMs
     ? {
         ...usage,
@@ -66,9 +66,9 @@ const currentWindow = (
     : { ...usage };
 
 const rejection = (
-  policy: FabricActorBudgetPolicy,
-  usage: FabricActorBudgetUsage,
-): FabricActorBudgetRejection | undefined => {
+  policy: FabricPersistentAgentBudgetPolicy,
+  usage: FabricPersistentAgentBudgetUsage,
+): FabricPersistentAgentBudgetRejection | undefined => {
   if (
     policy.lifetimeActivations > 0 &&
     usage.lifetimeActivations >= policy.lifetimeActivations
@@ -84,13 +84,13 @@ const rejection = (
   return undefined;
 };
 
-export const admitActorActivation = (
-  policy: FabricActorBudgetPolicy,
-  usage: FabricActorBudgetUsage,
+export const admitPersistentAgentActivation = (
+  policy: FabricPersistentAgentBudgetPolicy,
+  usage: FabricPersistentAgentBudgetUsage,
   now: number,
 ):
-  | { ok: true; usage: FabricActorBudgetUsage }
-  | { ok: false; reason: FabricActorBudgetRejection; usage: FabricActorBudgetUsage } => {
+  | { ok: true; usage: FabricPersistentAgentBudgetUsage }
+  | { ok: false; reason: FabricPersistentAgentBudgetRejection; usage: FabricPersistentAgentBudgetUsage } => {
   const current = currentWindow(policy, usage, now);
   const reason = rejection(policy, current);
   if (reason) {
@@ -115,14 +115,14 @@ export const admitActorActivation = (
   };
 };
 
-export const restoreActorBudgetUsage = (
+export const restorePersistentAgentBudgetUsage = (
   value: unknown,
   now: number,
-): FabricActorBudgetUsage => {
+): FabricPersistentAgentBudgetUsage => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return createActorBudgetUsage(now);
+    return createPersistentAgentBudgetUsage(now);
   }
-  const record = value as Partial<FabricActorBudgetUsage>;
+  const record = value as Partial<FabricPersistentAgentBudgetUsage>;
   const lastRejection =
     record.lastRejection === "lifetime_exhausted" ||
     record.lastRejection === "window_exhausted"
@@ -160,12 +160,12 @@ export const restoreActorBudgetUsage = (
   };
 };
 
-export const recordActorTokens = (
-  policy: FabricActorBudgetPolicy,
-  usage: FabricActorBudgetUsage,
+export const recordPersistentAgentTokens = (
+  policy: FabricPersistentAgentBudgetPolicy,
+  usage: FabricPersistentAgentBudgetUsage,
   tokens: number,
   now: number,
-): FabricActorBudgetUsage => {
+): FabricPersistentAgentBudgetUsage => {
   const current = currentWindow(policy, usage, now);
   const amount = boundedInteger(tokens, 0, 0, Number.MAX_SAFE_INTEGER);
   return {
@@ -175,8 +175,8 @@ export const recordActorTokens = (
   };
 };
 
-export interface FabricActorBudgetTelemetry {
-  actors: number;
+export interface FabricPersistentAgentBudgetTelemetry {
+  persistentAgents: number;
   open: number;
   lifetimeExhausted: number;
   windowExhausted: number;
@@ -185,10 +185,10 @@ export interface FabricActorBudgetTelemetry {
   rejectedActivations: number;
 }
 
-export const summarizeActorBudgets = (
-  snapshots: readonly FabricActorBudgetSnapshot[],
-): FabricActorBudgetTelemetry => ({
-  actors: snapshots.length,
+export const summarizePersistentAgentBudgets = (
+  snapshots: readonly FabricPersistentAgentBudgetSnapshot[],
+): FabricPersistentAgentBudgetTelemetry => ({
+  persistentAgents: snapshots.length,
   open: snapshots.filter((snapshot) => snapshot.admission === "open").length,
   lifetimeExhausted: snapshots.filter(
     (snapshot) => snapshot.admission === "lifetime_exhausted",
@@ -210,11 +210,11 @@ export const summarizeActorBudgets = (
   ),
 });
 
-export const actorBudgetSnapshot = (
-  policy: FabricActorBudgetPolicy,
-  usage: FabricActorBudgetUsage,
+export const persistentAgentBudgetSnapshot = (
+  policy: FabricPersistentAgentBudgetPolicy,
+  usage: FabricPersistentAgentBudgetUsage,
   now: number,
-): FabricActorBudgetSnapshot => {
+): FabricPersistentAgentBudgetSnapshot => {
   const current = currentWindow(policy, usage, now);
   return {
     policy: { ...policy },

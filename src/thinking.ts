@@ -1,7 +1,7 @@
 /**
  * Shared thinking (reasoning effort) level type and helpers.
  *
- * Fabric resolves a thinking level per run (explicit call/actor value, else the
+ * Fabric resolves a thinking level per run (explicit call/persistentAgent value, else the
  * Fabric default, "medium"). Pi receives it via "--thinking" and clamps it to
  * the model's supported levels using next-highest fallback (see pi-ai
  * clampThinkingLevel). Claude receives it via "--effort"; off/minimal map to
@@ -9,7 +9,7 @@
  */
 export type FabricThinking = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-/** Fabric-wide default thinking level, used when a call/actor omits one. */
+/** Fabric-wide default thinking level, used when a call/persistentAgent omits one. */
 export const DEFAULT_FABRIC_THINKING: FabricThinking = "medium";
 
 /** Ordered lowest -> highest; matches pi-ai's EXTENDED_THINKING_LEVELS. */

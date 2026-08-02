@@ -97,7 +97,7 @@ if (task.includes("HANG")) {
   const directive = schema?.properties?.action
     ? {
         action: "message",
-        message: "fake actor advice",
+        message: "fake persistentAgent advice",
         ...(images.length > 0 ? { data: { imageCount: images.length } } : {}),
       }
     : undefined;
@@ -173,7 +173,7 @@ if (task.includes("HANG")) {
     fs.writeFileSync(logFile, events.map((event) => JSON.stringify(event)).join("\n") + "\n");
   }
 
-  // Append a lightweight actor transcript only when this is not already a
+  // Append a lightweight persistentAgent transcript only when this is not already a
   // native Pi session. Handoff fixtures pass a real branched JSONL file; raw
   // role records would corrupt its id/parentId tree.
   let nativePiSession = false;

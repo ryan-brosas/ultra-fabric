@@ -6,7 +6,7 @@ import {
 } from "../src/main-agent.js";
 
 describe("MainAgentController", () => {
-  it("resolves root, recursive-agent, and actor identities without losing the root Main target", () => {
+  it("resolves root, recursive-agent, and persistentAgent identities without losing the root Main target", () => {
     expect(resolveFabricIdentity("root", {})).toEqual({
       identity: {
         id: "session:root",
@@ -34,18 +34,18 @@ describe("MainAgentController", () => {
     });
 
     expect(
-      resolveFabricIdentity("actor-session", {
-        PI_FABRIC_ACTOR_ID: "actor-supervisor",
-        PI_FABRIC_ACTOR_NAME: "Supervisor",
-        PI_FABRIC_PARENT_RUN: "actor-worker-run",
+      resolveFabricIdentity("persistentAgent-session", {
+        PI_FABRIC_PERSISTENT_AGENT_ID: "persistentAgent-supervisor",
+        PI_FABRIC_PERSISTENT_AGENT_NAME: "Supervisor",
+        PI_FABRIC_PARENT_RUN: "persistentAgent-worker-run",
         PI_FABRIC_MAIN_AGENT_ID: "session:root",
       }),
     ).toEqual({
       identity: {
-        id: "actor-supervisor",
+        id: "persistentAgent-supervisor",
         name: "Supervisor",
-        kind: "actor",
-        sessionId: "actor-session",
+        kind: "persistentAgent",
+        sessionId: "persistentAgent-session",
       },
       mainAgentId: "session:root",
     });
@@ -93,7 +93,7 @@ describe("MainAgentController", () => {
 
     expect(
       controller.deliverAgent({
-        from: { id: "actor-1", name: "Supervisor", kind: "actor" },
+        from: { id: "persistentAgent-1", name: "Supervisor", kind: "persistentAgent" },
         message: "inspect <unsafe> & continue",
         delivery: "followUp",
         data: { priority: 2 },
@@ -104,7 +104,7 @@ describe("MainAgentController", () => {
         customType: "pi-fabric-agent-message",
         content: expect.stringContaining("inspect &lt;unsafe&gt; &amp; continue"),
         details: expect.objectContaining({
-          from: { id: "actor-1", name: "Supervisor", kind: "actor" },
+          from: { id: "persistentAgent-1", name: "Supervisor", kind: "persistentAgent" },
           delivery: "followUp",
           data: { priority: 2 },
         }),

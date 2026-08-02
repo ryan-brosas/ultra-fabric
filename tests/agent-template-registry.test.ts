@@ -2,15 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { GlobalActorRegistry } from "../src/actors/global-registry.js";
-import type { FabricActorRequest } from "../src/actors/types.js";
+import { AgentTemplateRegistry } from "../src/agents/persistent/template-registry.js";
+import type { FabricPersistentAgentRequest } from "../src/agents/persistent/types.js";
 
 const dirs: string[] = [];
 
 const setup = () => {
-  const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-global-actors-"));
+  const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-global-persistentAgents-"));
   dirs.push(agentDir);
-  const registry = new GlobalActorRegistry(agentDir, 64 * 1024);
+  const registry = new AgentTemplateRegistry(agentDir, 64 * 1024);
   return { agentDir, registry };
 };
 
@@ -18,7 +18,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const baseRequest: FabricActorRequest = {
+const baseRequest: FabricPersistentAgentRequest = {
   name: "reviewer",
   instructions: "Review code for security defects and reply concisely.",
   events: ["turn_end"],
@@ -29,7 +29,7 @@ const baseRequest: FabricActorRequest = {
   coalesce: true,
 };
 
-describe("GlobalActorRegistry", () => {
+describe("AgentTemplateRegistry", () => {
   it("creates, lists, and resolves templates by id, prefix, and name", () => {
     const { registry } = setup();
     expect(registry.list()).toEqual([]);
@@ -52,7 +52,7 @@ describe("GlobalActorRegistry", () => {
   it("persists across instances in the same agent dir", () => {
     const { agentDir, registry } = setup();
     registry.create({ ...baseRequest, extensions: false });
-    const reloaded = new GlobalActorRegistry(agentDir, 64 * 1024);
+    const reloaded = new AgentTemplateRegistry(agentDir, 64 * 1024);
     expect(reloaded.list()).toHaveLength(1);
     expect(reloaded.resolve("reviewer")?.instructions).toBe(baseRequest.instructions);
     expect(reloaded.resolve("reviewer")?.extensions).toBe(false);
@@ -155,13 +155,13 @@ describe("GlobalActorRegistry", () => {
 
   it("normalizes impossible legacy trigger settings while keeping active modes passive by default", () => {
     const { agentDir } = setup();
-    const registryPath = path.join(agentDir, "fabric", "actors", "global-actors.json");
+    const registryPath = path.join(agentDir, "fabric", "persistentAgents", "global-persistentAgents.json");
     fs.mkdirSync(path.dirname(registryPath), { recursive: true });
     fs.writeFileSync(
       registryPath,
       JSON.stringify({
         format: 1,
-        actors: [
+        persistentAgents: [
           {
             id: "a".repeat(32),
             name: "legacy-mailbox",
@@ -181,7 +181,7 @@ describe("GlobalActorRegistry", () => {
       }),
     );
 
-    const reloaded = new GlobalActorRegistry(agentDir, 64 * 1024);
+    const reloaded = new AgentTemplateRegistry(agentDir, 64 * 1024);
     expect(reloaded.resolve("legacy-mailbox")).toMatchObject({
       delivery: "mailbox",
       triggerTurn: false,

@@ -13,6 +13,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { clipUtf8, MAX_SUMMARY_BYTES } from "./bounds.js";
 import { modelCompactionKey } from "./threshold.js";
+import {
+  compactWithOpenAI,
+  supportsOpenAINativeCompaction,
+  type OpenAINativeCompactionDetails,
+} from "./openai-native.js";
+import { registerOpenAINativeReplay } from "./openai-native-replay.js";
 import { NO_BUILTIN_ENRICHERS, runEnrichers, type CompactionEnricher } from "./enrichers.js";
 import { compileFabricBranchSummary } from "./branch-summary.js";
 import {
@@ -492,6 +498,7 @@ export interface FabricCompactionDetailsV2 {
     recall: "session-entry-id-range";
   };
   budget?: FabricCompactionBudgetDetails;
+  remoteCompaction?: OpenAINativeCompactionDetails;
   timestamp: string;
 }
 
@@ -744,6 +751,10 @@ const notifyInstructionError = (
 };
 
 export const registerCompactionHook = (pi: ExtensionAPI, options: CompactionHookOptions): void => {
+  const openAIReplay = registerOpenAINativeReplay(pi, {
+    isEnabled: () => options.getEngine() === "fabric",
+  });
+
   pi.on("session_before_compact", (event: SessionBeforeCompactEvent, context: ExtensionContext) => {
     if (event.customInstructions === "__pi_vcc__") return;
     const { preparation, branchEntries } = event;
@@ -761,6 +772,7 @@ export const registerCompactionHook = (pi: ExtensionAPI, options: CompactionHook
       return { cancel: true };
     }
     if (options.getEngine() !== "fabric") return;
+    if (context?.model?.baseUrl === "claude-bridge") return;
     const targetContextRatio = options.getTargetContextRatio?.();
     const settings = preparation.settings ?? DEFAULT_COMPACTION_SETTINGS;
     const tokensBefore = preparation.tokensBefore;
@@ -807,8 +819,34 @@ export const registerCompactionHook = (pi: ExtensionAPI, options: CompactionHook
       }
       return { cancel: true };
     }
-    (event as SessionBeforeCompactEvent & { _fabricCompaction?: boolean })._fabricCompaction = true;
-    return { compaction: result.compaction };
+    const claim = () => {
+      (event as SessionBeforeCompactEvent & { _fabricCompaction?: boolean })._fabricCompaction = true;
+      return { compaction: result.compaction };
+    };
+    if (!context || !supportsOpenAINativeCompaction(context.model)) return claim();
+    const existingHistory = openAIReplay.historyFor(context);
+    return compactWithOpenAI({
+      pi,
+      event,
+      context,
+      ...(existingHistory ? { existingHistory } : {}),
+    })
+      .then((remoteCompaction) => {
+        if (remoteCompaction && result.compaction.details) {
+          result.compaction.details = {
+            ...result.compaction.details,
+            remoteCompaction,
+          };
+        }
+        return claim();
+      })
+      .catch((error: unknown) => {
+        if (!event.signal?.aborted && context.hasUI) {
+          const message = error instanceof Error ? error.message : String(error);
+          context.ui.notify(clipUtf8(`OpenAI native compaction failed; using Fabric summary. ${message}`, 512), "warning");
+        }
+        return claim();
+      });
   });
 
   pi.on("session_before_tree", (event: SessionBeforeTreeEvent, context: ExtensionContext) => {

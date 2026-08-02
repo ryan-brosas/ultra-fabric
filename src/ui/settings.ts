@@ -64,7 +64,7 @@ const CONSULT_PRESSURE_RATIOS = Array.from(
   { length: 15 },
   (_, index) => (25 + index * 5) / 100,
 );
-const ACTOR_SCOPES = ["project", "session"] as const;
+const PERSISTENT_AGENT_SCOPES = ["project", "session"] as const;
 const RISKS = ["read", "write", "execute", "network", "agent"] as const;
 const CORE_RISK_TOOLS = ["read", "grep", "find", "edit", "write", "bash"] as const;
 const CORE_DEFAULT_TOOL_CANDIDATES = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -292,7 +292,7 @@ const summaryFor = (id: string, config: FabricConfig): string => {
         ? `learning · min ${config.outcomes.minRecommendationSamples}`
         : "disabled";
     case "retention":
-      return `${formatRetention(config.retention.orphanedTempRunMs)} · ${formatRetention(config.retention.oneShotRunMs)} · ${formatRetention(config.retention.actorRunArchiveMs)}`;
+      return `${formatRetention(config.retention.orphanedTempRunMs)} · ${formatRetention(config.retention.oneShotRunMs)} · ${formatRetention(config.retention.persistentAgentRunArchiveMs)}`;
     case "mesh":
       return config.mesh.enabled ? "enabled" : "disabled";
     default:
@@ -449,7 +449,7 @@ const thinkingSubmenu = (
     theme,
     overrides.title ?? "Default thinking",
     overrides.description ??
-      "Reasoning effort forwarded to spawned agents and actors when a call does not specify one. The level is clamped to each model's supported levels (next highest if unsupported).",
+      "Reasoning effort forwarded to agents across both lifecycles when a call does not specify one. The level is clamped to each model's supported levels (next highest if unsupported).",
     options,
     canonicalCurrent,
     (value) => done(options.find((option) => option.value === value)?.label ?? value),
@@ -769,7 +769,7 @@ export const buildFabricSettingsItems = (
             values: APPROVAL_MODES,
           }),
           setting("approvals.agent", "Agent", config.approvals.agent, {
-            description: "Approval policy for agent and actor operations. Auto classifies each request.",
+            description: "Approval policy for agent operations across both lifecycles. Auto classifies each request.",
             values: APPROVAL_MODES,
           }),
         ],
@@ -902,11 +902,11 @@ export const buildFabricSettingsItems = (
       ),
     }),
     setting("agents", "Agents", summaryFor("agents", config), {
-      description: "One-shot child agents spawned from inside fabric_exec.",
+      description: "One-shot and persistent agent lifecycles.",
       submenu: sectionSubmenu(
         theme,
         "Agents",
-        "One-shot child agents spawned from inside fabric_exec.",
+        "One-shot and persistent agent lifecycles.",
         [
           setting("agents.enabled", "Enabled", config.agents.enabled ? "true" : "false", {
             description: "Enable agent spawning via workflow.agent() and agents.run().",
@@ -922,7 +922,7 @@ export const buildFabricSettingsItems = (
           }),
           setting("agents.model", "Default model", config.agents.model || INHERIT_VALUE, {
             description:
-              "Model forwarded to Pi-backed agents and actors when a call does not specify one. Pick Inherit to use the host session's default. Order matches pi-model-sort (most recently used first).",
+              "Model forwarded to Pi-backed agents across both lifecycles when a call does not specify one. Pick Inherit to use the host session's default. Order matches pi-model-sort (most recently used first).",
             submenu: modelPickerSubmenu(
               theme,
               options.modelSource,
@@ -954,13 +954,13 @@ export const buildFabricSettingsItems = (
             config.agents.claude.model || INHERIT_VALUE,
             {
               description:
-                "Claude Code model used by Claude-backed agents and actors. Models are enumerated from the installed claude runtime; Inherit uses Claude Code's default.",
+                "Claude Code model used by Claude-backed agents across both lifecycles. Models are enumerated from the installed claude runtime; Inherit uses Claude Code's default.",
               submenu: modelPickerSubmenu(
                 theme,
                 options.claudeModelSource ?? { models: [], lastUsed: {} },
                 {
                   headerText:
-                    "Default model for Claude-backed Fabric agents and actors. Pick Inherit to use Claude Code's runtime default.",
+                    "Default model for Claude-backed Fabric agents across both lifecycles. Pick Inherit to use Claude Code's runtime default.",
                   inheritName: "Use Claude Code's runtime default model",
                 },
               ),
@@ -968,7 +968,7 @@ export const buildFabricSettingsItems = (
           ),
           setting("agents.thinking", "Default thinking", thinkingLabel(config.agents.thinking), {
             description:
-              "Reasoning effort forwarded to spawned agents and actors when a call does not specify one. Clamped to each model's supported levels (next highest if unsupported).",
+              "Reasoning effort forwarded to agents across both lifecycles when a call does not specify one. Clamped to each model's supported levels (next highest if unsupported).",
             submenu: thinkingSubmenu(theme),
           }),
           setting("agents.maxConcurrent", "Max concurrent", String(config.agents.maxConcurrent), {
@@ -1045,7 +1045,7 @@ export const buildFabricSettingsItems = (
             ),
           }),
           setting("agents.extensions", "Extensions", config.agents.extensions ? "true" : "false", {
-            description: "Allow agents to load registered extensions.",
+            description: "Allow agents to load registered extensions, including Pi model-provider plugins.",
             values: BOOLEANS,
           }),
           defaultToolsItem,
@@ -1226,7 +1226,7 @@ export const buildFabricSettingsItems = (
             "Nested tool calls",
             config.ui.showNestedToolCalls ? "true" : "false",
             {
-              description: "Show child-agent and actor tool activity in Fabric tool-call previews.",
+              description: "Show one-shot and persistent agent tool activity in Fabric tool-call previews.",
               values: BOOLEANS,
             },
           ),
@@ -1284,7 +1284,7 @@ export const buildFabricSettingsItems = (
       submenu: sectionSubmenu(
         theme,
         "Compaction",
-        "Choose Fabric deterministic compaction or Pi core model-driven compaction.",
+        "Choose Fabric model-aware compaction with a portable summary, or Pi core compaction.",
         [
           ...(options.activeModelKey
             ? [setting(
@@ -1301,7 +1301,7 @@ export const buildFabricSettingsItems = (
             : []),
           setting("compaction.engine", "Engine", config.compaction.engine, {
             description:
-              "Fabric uses deterministic branch summaries; Pi delegates compaction to Pi core.",
+              "Fabric routes compatible native backends and keeps a deterministic portable summary; Pi delegates to Pi core.",
             values: COMPACTION_ENGINES,
           }),
           setting(
@@ -1391,7 +1391,7 @@ export const buildFabricSettingsItems = (
       submenu: sectionSubmenu(
         theme,
         "Retention",
-        "Cleanup only removes dead temporary roots and terminal run artifacts. Active runs and actor session.jsonl files are never modified.",
+        "Cleanup only removes dead temporary roots and terminal run artifacts. Active runs and persistent-agent session.jsonl files are never modified.",
         [
           setting(
             "retention.orphanedTempRunMs",
@@ -1424,17 +1424,17 @@ export const buildFabricSettingsItems = (
             },
           ),
           setting(
-            "retention.actorRunArchiveMs",
-            "Actor run archives",
-            formatRetention(config.retention.actorRunArchiveMs),
+            "retention.persistentAgentRunArchiveMs",
+            "Persistent agent run archives",
+            formatRetention(config.retention.persistentAgentRunArchiveMs),
             {
-              description: "Retain terminal actor run archives for this duration; the latest run is always preserved.",
+              description: "Retain terminal persistent-agent run archives for this duration; the latest run is always preserved.",
               submenu: numericSubmenu(
                 theme,
                 [86_400_000, 3 * 86_400_000, 7 * 86_400_000, 14 * 86_400_000, 30 * 86_400_000, 90 * 86_400_000],
                 formatRetention,
-                "Actor run archives",
-                "Retain terminal actor run archives for this duration; the latest run is always preserved.",
+                "Persistent agent run archives",
+                "Retain terminal persistent-agent run archives for this duration; the latest run is always preserved.",
               ),
             },
           ),
@@ -1443,20 +1443,20 @@ export const buildFabricSettingsItems = (
       ),
     }),
     setting("mesh", "Mesh", summaryFor("mesh", config), {
-      description: "Durable mesh coordination store and actors.",
+      description: "Durable mesh coordination store and persistent agents.",
       submenu: sectionSubmenu(
         theme,
         "Mesh",
-        "Durable mesh coordination store and actors.",
+        "Durable mesh coordination store and persistent agents.",
         [
           setting("mesh.enabled", "Enabled", config.mesh.enabled ? "true" : "false", {
-            description: "Enable the durable mesh store and actor providers.",
+            description: "Enable the durable mesh store and persistent-agent provider.",
             values: BOOLEANS,
           }),
-          setting("mesh.actorScope", "Actor scope", config.mesh.actorScope, {
+          setting("mesh.persistentAgentScope", "Persistent agent scope", config.mesh.persistentAgentScope, {
             description:
-              'Where persistent actor definitions, mailboxes, and sessions are stored. "project" shares actors across all Pi sessions in this project (survives /new); "session" isolates them per Pi session (the previous default).',
-            values: ACTOR_SCOPES,
+              'Where persistent-agent definitions, mailboxes, and sessions are stored. "project" shares them across all Pi sessions in this project (survives /new); "session" isolates them per Pi session (the previous default).',
+            values: PERSISTENT_AGENT_SCOPES,
           }),
           setting("mesh.maxReadEvents", "Max read events", String(config.mesh.maxReadEvents), {
             description: "Maximum events returned by a single mesh read.",
@@ -1468,30 +1468,30 @@ export const buildFabricSettingsItems = (
               "Maximum events returned by a single mesh read.",
             ),
           }),
-          setting("mesh.actorPollMs", "Actor poll fallback", formatMs(config.mesh.actorPollMs), {
-            description: "Fallback polling interval when mesh filesystem notifications are unavailable.",
+          setting("mesh.persistentAgentPollMs", "Persistent agent poll fallback", formatMs(config.mesh.persistentAgentPollMs), {
+            description: "Fallback polling interval for persistent agents when mesh filesystem notifications are unavailable.",
             submenu: numericSubmenu(
               theme,
               [50, 100, 250, 500, 1000],
               formatMs,
-              "Actor poll fallback",
-              "Fallback polling interval when mesh filesystem notifications are unavailable.",
+              "Persistent agent poll fallback",
+              "Fallback polling interval for persistent agents when mesh filesystem notifications are unavailable.",
             ),
           }),
-          setting("mesh.actorQueueLimit", "Actor queue limit", String(config.mesh.actorQueueLimit), {
-            description: "Maximum messages queued per actor mailbox.",
+          setting("mesh.persistentAgentQueueLimit", "Persistent agent queue limit", String(config.mesh.persistentAgentQueueLimit), {
+            description: "Maximum messages queued per persistent-agent mailbox.",
             submenu: numericSubmenu(
               theme,
               [4, 8, 16, 32, 64, 128],
               String,
-              "Actor queue limit",
-              "Maximum messages queued per actor mailbox.",
+              "Persistent agent queue limit",
+              "Maximum messages queued per persistent-agent mailbox.",
             ),
           }),
           setting(
-            "mesh.actorOverflowPolicy",
-            "Actor overflow policy",
-            config.mesh.actorOverflowPolicy,
+            "mesh.persistentAgentOverflowPolicy",
+            "Persistent agent overflow policy",
+            config.mesh.persistentAgentOverflowPolicy,
             {
               description:
                 "Reject, source-coalesce, drop the oldest queued activation, or dead-letter the oldest queued activation when the mailbox is full.",
@@ -1499,155 +1499,155 @@ export const buildFabricSettingsItems = (
             },
           ),
           setting(
-            "mesh.actorRunMaxAttempts",
-            "Actor startup attempts",
-            String(config.mesh.actorRunMaxAttempts),
+            "mesh.persistentAgentRunMaxAttempts",
+            "Persistent agent startup attempts",
+            String(config.mesh.persistentAgentRunMaxAttempts),
             {
-              description: "Maximum attempts for zero-effect actor startup failures. Runs with model/tool activity never replay automatically.",
+              description: "Maximum attempts for zero-effect persistent-agent startup failures. Runs with model/tool activity never replay automatically.",
               values: ["1", "2", "3", "4", "5"],
             },
           ),
           setting(
-            "mesh.actorRunBaseDelayMs",
-            "Actor startup retry base",
-            formatMs(config.mesh.actorRunBaseDelayMs),
+            "mesh.persistentAgentRunBaseDelayMs",
+            "Persistent agent startup retry base",
+            formatMs(config.mesh.persistentAgentRunBaseDelayMs),
             {
-              description: "Initial delay for safe zero-effect actor run retry.",
+              description: "Initial delay for safe zero-effect persistent-agent run retry.",
               submenu: numericSubmenu(
                 theme,
                 [0, 100, 250, 500, 1_000, 2_000],
                 formatMs,
-                "Actor startup retry base",
-                "Initial delay for safe zero-effect actor run retry.",
+                "Persistent agent startup retry base",
+                "Initial delay for safe zero-effect persistent-agent run retry.",
               ),
             },
           ),
           setting(
-            "mesh.actorRunMaxDelayMs",
-            "Actor startup retry max",
-            formatMs(config.mesh.actorRunMaxDelayMs),
+            "mesh.persistentAgentRunMaxDelayMs",
+            "Persistent agent startup retry max",
+            formatMs(config.mesh.persistentAgentRunMaxDelayMs),
             {
-              description: "Maximum exponential delay for safe actor run retry.",
+              description: "Maximum exponential delay for safe persistent-agent run retry.",
               submenu: numericSubmenu(
                 theme,
                 [0, 500, 1_000, 2_000, 5_000, 10_000],
                 formatMs,
-                "Actor startup retry max",
-                "Maximum exponential delay for safe actor run retry.",
+                "Persistent agent startup retry max",
+                "Maximum exponential delay for safe persistent-agent run retry.",
               ),
             },
           ),
           setting(
-            "mesh.actorRunJitterMs",
-            "Actor startup retry jitter",
-            formatMs(config.mesh.actorRunJitterMs),
+            "mesh.persistentAgentRunJitterMs",
+            "Persistent agent startup retry jitter",
+            formatMs(config.mesh.persistentAgentRunJitterMs),
             {
-              description: "Random jitter added to safe actor run retry delays.",
+              description: "Random jitter added to safe persistent-agent run retry delays.",
               submenu: numericSubmenu(
                 theme,
                 [0, 50, 100, 250, 500, 1_000],
                 formatMs,
-                "Actor startup retry jitter",
-                "Random jitter added to safe actor run retry delays.",
+                "Persistent agent startup retry jitter",
+                "Random jitter added to safe persistent-agent run retry delays.",
               ),
             },
           ),
           setting(
-            "mesh.actorDeliveryMaxAttempts",
-            "Actor delivery attempts",
-            String(config.mesh.actorDeliveryMaxAttempts),
+            "mesh.persistentAgentDeliveryMaxAttempts",
+            "Persistent agent delivery attempts",
+            String(config.mesh.persistentAgentDeliveryMaxAttempts),
             {
               description: "Maximum idempotent mesh/Main delivery attempts before dead-lettering.",
               values: ["1", "2", "3", "4", "5"],
             },
           ),
           setting(
-            "mesh.actorDeliveryBaseDelayMs",
-            "Actor retry base delay",
-            formatMs(config.mesh.actorDeliveryBaseDelayMs),
+            "mesh.persistentAgentDeliveryBaseDelayMs",
+            "Persistent agent retry base delay",
+            formatMs(config.mesh.persistentAgentDeliveryBaseDelayMs),
             {
-              description: "Initial actor delivery retry delay before exponential growth.",
+              description: "Initial persistent-agent delivery retry delay before exponential growth.",
               submenu: numericSubmenu(
                 theme,
                 [0, 50, 100, 250, 500, 1_000],
                 formatMs,
-                "Actor retry base delay",
-                "Initial actor delivery retry delay before exponential growth.",
+                "Persistent agent retry base delay",
+                "Initial persistent-agent delivery retry delay before exponential growth.",
               ),
             },
           ),
           setting(
-            "mesh.actorDeliveryMaxDelayMs",
-            "Actor retry max delay",
-            formatMs(config.mesh.actorDeliveryMaxDelayMs),
+            "mesh.persistentAgentDeliveryMaxDelayMs",
+            "Persistent agent retry max delay",
+            formatMs(config.mesh.persistentAgentDeliveryMaxDelayMs),
             {
-              description: "Maximum exponential component of actor delivery backoff.",
+              description: "Maximum exponential component of persistent-agent delivery backoff.",
               submenu: numericSubmenu(
                 theme,
                 [250, 500, 1_000, 2_000, 5_000, 10_000],
                 formatMs,
-                "Actor retry max delay",
-                "Maximum exponential component of actor delivery backoff.",
+                "Persistent agent retry max delay",
+                "Maximum exponential component of persistent-agent delivery backoff.",
               ),
             },
           ),
           setting(
-            "mesh.actorDeliveryJitterMs",
-            "Actor retry jitter",
-            formatMs(config.mesh.actorDeliveryJitterMs),
+            "mesh.persistentAgentDeliveryJitterMs",
+            "Persistent agent retry jitter",
+            formatMs(config.mesh.persistentAgentDeliveryJitterMs),
             {
-              description: "Random jitter added to actor delivery retry delays.",
+              description: "Random jitter added to persistent-agent delivery retry delays.",
               submenu: numericSubmenu(
                 theme,
                 [0, 25, 50, 100, 250, 500],
                 formatMs,
-                "Actor retry jitter",
-                "Random jitter added to actor delivery retry delays.",
+                "Persistent agent retry jitter",
+                "Random jitter added to persistent-agent delivery retry delays.",
               ),
             },
           ),
           setting(
-            "mesh.actorCircuitFailureThreshold",
-            "Actor circuit threshold",
-            String(config.mesh.actorCircuitFailureThreshold),
+            "mesh.persistentAgentCircuitFailureThreshold",
+            "Persistent agent circuit threshold",
+            String(config.mesh.persistentAgentCircuitFailureThreshold),
             {
-              description: "Consecutive terminal Main delivery failures before the actor circuit opens.",
+              description: "Consecutive terminal Main delivery failures before the persistent-agent circuit opens.",
               values: ["1", "2", "3", "5", "10"],
             },
           ),
           setting(
-            "mesh.actorCircuitCooldownMs",
-            "Actor circuit cooldown",
-            formatMs(config.mesh.actorCircuitCooldownMs),
+            "mesh.persistentAgentCircuitCooldownMs",
+            "Persistent agent circuit cooldown",
+            formatMs(config.mesh.persistentAgentCircuitCooldownMs),
             {
-              description: "Wait before one half-open actor delivery probe is allowed.",
+              description: "Wait before one half-open persistent-agent delivery probe is allowed.",
               submenu: numericSubmenu(
                 theme,
                 [0, 1_000, 5_000, 15_000, 30_000, 60_000, 300_000],
                 formatMs,
-                "Actor circuit cooldown",
-                "Wait before one half-open actor delivery probe is allowed.",
+                "Persistent agent circuit cooldown",
+                "Wait before one half-open persistent-agent delivery probe is allowed.",
               ),
             },
           ),
-          setting("mesh.actorContextEntries", "Actor context entries", String(config.mesh.actorContextEntries), {
-            description: "Transcript entries forwarded to actors as context.",
+          setting("mesh.persistentAgentContextEntries", "Persistent agent context entries", String(config.mesh.persistentAgentContextEntries), {
+            description: "Transcript entries forwarded to persistent agents as context.",
             submenu: numericSubmenu(
               theme,
               [3, 5, 10, 14, 20, 50],
               String,
-              "Actor context entries",
-              "Transcript entries forwarded to actors as context.",
+              "Persistent agent context entries",
+              "Transcript entries forwarded to persistent agents as context.",
             ),
           }),
           setting("mesh.eventContextChars", "Event context chars", config.mesh.eventContextChars.toLocaleString(), {
-            description: "Character cap applied to host events dispatched to actors.",
+            description: "Character cap applied to host events dispatched to persistent agents.",
             submenu: numericSubmenu(
               theme,
               [10_000, 20_000, 40_000, 80_000, 160_000],
               (n) => n.toLocaleString(),
               "Event context chars",
-              "Character cap applied to host events dispatched to actors.",
+              "Character cap applied to host events dispatched to persistent agents.",
             ),
           }),
         ],

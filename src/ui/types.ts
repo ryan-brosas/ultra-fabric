@@ -1,4 +1,4 @@
-import type { FabricActorInfo, FabricActorMessage, GlobalActorDefinition } from "../actors/types.js";
+import type { FabricPersistentAgentInfo, FabricPersistentAgentMessage, AgentTemplateDefinition } from "../agents/persistent/types.js";
 import type { FabricActivityRun } from "../activity/types.js";
 import type { MeshEvent } from "../mesh/store.js";
 import type { FabricMainAgentInfo } from "../main-agent.js";
@@ -41,8 +41,8 @@ export interface FabricUiAgent {
   attachCommand?: string;
   branch?: string;
   worktree?: string;
-  actorId?: string;
-  actorName?: string;
+  persistentAgentId?: string;
+  persistentAgentName?: string;
   runId?: string;
   phaseId?: string;
   parentId?: string;
@@ -55,10 +55,10 @@ export interface FabricUiAgent {
   capabilities?: FabricParticipantCapability[];
 }
 
-export interface FabricUiActor extends FabricActorInfo {
-  /** The actor's default instruction (persona text); shown and edited in the dashboard. */
+export interface FabricUiPersistentAgent extends FabricPersistentAgentInfo {
+  /** The persistentAgent's default instruction (persona text); shown and edited in the dashboard. */
   instructions: string;
-  recentMessages: FabricActorMessage[];
+  recentMessages: FabricPersistentAgentMessage[];
   worker?: FabricUiAgent;
 }
 
@@ -81,9 +81,9 @@ export interface FabricDashboardSnapshot {
   peers: FabricUiPeer[];
   participants?: FabricParticipantInfo[];
   agents: FabricUiAgent[];
-  actors: FabricUiActor[];
-  /** Project-independent actor templates from the global registry. */
-  globalActors: GlobalActorDefinition[];
+  persistentAgents: FabricUiPersistentAgent[];
+  /** Project-independent persistent-agent templates from the global registry. */
+  agentTemplates: AgentTemplateDefinition[];
   state: FabricUiStateEntry[];
   events: MeshEvent[];
   observability?: {
@@ -93,8 +93,8 @@ export interface FabricDashboardSnapshot {
       retiredChars: number;
       protectedResults: number;
     };
-    actorBudgets: {
-      actors: number;
+    persistentAgentBudgets: {
+      persistentAgents: number;
       open: number;
       lifetimeExhausted: number;
       windowExhausted: number;

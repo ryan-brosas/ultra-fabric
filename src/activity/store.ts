@@ -66,8 +66,8 @@ const boundedData = (value: unknown, maxChars = MAX_DATA_CHARS): unknown => {
 
 const kindForRef = (ref: string): FabricActivityKind => {
   if (ref.startsWith("agents.")) {
-    return ["agents.create", "agents.ask", "agents.tell", "agents.actorStatus"].includes(ref)
-      ? "actor"
+    return ["agents.create", "agents.ask", "agents.tell"].includes(ref)
+      ? "persistentAgent"
       : "agent";
   }
   if (ref.startsWith("mcp.")) return "mcp";
@@ -453,7 +453,7 @@ export class FabricActivityStore {
       const record = input.result as Record<string, unknown>;
       if (typeof record.id === "string") call.entityId = cleanId(record.id, record.id);
       if (call.kind === "agent") call.entityKind = "agent";
-      if (call.kind === "actor") call.entityKind = "actor";
+      if (call.kind === "persistentAgent") call.entityKind = "persistentAgent";
       if (!error && typeof record.error === "string") {
         const resultError = cleanText(record.error, MAX_DETAIL_CHARS);
         if (resultError) call.error = resultError;

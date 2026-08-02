@@ -222,7 +222,7 @@ describe("FabricSettingsComponent", () => {
     expect(lines).toContain("6h");
     expect(lines).toContain("One-shot runs");
     expect(lines).toContain("1d");
-    expect(lines).toContain("Actor run archives");
+    expect(lines).toContain("Persistent agent run archives");
     expect(lines).toContain("7d");
     expect(lines).toContain("session.jsonl");
   });
@@ -235,6 +235,14 @@ describe("FabricSettingsComponent", () => {
     expect(lines).toContain("Nested tool calls");
     expect(lines).toContain("Nested tool debounce");
     expect(lines).toContain("100ms");
+  });
+
+  it("presents one Agent concept with one-shot and persistent lifecycles", () => {
+    const items = buildItems();
+    const agents = items.find((item) => item.id === "agents");
+    const lines = agents!.submenu!("", () => {}).render(100).join("\n");
+    expect(lines).toContain("One-shot and persistent agent lifecycles");
+    expect(lines).not.toContain("agents and persistentAgents");
   });
 
   it("surfaces the recursion budget in the Agents section", () => {
@@ -661,8 +669,8 @@ describe("FabricSettingsComponent", () => {
         modelRegistry: { getAvailable: () => fakeModelSource.models },
         ui: {
           notify,
-          custom: vi.fn(async (factory) => {
-            const component = factory({}, theme, {}, () => {}) as FabricSettingsComponent;
+          custom: vi.fn(async (fpersistentAgenty) => {
+            const component = fpersistentAgenty({}, theme, {}, () => {}) as FabricSettingsComponent;
             rootList = component.settingsList;
             rootList.selectedIndex = rootList.items.findIndex(
               (item: { id: string }) => item.id === "prewalk",
@@ -739,8 +747,8 @@ describe("FabricSettingsComponent", () => {
         modelRegistry: { getAvailable: () => fakeModelSource.models },
         ui: {
           notify,
-          custom: vi.fn(async (factory) => {
-            const component = factory({}, theme, {}, () => {}) as FabricSettingsComponent;
+          custom: vi.fn(async (fpersistentAgenty) => {
+            const component = fpersistentAgenty({}, theme, {}, () => {}) as FabricSettingsComponent;
             rootList = component.settingsList;
             rootList.selectedIndex = rootList.items.findIndex(
               (item: { id: string }) => item.id === "prewalk",

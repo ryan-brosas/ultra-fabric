@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { PI_CORE_TOOL_NAME_SET } from "./core/pi-tools.js";
 import {
+  assertCurrentFabricConfigPatch,
   CURRENT_FABRIC_CONFIG_VERSION,
   migrateFabricConfigDocument,
 } from "./config-migrations.js";
@@ -25,8 +26,8 @@ export type FabricPrewalkReturnPolicy = "executor" | "previous";
 type FabricPrewalkVerificationMode = "gated";
 export type FabricExecutorRuntime = "quickjs" | "node-process";
 type FabricCompactionEngine = "pi" | "fabric";
-type FabricActorScope = "project" | "session";
-type FabricActorOverflowPolicy =
+type FabricPersistentAgentScope = "project" | "session";
+type FabricPersistentAgentOverflowPolicy =
   | "reject"
   | "coalesce"
   | "drop-oldest"
@@ -173,30 +174,30 @@ interface FabricOutcomeConfig {
 export interface FabricRetentionConfig {
   orphanedTempRunMs: number;
   oneShotRunMs: number;
-  actorRunArchiveMs: number;
+  persistentAgentRunArchiveMs: number;
 }
 
 export interface FabricMeshConfig {
   enabled: boolean;
   root?: string;
-  actorScope: FabricActorScope;
+  persistentAgentScope: FabricPersistentAgentScope;
   maxEventBytes: number;
   maxReadEvents: number;
-  actorPollMs: number;
-  actorQueueLimit: number;
-  actorOverflowPolicy: FabricActorOverflowPolicy;
-  actorRunMaxAttempts: number;
-  actorRunBaseDelayMs: number;
-  actorRunMaxDelayMs: number;
-  actorRunJitterMs: number;
-  actorDeliveryMaxAttempts: number;
-  actorDeliveryBaseDelayMs: number;
-  actorDeliveryMaxDelayMs: number;
-  actorDeliveryJitterMs: number;
-  actorCircuitFailureThreshold: number;
-  actorCircuitCooldownMs: number;
+  persistentAgentPollMs: number;
+  persistentAgentQueueLimit: number;
+  persistentAgentOverflowPolicy: FabricPersistentAgentOverflowPolicy;
+  persistentAgentRunMaxAttempts: number;
+  persistentAgentRunBaseDelayMs: number;
+  persistentAgentRunMaxDelayMs: number;
+  persistentAgentRunJitterMs: number;
+  persistentAgentDeliveryMaxAttempts: number;
+  persistentAgentDeliveryBaseDelayMs: number;
+  persistentAgentDeliveryMaxDelayMs: number;
+  persistentAgentDeliveryJitterMs: number;
+  persistentAgentCircuitFailureThreshold: number;
+  persistentAgentCircuitCooldownMs: number;
   eventContextChars: number;
-  actorContextEntries: number;
+  persistentAgentContextEntries: number;
 }
 
 export interface FabricMemoryConfig {
@@ -359,28 +360,28 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
   retention: {
     orphanedTempRunMs: 6 * 60 * 60 * 1_000,
     oneShotRunMs: 24 * 60 * 60 * 1_000,
-    actorRunArchiveMs: 7 * 24 * 60 * 60 * 1_000,
+    persistentAgentRunArchiveMs: 7 * 24 * 60 * 60 * 1_000,
   },
   mesh: {
     enabled: true,
-    actorScope: "project",
+    persistentAgentScope: "project",
     maxEventBytes: 256 * 1024,
     maxReadEvents: 500,
-    actorPollMs: 250,
-    actorQueueLimit: 32,
-    actorOverflowPolicy: "reject",
-    actorRunMaxAttempts: 1,
-    actorRunBaseDelayMs: 250,
-    actorRunMaxDelayMs: 5_000,
-    actorRunJitterMs: 100,
-    actorDeliveryMaxAttempts: 3,
-    actorDeliveryBaseDelayMs: 100,
-    actorDeliveryMaxDelayMs: 2_000,
-    actorDeliveryJitterMs: 50,
-    actorCircuitFailureThreshold: 3,
-    actorCircuitCooldownMs: 30_000,
+    persistentAgentPollMs: 250,
+    persistentAgentQueueLimit: 32,
+    persistentAgentOverflowPolicy: "reject",
+    persistentAgentRunMaxAttempts: 1,
+    persistentAgentRunBaseDelayMs: 250,
+    persistentAgentRunMaxDelayMs: 5_000,
+    persistentAgentRunJitterMs: 100,
+    persistentAgentDeliveryMaxAttempts: 3,
+    persistentAgentDeliveryBaseDelayMs: 100,
+    persistentAgentDeliveryMaxDelayMs: 2_000,
+    persistentAgentDeliveryJitterMs: 50,
+    persistentAgentCircuitFailureThreshold: 3,
+    persistentAgentCircuitCooldownMs: 30_000,
     eventContextChars: 40_000,
-    actorContextEntries: 14,
+    persistentAgentContextEntries: 14,
   },
   memory: {
     enabled: true,
@@ -535,13 +536,13 @@ const compactionEngineValue = (
 ): FabricCompactionEngine =>
   value === "pi" || value === "fabric" ? value : fallback;
 
-const actorScopeValue = (value: unknown, fallback: FabricActorScope): FabricActorScope =>
+const persistentAgentScopeValue = (value: unknown, fallback: FabricPersistentAgentScope): FabricPersistentAgentScope =>
   value === "project" || value === "session" ? value : fallback;
 
-const actorOverflowPolicyValue = (
+const persistentAgentOverflowPolicyValue = (
   value: unknown,
-  fallback: FabricActorOverflowPolicy,
-): FabricActorOverflowPolicy =>
+  fallback: FabricPersistentAgentOverflowPolicy,
+): FabricPersistentAgentOverflowPolicy =>
   value === "reject" ||
   value === "coalesce" ||
   value === "drop-oldest" ||
@@ -993,9 +994,9 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         60 * 60 * 1_000,
         365 * 24 * 60 * 60 * 1_000,
       ),
-      actorRunArchiveMs: boundedInteger(
-        retention.actorRunArchiveMs,
-        DEFAULT_FABRIC_CONFIG.retention.actorRunArchiveMs,
+      persistentAgentRunArchiveMs: boundedInteger(
+        retention.persistentAgentRunArchiveMs,
+        DEFAULT_FABRIC_CONFIG.retention.persistentAgentRunArchiveMs,
         60 * 60 * 1_000,
         365 * 24 * 60 * 60 * 1_000,
       ),
@@ -1003,7 +1004,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
     mesh: {
       enabled: booleanValue(mesh.enabled, DEFAULT_FABRIC_CONFIG.mesh.enabled),
       ...(meshRoot ? { root: meshRoot } : {}),
-      actorScope: actorScopeValue(mesh.actorScope, DEFAULT_FABRIC_CONFIG.mesh.actorScope),
+      persistentAgentScope: persistentAgentScopeValue(mesh.persistentAgentScope, DEFAULT_FABRIC_CONFIG.mesh.persistentAgentScope),
       maxEventBytes: boundedInteger(
         mesh.maxEventBytes,
         DEFAULT_FABRIC_CONFIG.mesh.maxEventBytes,
@@ -1016,79 +1017,79 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         1,
         10_000,
       ),
-      actorPollMs: boundedInteger(
-        mesh.actorPollMs,
-        DEFAULT_FABRIC_CONFIG.mesh.actorPollMs,
+      persistentAgentPollMs: boundedInteger(
+        mesh.persistentAgentPollMs,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentPollMs,
         50,
         10_000,
       ),
-      actorQueueLimit: boundedInteger(
-        mesh.actorQueueLimit,
-        DEFAULT_FABRIC_CONFIG.mesh.actorQueueLimit,
+      persistentAgentQueueLimit: boundedInteger(
+        mesh.persistentAgentQueueLimit,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentQueueLimit,
         1,
         1_000,
       ),
-      actorOverflowPolicy: actorOverflowPolicyValue(
-        mesh.actorOverflowPolicy,
-        DEFAULT_FABRIC_CONFIG.mesh.actorOverflowPolicy,
+      persistentAgentOverflowPolicy: persistentAgentOverflowPolicyValue(
+        mesh.persistentAgentOverflowPolicy,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentOverflowPolicy,
       ),
-      actorRunMaxAttempts: boundedInteger(
-        mesh.actorRunMaxAttempts,
-        DEFAULT_FABRIC_CONFIG.mesh.actorRunMaxAttempts,
+      persistentAgentRunMaxAttempts: boundedInteger(
+        mesh.persistentAgentRunMaxAttempts,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentRunMaxAttempts,
         1,
         10,
       ),
-      actorRunBaseDelayMs: boundedInteger(
-        mesh.actorRunBaseDelayMs,
-        DEFAULT_FABRIC_CONFIG.mesh.actorRunBaseDelayMs,
+      persistentAgentRunBaseDelayMs: boundedInteger(
+        mesh.persistentAgentRunBaseDelayMs,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentRunBaseDelayMs,
         0,
         60_000,
       ),
-      actorRunMaxDelayMs: boundedInteger(
-        mesh.actorRunMaxDelayMs,
-        DEFAULT_FABRIC_CONFIG.mesh.actorRunMaxDelayMs,
+      persistentAgentRunMaxDelayMs: boundedInteger(
+        mesh.persistentAgentRunMaxDelayMs,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentRunMaxDelayMs,
         0,
         60_000,
       ),
-      actorRunJitterMs: boundedInteger(
-        mesh.actorRunJitterMs,
-        DEFAULT_FABRIC_CONFIG.mesh.actorRunJitterMs,
+      persistentAgentRunJitterMs: boundedInteger(
+        mesh.persistentAgentRunJitterMs,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentRunJitterMs,
         0,
         60_000,
       ),
-      actorDeliveryMaxAttempts: boundedInteger(
-        mesh.actorDeliveryMaxAttempts,
-        DEFAULT_FABRIC_CONFIG.mesh.actorDeliveryMaxAttempts,
+      persistentAgentDeliveryMaxAttempts: boundedInteger(
+        mesh.persistentAgentDeliveryMaxAttempts,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentDeliveryMaxAttempts,
         1,
         10,
       ),
-      actorDeliveryBaseDelayMs: boundedInteger(
-        mesh.actorDeliveryBaseDelayMs,
-        DEFAULT_FABRIC_CONFIG.mesh.actorDeliveryBaseDelayMs,
+      persistentAgentDeliveryBaseDelayMs: boundedInteger(
+        mesh.persistentAgentDeliveryBaseDelayMs,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentDeliveryBaseDelayMs,
         0,
         60_000,
       ),
-      actorDeliveryMaxDelayMs: boundedInteger(
-        mesh.actorDeliveryMaxDelayMs,
-        DEFAULT_FABRIC_CONFIG.mesh.actorDeliveryMaxDelayMs,
+      persistentAgentDeliveryMaxDelayMs: boundedInteger(
+        mesh.persistentAgentDeliveryMaxDelayMs,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentDeliveryMaxDelayMs,
         0,
         60_000,
       ),
-      actorDeliveryJitterMs: boundedInteger(
-        mesh.actorDeliveryJitterMs,
-        DEFAULT_FABRIC_CONFIG.mesh.actorDeliveryJitterMs,
+      persistentAgentDeliveryJitterMs: boundedInteger(
+        mesh.persistentAgentDeliveryJitterMs,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentDeliveryJitterMs,
         0,
         60_000,
       ),
-      actorCircuitFailureThreshold: boundedInteger(
-        mesh.actorCircuitFailureThreshold,
-        DEFAULT_FABRIC_CONFIG.mesh.actorCircuitFailureThreshold,
+      persistentAgentCircuitFailureThreshold: boundedInteger(
+        mesh.persistentAgentCircuitFailureThreshold,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentCircuitFailureThreshold,
         1,
         100,
       ),
-      actorCircuitCooldownMs: boundedInteger(
-        mesh.actorCircuitCooldownMs,
-        DEFAULT_FABRIC_CONFIG.mesh.actorCircuitCooldownMs,
+      persistentAgentCircuitCooldownMs: boundedInteger(
+        mesh.persistentAgentCircuitCooldownMs,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentCircuitCooldownMs,
         0,
         24 * 60 * 60 * 1_000,
       ),
@@ -1098,9 +1099,9 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         1_000,
         1_000_000,
       ),
-      actorContextEntries: boundedInteger(
-        mesh.actorContextEntries,
-        DEFAULT_FABRIC_CONFIG.mesh.actorContextEntries,
+      persistentAgentContextEntries: boundedInteger(
+        mesh.persistentAgentContextEntries,
+        DEFAULT_FABRIC_CONFIG.mesh.persistentAgentContextEntries,
         1,
         100,
       ),
@@ -1352,9 +1353,7 @@ export const saveFabricConfig = (
   const targetPath = options.projectTrusted
     ? path.join(options.cwd, ".pi", "fabric.json")
     : path.join(options.agentDir, "fabric.json");
-  if (Object.hasOwn(partial, "configVersion") || Object.hasOwn(partial, "subagents")) {
-    throw new Error("Fabric configuration updates must use the current schema");
-  }
+  assertCurrentFabricConfigPatch(partial);
   const input = readJsonObjectFile(targetPath);
   const existing = migrateFabricConfigDocument(input?.document ?? {}).document;
   const merged = mergeObjects(existing, partial) as Record<string, unknown>;

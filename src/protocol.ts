@@ -40,7 +40,7 @@ export type FabricRisk = "read" | "write" | "execute" | "network" | "agent";
 export type FabricEffect = "none" | "workspace" | "state" | "external";
 export type FabricActivityEntityKind =
   | "agent"
-  | "actor"
+  | "persistentAgent"
   | "tool"
   | "extension"
   | "mcp"

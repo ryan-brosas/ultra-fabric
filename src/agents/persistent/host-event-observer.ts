@@ -4,29 +4,29 @@ import type {
   ExtensionEvent,
 } from "@earendil-works/pi-coding-agent";
 import {
-  FABRIC_ACTOR_PI_HOST_EVENTS,
-  type FabricActorPiHostEvent,
+  FABRIC_PERSISTENT_AGENT_PI_HOST_EVENTS,
+  type FabricPersistentAgentPiHostEvent,
 } from "./types.js";
 
-export type FabricActorHostEventObserver = (
-  eventName: FabricActorPiHostEvent,
+export type FabricPersistentAgentHostEventObserver = (
+  eventName: FabricPersistentAgentPiHostEvent,
   event: ExtensionEvent,
   context: ExtensionContext,
 ) => void;
 
 interface ObservableExtensionApi {
   on(
-    event: FabricActorPiHostEvent,
+    event: FabricPersistentAgentPiHostEvent,
     handler: (event: ExtensionEvent, context: ExtensionContext) => void,
   ): void;
 }
 
-export const registerFabricActorHostEventObservers = (
+export const registerFabricPersistentAgentHostEventObservers = (
   pi: ExtensionAPI,
-  observer: FabricActorHostEventObserver,
+  observer: FabricPersistentAgentHostEventObserver,
 ): void => {
   const observable = pi as unknown as ObservableExtensionApi;
-  for (const eventName of FABRIC_ACTOR_PI_HOST_EVENTS) {
+  for (const eventName of FABRIC_PERSISTENT_AGENT_PI_HOST_EVENTS) {
     observable.on(eventName, (event, context) => observer(eventName, event, context));
   }
 };

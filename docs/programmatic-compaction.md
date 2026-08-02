@@ -8,8 +8,7 @@ pi-fabric:
 
 - **Harness enforcement** motivates a single gated channel from thought to
   action, with the host — not the model — deciding when it is safe to act.
-- **Deterministic compaction** avoids adding another model call to a context
-  transition and makes repeated results testable.
+- **Deterministic portable compaction** keeps every transition testable and avoids another model call for ordinary models. Official OpenAI Responses models may add a same-provider native compaction request while retaining that portable result.
 
 Both point at the same primitive: compaction should be a **deliberate,
 labeled transition** of the agent's own context, requested by the model
@@ -180,7 +179,7 @@ return await agents.wait({ id: handle.id });
   `kind: "committed" | "cancelled" | "failed"` when the host settles it. Pi's
   benign `"Compaction cancelled"` / `"Already compacted"` outcomes publish
   with `kind: "cancelled"`. Other
-  Fabric participants (persistent actors, peer sessions) can subscribe to
+  Fabric participants (persistent agents, peer sessions) can subscribe to
   observe compaction transitions. Activity-only sessions (mesh disabled)
   silently skip this.
 - **Status query**: `compact.status()` is the context-independent, in-memory

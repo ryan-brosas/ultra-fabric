@@ -20,7 +20,7 @@ import type { FabricThinking } from "../src/thinking.js";
 import type { FabricDashboardSnapshot } from "../src/ui/types.js";
 import { FabricWidget, shouldShowFabricWidget } from "../src/ui/widget.js";
 
-const actorModelSource: ModelSource = {
+const persistentAgentModelSource: ModelSource = {
   models: [
     { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
     { provider: "openai", id: "gpt-5.5", name: "GPT 5.5" },
@@ -177,10 +177,16 @@ const snapshot = (): FabricDashboardSnapshot => {
         phaseId: "audit",
       },
     ],
-    actors: [
+    persistentAgents: [
       {
-        id: "actor-1",
+        id: "persistentAgent-1",
+        kind: "agent",
+        lifecycle: "persistent",
         name: "advisor",
+        role: "advisor",
+        goal: "Give bounded advice.",
+        completion: "Return one recommendation, then idle.",
+        turnBudget: { maxTurns: 8, graceTurns: 1 },
         status: "idle",
         runner: "pi",
         events: ["turn_end"],
@@ -198,7 +204,7 @@ const snapshot = (): FabricDashboardSnapshot => {
         recentMessages: [],
       },
     ],
-    globalActors: [],
+    agentTemplates: [],
     state: [
       {
         key: "tasks/package-a",
@@ -216,7 +222,7 @@ const snapshot = (): FabricDashboardSnapshot => {
         sequence: 1,
         topic: "team.review",
         kind: "finding",
-        from: { id: "actor-1", name: "advisor", kind: "actor" },
+        from: { id: "persistentAgent-1", name: "advisor", kind: "persistentAgent" },
         text: "Review started",
         createdAt: now,
       },
@@ -242,7 +248,7 @@ describe("Fabric dynamic UI", () => {
 
   it("indents agents by recursive depth instead of topology parentage", () => {
     const current = snapshot();
-    current.actors = [];
+    current.persistentAgents = [];
     current.runs[0]!.calls = [];
     const base = current.agents[0]!;
     current.agents = [
@@ -261,15 +267,15 @@ describe("Fabric dynamic UI", () => {
     expect(grandchild).toMatch(/^ {6}\S/);
   });
 
-  it("leases actor rows through settle and resets them for the next activation", () => {
+  it("leases persistentAgent rows through settle and resets them for the next activation", () => {
     const current = snapshot();
     current.runs = [];
     current.agents = [];
-    const actor = current.actors[0]!;
-    actor.status = "running";
-    actor.lastRunId = "actor-run-1";
-    actor.worker = {
-      id: "actor-run-1",
+    const persistentAgent = current.persistentAgents[0]!;
+    persistentAgent.status = "running";
+    persistentAgent.lastRunId = "persistentAgent-run-1";
+    persistentAgent.worker = {
+      id: "persistentAgent-run-1",
       name: "worker",
       status: "running",
       runner: "pi",
@@ -281,15 +287,15 @@ describe("Fabric dynamic UI", () => {
     expect(active[0]).not.toMatch(/^· Fabric/);
     expect(active.join("\n")).toContain("advisor");
 
-    actor.status = "idle";
-    actor.worker.status = "completed";
+    persistentAgent.status = "idle";
+    persistentAgent.worker.status = "completed";
     widget.invalidate();
     const settled = widget.render(100);
     expect(settled).toHaveLength(active.length);
 
-    actor.status = "running";
-    actor.worker = {
-      id: "actor-run-2",
+    persistentAgent.status = "running";
+    persistentAgent.worker = {
+      id: "persistentAgent-run-2",
       name: "worker",
       status: "running",
       runner: "pi",
@@ -333,7 +339,7 @@ describe("Fabric dynamic UI", () => {
     const current = snapshot();
     current.runs = [];
     current.agents = [];
-    current.actors = [];
+    current.persistentAgents = [];
     expect(current.state[0]?.status).toBe("claimed");
     expect(shouldShowFabricWidget(current, "auto")).toBe(false);
   });
@@ -355,8 +361,8 @@ describe("Fabric dynamic UI", () => {
     const current = snapshot();
     current.observability = {
       contextQos: { passes: 8, retiredResults: 4, retiredChars: 20_000, protectedResults: 6 },
-      actorBudgets: {
-        actors: 1,
+      persistentAgentBudgets: {
+        persistentAgents: 1,
         open: 1,
         lifetimeExhausted: 0,
         windowExhausted: 0,
@@ -388,7 +394,7 @@ describe("Fabric dynamic UI", () => {
 
   it("keeps dashboard and widget agents in creation order", () => {
     const current = snapshot();
-    current.actors = [];
+    current.persistentAgents = [];
     current.state = [];
     current.runs[0]!.calls = [];
     current.runs[0]!.items = [];
@@ -432,7 +438,7 @@ describe("Fabric dynamic UI", () => {
     }
   });
 
-  it("keeps completed runs visible and summarizes actors without listing them", () => {
+  it("keeps completed runs visible and summarizes persistentAgents without listing them", () => {
     const current = snapshot();
     const run = current.runs[0];
     if (!run) throw new Error("missing fixture run");
@@ -440,19 +446,19 @@ describe("Fabric dynamic UI", () => {
     run.finishedAt = current.now - 20_000;
     current.agents[0]!.status = "completed";
     current.state = [];
-    current.actors = [];
+    current.persistentAgents = [];
     // A completed run remains visible through agent_settled so its rows do not collapse.
     expect(shouldShowFabricWidget(current, "auto")).toBe(true);
     // An explicit dismissal watermark can still hide retained history.
     current.widgetDismissedAt = current.now;
     expect(shouldShowFabricWidget(current, "auto")).toBe(false);
-    // ambient actors keep the widget visible regardless
-    current.actors = snapshot().actors;
+    // ambient persistentAgents keep the widget visible regardless
+    current.persistentAgents = snapshot().persistentAgents;
     expect(shouldShowFabricWidget(current, "auto")).toBe(true);
     const lines = new FabricWidget(theme, () => current, 5).render(72);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("Fabric session");
-    expect(lines[0]).toContain("1 actor");
+    expect(lines[0]).toContain("1 persistent");
     expect(lines.join("\n")).not.toContain("advisor");
   });
 
@@ -461,7 +467,7 @@ describe("Fabric dynamic UI", () => {
     const run = current.runs[0]!;
     run.status = "completed";
     run.finishedAt = current.now;
-    current.actors = [];
+    current.persistentAgents = [];
     current.state = [];
     current.agents[0]!.status = "completed";
     current.agents[0]!.finishedAt = current.now;
@@ -485,7 +491,7 @@ describe("Fabric dynamic UI", () => {
     ];
     run.items = [];
     current.agents = [];
-    current.actors = [];
+    current.persistentAgents = [];
     current.state = [];
     run.status = "completed";
     run.finishedAt = current.now;
@@ -509,7 +515,7 @@ describe("Fabric dynamic UI", () => {
 
   it("keeps widget rows stable as agents complete", () => {
     const current = snapshot();
-    current.actors = [];
+    current.persistentAgents = [];
     current.state = [];
     current.runs[0]!.items = [];
     current.runs[0]!.calls = [];
@@ -540,7 +546,7 @@ describe("Fabric dynamic UI", () => {
   it("leases rows within one run and releases them for a newer run", () => {
     const current = snapshot();
     const call = current.runs[0]!.calls.find((candidate) => candidate.kind === "extension")!;
-    current.actors = [];
+    current.persistentAgents = [];
     current.state = [];
     current.runs[0]!.items = [];
     current.runs[0]!.calls = [
@@ -584,7 +590,7 @@ describe("Fabric dynamic UI", () => {
 
   it("keeps the hidden-row marker visible at the width boundary", () => {
     const current = snapshot();
-    current.actors = [];
+    current.persistentAgents = [];
     current.state = [];
     current.runs[0]!.items = [];
     current.runs[0]!.calls = [];
@@ -620,7 +626,7 @@ describe("Fabric dynamic UI", () => {
 
   it("reports whether the rendered output changed", () => {
     const current = snapshot();
-    current.actors = [];
+    current.persistentAgents = [];
     current.state = [];
     current.runs[0]!.items = [];
     current.runs[0]!.calls = [];
@@ -669,7 +675,7 @@ describe("Fabric dynamic UI", () => {
       expect(rendered).toContain("Extensions (1)");
       expect(rendered).toContain("Tasks (1)");
       expect(rendered).toContain("Custom items (2)");
-      expect(rendered).not.toContain("Actors (1)");
+      expect(rendered).not.toContain("PersistentAgents (1)");
       expect(rendered).not.toContain("Shared state (1)");
       expect(rendered.indexOf("Agents (2)")).toBeLessThan(rendered.indexOf("Extensions (1)"));
       expect(rendered.indexOf("Extensions (1)")).toBeLessThan(rendered.indexOf("Tasks (1)"));
@@ -683,9 +689,11 @@ describe("Fabric dynamic UI", () => {
 
       dashboard.handleInput("G");
       const session = dashboard.render(120).join("\n");
-      expect(session).toContain("Actors (1)");
+      expect(session).toContain("Agents (");
+      expect(session).toContain("advisor");
+      expect(session).not.toContain("PersistentAgents (1)");
       expect(session).toContain("Shared state (1)");
-      expect(session.indexOf("Actors (1)")).toBeLessThan(session.indexOf("Shared state (1)"));
+      expect(session.indexOf("Agents (")).toBeLessThan(session.indexOf("Shared state (1)"));
     } finally {
       dashboard.dispose();
     }
@@ -720,7 +728,7 @@ describe("Fabric dynamic UI", () => {
       dashboard.handleInput("h");
       dashboard.handleInput("G");
       dashboard.handleInput("l");
-      expect(inspectSelection()).toContain("actor · advisor");
+      expect(inspectSelection()).toContain("persistent agent · advisor");
 
       dashboard.handleInput("j");
       expect(inspectSelection()).toContain("state · Package A");
@@ -760,7 +768,7 @@ describe("Fabric dynamic UI", () => {
       expect(overviewText).toContain("Activity");
       expect(overviewText).toContain("Audit");
       expect(overviewText).toContain("Agents (2)");
-      expect(overviewText).not.toContain("Actors (1)");
+      expect(overviewText).not.toContain("PersistentAgents (1)");
       expect(overviewText).toContain("security-reviewer");
       expect(overviewText).toContain("claude-opus-4-8");
       expect(overview.some((line) => /^│[^│]*│[^│]*Audit/.test(line))).toBe(false);
@@ -790,8 +798,8 @@ describe("Fabric dynamic UI", () => {
   it("renders call inputs and outputs with preview highlighting", () => {
     const current = snapshot();
     current.agents = [];
-    current.actors = [];
-    current.globalActors = [];
+    current.persistentAgents = [];
+    current.agentTemplates = [];
     current.state = [];
     current.runs[0]!.items = [];
     const now = current.now;
@@ -916,8 +924,8 @@ describe("Fabric dynamic UI", () => {
     configureHighlighting("dark-plus", true);
     const current = snapshot();
     current.agents = [];
-    current.actors = [];
-    current.globalActors = [];
+    current.persistentAgents = [];
+    current.agentTemplates = [];
     current.state = [];
     current.runs[0]!.items = [];
     const now = current.now;
@@ -1051,21 +1059,21 @@ describe("Fabric dynamic UI", () => {
     }
   }, 20_000);
 
-  const openActorDetail = (dashboard: FabricDashboard): void => {
+  const openPersistentAgentDetail = (dashboard: FabricDashboard): void => {
     dashboard.handleInput("G");
     dashboard.handleInput("l");
     dashboard.handleInput("\r");
   };
 
-  it("offers a per-actor model picker from the actor detail view", () => {
+  it("offers a per-persistentAgent model picker from the persistentAgent detail view", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
-    const onActorModel = vi.fn();
+    const onPersistentAgentModel = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
-      onActorModel,
+      modelSource: persistentAgentModelSource,
+      onPersistentAgentModel,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       const detail = dashboard.render(120);
       expect(detail.join("\n")).toContain("advisor");
       expect(detail.join("\n")).toContain("m model");
@@ -1074,7 +1082,7 @@ describe("Fabric dynamic UI", () => {
       dashboard.handleInput("m");
       const picker = dashboard.render(120);
       const pickerText = picker.join("\n");
-      expect(pickerText).toContain('Model for actor "advisor"');
+      expect(pickerText).toContain('Model for persistent agent "advisor"');
       expect(pickerText).toContain("Inherit");
       expect(pickerText).toContain("claude-sonnet-4-5");
       expect(picker.every((line) => visibleWidth(line) <= 120)).toBe(true);
@@ -1082,62 +1090,62 @@ describe("Fabric dynamic UI", () => {
       // Select the first real model (Inherit is index 0; one down lands on it).
       dashboard.handleInput("\x1b[B");
       dashboard.handleInput("\r");
-      expect(onActorModel).toHaveBeenCalledWith("actor-1", "anthropic/claude-sonnet-4-5");
+      expect(onPersistentAgentModel).toHaveBeenCalledWith("persistentAgent-1", "anthropic/claude-sonnet-4-5");
 
-      // Selecting closes the picker and returns to the actor detail.
+      // Selecting closes the picker and returns to the persistentAgent detail.
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
-      expect(after.join("\n")).not.toContain('Model for actor "advisor"');
+      expect(after.join("\n")).not.toContain('Model for persistentAgent "advisor"');
     } finally {
       dashboard.dispose();
     }
   });
 
-  it("uses the Claude runtime catalog for a Claude actor", () => {
+  it("uses the Claude runtime catalog for a Claude persistentAgent", () => {
     const current = snapshot();
-    current.actors[0]!.runner = "claude";
-    current.actors[0]!.model = "claude/haiku";
-    const onActorModel = vi.fn();
+    current.persistentAgents[0]!.runner = "claude";
+    current.persistentAgents[0]!.model = "claude/haiku";
+    const onPersistentAgentModel = vi.fn();
     const dashboard = new FabricDashboard(
       { requestRender: vi.fn() } as unknown as TUI,
       theme,
       () => current,
       vi.fn(),
       {
-        modelSource: actorModelSource,
+        modelSource: persistentAgentModelSource,
         claudeModelSource: {
           models: [{ provider: "claude", id: "haiku", name: "Haiku (runtime)" }],
           lastUsed: {},
         },
-        onActorModel,
+        onPersistentAgentModel,
       },
     );
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       dashboard.handleInput("m");
       const picker = dashboard.render(120).join("\n");
-      expect(picker).toContain('Model for Claude actor "advisor"');
+      expect(picker).toContain('Model for Claude persistent agent "advisor"');
       expect(picker).toContain("Haiku (runtime)");
       dashboard.handleInput("\r");
-      expect(onActorModel).toHaveBeenCalledWith("actor-1", "claude/haiku");
+      expect(onPersistentAgentModel).toHaveBeenCalledWith("persistentAgent-1", "claude/haiku");
     } finally {
       dashboard.dispose();
     }
   });
 
-  it("picking Inherit clears the actor model override", () => {
+  it("picking Inherit clears the persistentAgent model override", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
-    const onActorModel = vi.fn();
+    const onPersistentAgentModel = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
-      onActorModel,
+      modelSource: persistentAgentModelSource,
+      onPersistentAgentModel,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       dashboard.handleInput("m");
       // Inherit is the default selection (index 0).
       dashboard.handleInput("\r");
-      expect(onActorModel).toHaveBeenCalledWith("actor-1", undefined);
+      expect(onPersistentAgentModel).toHaveBeenCalledWith("persistentAgent-1", undefined);
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
     } finally {
@@ -1147,33 +1155,33 @@ describe("Fabric dynamic UI", () => {
 
   it("canceling the picker returns to the detail without changing the model", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
-    const onActorModel = vi.fn();
+    const onPersistentAgentModel = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
-      onActorModel,
+      modelSource: persistentAgentModelSource,
+      onPersistentAgentModel,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       dashboard.handleInput("m");
       dashboard.handleInput("\x1b");
-      expect(onActorModel).not.toHaveBeenCalled();
+      expect(onPersistentAgentModel).not.toHaveBeenCalled();
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
-      expect(after.join("\n")).not.toContain('Model for actor "advisor"');
+      expect(after.join("\n")).not.toContain('Model for persistentAgent "advisor"');
     } finally {
       dashboard.dispose();
     }
   });
 
-  it("offers a per-actor thinking picker from the actor detail view", () => {
+  it("offers a per-persistentAgent thinking picker from the persistentAgent detail view", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
-    const onActorThinking = vi.fn<(id: string, thinking: FabricThinking | undefined) => void>();
+    const onPersistentAgentThinking = vi.fn<(id: string, thinking: FabricThinking | undefined) => void>();
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
-      onActorThinking,
+      modelSource: persistentAgentModelSource,
+      onPersistentAgentThinking,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       const detail = dashboard.render(120);
       expect(detail.join("\n")).toContain("advisor");
       expect(detail.join("\n")).toContain("e thinking");
@@ -1182,7 +1190,7 @@ describe("Fabric dynamic UI", () => {
       dashboard.handleInput("e");
       const picker = dashboard.render(120);
       const pickerText = picker.join("\n");
-      expect(pickerText).toContain('Thinking level for actor "advisor"');
+      expect(pickerText).toContain('Thinking level for persistent agent "advisor"');
       expect(pickerText).toContain("Inherit");
       expect(pickerText).toContain("Medium");
       expect(picker.every((line) => visibleWidth(line) <= 120)).toBe(true);
@@ -1193,30 +1201,30 @@ describe("Fabric dynamic UI", () => {
       dashboard.handleInput("\x1b[B");
       dashboard.handleInput("\x1b[B");
       dashboard.handleInput("\r");
-      expect(onActorThinking).toHaveBeenCalledWith("actor-1", "medium");
+      expect(onPersistentAgentThinking).toHaveBeenCalledWith("persistentAgent-1", "medium");
 
-      // Selecting closes the picker and returns to the actor detail.
+      // Selecting closes the picker and returns to the persistentAgent detail.
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
-      expect(after.join("\n")).not.toContain('Thinking level for actor "advisor"');
+      expect(after.join("\n")).not.toContain('Thinking level for persistentAgent "advisor"');
     } finally {
       dashboard.dispose();
     }
   });
 
-  it("picking Inherit clears the actor thinking override", () => {
+  it("picking Inherit clears the persistentAgent thinking override", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
-    const onActorThinking = vi.fn();
+    const onPersistentAgentThinking = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
-      onActorThinking,
+      modelSource: persistentAgentModelSource,
+      onPersistentAgentThinking,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       dashboard.handleInput("e");
-      // Inherit is the default selection (index 0) for an actor with no thinking set.
+      // Inherit is the default selection (index 0) for an persistentAgent with no thinking set.
       dashboard.handleInput("\r");
-      expect(onActorThinking).toHaveBeenCalledWith("actor-1", undefined);
+      expect(onPersistentAgentThinking).toHaveBeenCalledWith("persistentAgent-1", undefined);
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
     } finally {
@@ -1226,32 +1234,32 @@ describe("Fabric dynamic UI", () => {
 
   it("canceling the thinking picker returns to the detail without changing thinking", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
-    const onActorThinking = vi.fn();
+    const onPersistentAgentThinking = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
-      onActorThinking,
+      modelSource: persistentAgentModelSource,
+      onPersistentAgentThinking,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       dashboard.handleInput("e");
       dashboard.handleInput("\x1b");
-      expect(onActorThinking).not.toHaveBeenCalled();
+      expect(onPersistentAgentThinking).not.toHaveBeenCalled();
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
-      expect(after.join("\n")).not.toContain('Thinking level for actor "advisor"');
+      expect(after.join("\n")).not.toContain('Thinking level for persistentAgent "advisor"');
     } finally {
       dashboard.dispose();
     }
   });
 
-  it("does not offer the thinking picker when no onActorThinking is wired", () => {
+  it("does not offer the thinking picker when no onPersistentAgentThinking is wired", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn());
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       const detail = dashboard.render(120);
       expect(detail.join("\n")).not.toContain("e thinking");
-      // Pressing e is a no-op: still in the actor detail.
+      // Pressing e is a no-op: still in the persistentAgent detail.
       dashboard.handleInput("e");
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
@@ -1264,10 +1272,10 @@ describe("Fabric dynamic UI", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn());
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       const detail = dashboard.render(120);
       expect(detail.join("\n")).not.toContain("m model");
-      // Pressing m is a no-op: still in the actor detail.
+      // Pressing m is a no-op: still in the persistentAgent detail.
       dashboard.handleInput("m");
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
@@ -1276,14 +1284,14 @@ describe("Fabric dynamic UI", () => {
     }
   });
 
-  it("edits a live actor delivery policy with an explicit resume choice", () => {
+  it("edits a live persistent Agent delivery policy with an explicit resume choice", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
-    const onActorDeliveryPolicy = vi.fn();
+    const onPersistentAgentDeliveryPolicy = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      onActorDeliveryPolicy,
+      onPersistentAgentDeliveryPolicy,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       const detail = dashboard.render(120).join("\n");
       expect(detail).toContain("Trigger turn: no");
       expect(detail).toContain("y delivery policy");
@@ -1295,31 +1303,31 @@ describe("Fabric dynamic UI", () => {
       dashboard.handleInput("\x1b[B");
       dashboard.handleInput("\x1b[B");
       dashboard.handleInput("\r");
-      expect(onActorDeliveryPolicy).toHaveBeenCalledWith("actor-1", "steer", true);
+      expect(onPersistentAgentDeliveryPolicy).toHaveBeenCalledWith("persistentAgent-1", "steer", true);
     } finally {
       dashboard.dispose();
     }
   });
 
-  it("offers a per-actor host-event picker from the actor detail view", () => {
+  it("offers a per-persistentAgent host-event picker from the persistentAgent detail view", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
-    const onActorEvents = vi.fn();
+    const onPersistentAgentEvents = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
-      onActorEvents,
+      modelSource: persistentAgentModelSource,
+      onPersistentAgentEvents,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       const detail = dashboard.render(120);
       expect(detail.join("\n")).toContain("v events");
       // clear is offered by its own callback, not wired in this test.
       expect(detail.join("\n")).not.toContain("c clear");
 
-      // Open the events picker. The fixture actor subscribes to turn_end only.
+      // Open the events picker. The fixture persistentAgent subscribes to turn_end only.
       dashboard.handleInput("v");
       const picker = dashboard.render(120);
       const pickerText = picker.join("\n");
-      expect(pickerText).toContain('Host events for actor "advisor"');
+      expect(pickerText).toContain('Host events for persistent agent "advisor"');
       expect(pickerText).toContain("[x] turn_end");
       expect(pickerText).toContain("[ ] input");
       expect(picker.every((line) => visibleWidth(line) <= 120)).toBe(true);
@@ -1329,11 +1337,11 @@ describe("Fabric dynamic UI", () => {
       dashboard.handleInput("\x1b[B");
       dashboard.handleInput(" ");
       dashboard.handleInput("\r");
-      expect(onActorEvents).toHaveBeenCalledWith("actor-1", ["input"]);
+      expect(onPersistentAgentEvents).toHaveBeenCalledWith("persistentAgent-1", ["input"]);
 
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
-      expect(after.join("\n")).not.toContain('Host events for actor "advisor"');
+      expect(after.join("\n")).not.toContain('Host events for persistentAgent "advisor"');
     } finally {
       dashboard.dispose();
     }
@@ -1342,11 +1350,11 @@ describe("Fabric dynamic UI", () => {
   it("scrolls the expanded host-event catalog around the current selection", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
-      onActorEvents: vi.fn(),
+      modelSource: persistentAgentModelSource,
+      onPersistentAgentEvents: vi.fn(),
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       dashboard.handleInput("v");
       for (let index = 0; index < 28; index++) dashboard.handleInput("\x1b[B");
       const picker = dashboard.render(120);
@@ -1362,19 +1370,19 @@ describe("Fabric dynamic UI", () => {
 
   it("canceling the events picker returns to the detail without changing events", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
-    const onActorEvents = vi.fn();
+    const onPersistentAgentEvents = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
-      onActorEvents,
+      modelSource: persistentAgentModelSource,
+      onPersistentAgentEvents,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       dashboard.handleInput("v");
       dashboard.handleInput("\x1b");
-      expect(onActorEvents).not.toHaveBeenCalled();
+      expect(onPersistentAgentEvents).not.toHaveBeenCalled();
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
-      expect(after.join("\n")).not.toContain('Host events for actor "advisor"');
+      expect(after.join("\n")).not.toContain('Host events for persistentAgent "advisor"');
     } finally {
       dashboard.dispose();
     }
@@ -1384,16 +1392,16 @@ describe("Fabric dynamic UI", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
     const onClearMessages = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
+      modelSource: persistentAgentModelSource,
       onClearMessages,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       const detail = dashboard.render(120);
       expect(detail.join("\n")).toContain("c clear");
 
       dashboard.handleInput("c");
-      expect(onClearMessages).toHaveBeenCalledWith("actor-1");
+      expect(onClearMessages).toHaveBeenCalledWith("persistentAgent-1");
 
       const after = dashboard.render(120);
       expect(after.join("\n")).toContain("advisor");
@@ -1405,14 +1413,14 @@ describe("Fabric dynamic UI", () => {
   it("does not offer the events or clear actions when not wired", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
     const dashboard = new FabricDashboard(tui, theme, snapshot, vi.fn(), {
-      modelSource: actorModelSource,
+      modelSource: persistentAgentModelSource,
     });
     try {
-      openActorDetail(dashboard);
+      openPersistentAgentDetail(dashboard);
       const detail = dashboard.render(120);
       expect(detail.join("\n")).not.toContain("v events");
       expect(detail.join("\n")).not.toContain("c clear");
-      // Pressing v/c is a no-op: still in the actor detail.
+      // Pressing v/c is a no-op: still in the persistentAgent detail.
       dashboard.handleInput("v");
       dashboard.handleInput("c");
       const after = dashboard.render(120);
@@ -1424,8 +1432,8 @@ describe("Fabric dynamic UI", () => {
   it("shows active and completed run-owned work in the Agents group", () => {
     const current = snapshot();
     const run = current.runs[0]!;
-    current.actors = [];
-    current.globalActors = [];
+    current.persistentAgents = [];
+    current.agentTemplates = [];
     current.state = [];
     current.events = [];
     run.status = "completed";
@@ -1504,8 +1512,8 @@ describe("Fabric dynamic UI", () => {
   it("keeps lifecycle calls and linked agents in their sidebar phases", () => {
     const current = snapshot();
     const run = current.runs[0]!;
-    current.actors = [];
-    current.globalActors = [];
+    current.persistentAgents = [];
+    current.agentTemplates = [];
     current.state = [];
     run.currentPhaseId = "implement";
     run.phases = [
@@ -1639,7 +1647,7 @@ describe("Fabric dynamic UI", () => {
     }
   });
 
-  it("queues user messages for Main, actors, and remote mesh agents", () => {
+  it("queues user messages for Main, persistentAgents, and remote mesh agents", () => {
     const current = snapshot();
     current.participants = [
       {
@@ -1722,9 +1730,19 @@ describe("Fabric dynamic UI", () => {
       dashboard.handleInput("review this queue item");
       dashboard.handleInput("\r");
       expect(onTargetMessage).toHaveBeenCalledWith(
-        { id: "actor-1", name: "advisor", kind: "actor" },
+        { id: "persistentAgent-1", name: "advisor", kind: "persistentAgent" },
         "review this queue item",
         "steer",
+      );
+
+      dashboard.handleInput("u");
+      expect(dashboard.render(120).join("\n")).toContain("queue persistent agent follow-up · advisor");
+      dashboard.handleInput("review after current mailbox work");
+      dashboard.handleInput("\r");
+      expect(onTargetMessage).toHaveBeenCalledWith(
+        { id: "persistentAgent-1", name: "advisor", kind: "persistentAgent" },
+        "review after current mailbox work",
+        "followUp",
       );
 
       dashboard.handleInput("\x1b");
@@ -1832,57 +1850,57 @@ describe("Fabric dynamic UI", () => {
     }
   });
 
-  it("advertises and opens actor controls directly from the overview", () => {
+  it("advertises and opens persistentAgent controls directly from the overview", () => {
     const current = snapshot();
     const dashboard = new FabricDashboard(
       { requestRender: vi.fn() } as unknown as TUI,
       theme,
       () => current,
       vi.fn(),
-      { modelSource: actorModelSource, onActorModel: vi.fn(), onActorThinking: vi.fn() },
+      { modelSource: persistentAgentModelSource, onPersistentAgentModel: vi.fn(), onPersistentAgentThinking: vi.fn() },
     );
     try {
       dashboard.render(120);
       dashboard.handleInput("j");
       dashboard.handleInput("l");
       const overview = dashboard.render(120).join("\n");
-      expect(overview).toContain("actor actions: m model · e thinking");
+      expect(overview).toContain("persistent agent actions: m model · e thinking");
 
       dashboard.handleInput("m");
-      expect(dashboard.render(120).join("\n")).toContain('Model for actor "advisor"');
+      expect(dashboard.render(120).join("\n")).toContain('Model for persistent agent "advisor"');
     } finally {
       dashboard.dispose();
     }
   });
 
-  it("selects persistent actor tools from the actor overview", () => {
+  it("selects persistent persistentAgent tools from the persistentAgent overview", () => {
     const current = snapshot();
-    current.actors[0]!.tools = ["read", "grep"];
-    const onActorTools = vi.fn();
+    current.persistentAgents[0]!.tools = ["read", "grep"];
+    const onPersistentAgentTools = vi.fn();
     const dashboard = new FabricDashboard(
       { requestRender: vi.fn() } as unknown as TUI,
       theme,
       () => current,
       vi.fn(),
-      { onActorTools, actorDefaultTools: ["read", "grep", "find", "ls"] },
+      { onPersistentAgentTools, persistentAgentDefaultTools: ["read", "grep", "find", "ls"] },
     );
     try {
       dashboard.render(120);
       dashboard.handleInput("j");
       dashboard.handleInput("l");
-      expect(dashboard.render(120).join("\n")).toContain("actor actions: o tools");
+      expect(dashboard.render(120).join("\n")).toContain("persistent agent actions: o tools");
 
       dashboard.handleInput("o");
-      expect(dashboard.render(120).join("\n")).toContain('Tools for actor "advisor"');
+      expect(dashboard.render(120).join("\n")).toContain('Tools for persistent agent "advisor"');
       dashboard.handleInput(" ");
       dashboard.handleInput("\r");
-      expect(onActorTools).toHaveBeenCalledWith("actor-1", ["grep"]);
+      expect(onPersistentAgentTools).toHaveBeenCalledWith("persistentAgent-1", ["grep"]);
     } finally {
       dashboard.dispose();
     }
   });
 
-  it("lazy-loads actor transcript pages and toggles tool details with the native binding", () => {
+  it("lazy-loads persistentAgent transcript pages and toggles tool details with the native binding", () => {
     const nestedSuccessBackground = "\x1b[48;2;10;10;10m";
     const nestedErrorBackground = "\x1b[48;2;20;10;10m";
     const dashboardTheme = {
@@ -1894,32 +1912,32 @@ describe("Fabric dynamic UI", () => {
         ? nestedErrorBackground
         : nestedSuccessBackground,
     } as unknown as Theme;
-    const actorTranscript = vi.fn(() => ({
+    const persistentAgentTranscript = vi.fn(() => ({
       truncated: true,
       hasMore: true,
       hasNewer: true,
       entries: [
         {
-          id: "actor-edit",
+          id: "persistentAgent-edit",
           kind: "tool" as const,
           label: "edit",
           toolName: "edit",
           status: "running" as const,
           args: {
-            path: "src/actor.ts",
+            path: "src/persistentAgent.ts",
             edits: [{ oldText: "const before = 1;", newText: "const after = 2;" }],
           },
-          text: "editing actor source",
+          text: "editing persistentAgent source",
         },
         {
-          id: "actor-grep",
+          id: "persistentAgent-grep",
           kind: "tool" as const,
           label: "grep",
           toolName: "grep",
           status: "completed" as const,
-          args: { pattern: "actorValue", path: "src", literal: true },
+          args: { pattern: "persistentAgentValue", path: "src", literal: true },
           result: {
-            content: [{ type: "text", text: "src/actor.ts:1: const actorValue = true;" }],
+            content: [{ type: "text", text: "src/persistentAgent.ts:1: const persistentAgentValue = true;" }],
           },
         },
       ],
@@ -1933,7 +1951,7 @@ describe("Fabric dynamic UI", () => {
       snapshot,
       vi.fn(),
       {
-        actorTranscript,
+        persistentAgentTranscript,
         loadOlderTranscript,
         loadNewerTranscript,
         loadLatestTranscript,
@@ -1947,17 +1965,17 @@ describe("Fabric dynamic UI", () => {
       dashboard.handleInput(" ");
       const collapsed = dashboard.render(100).join("\n");
       const collapsedVisible = collapsed.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-      expect(actorTranscript).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "actor-1", name: "advisor" }),
+      expect(persistentAgentTranscript).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "persistentAgent-1", name: "advisor" }),
         true,
       );
-      expect(collapsedVisible).toContain("actor · advisor · transcript");
-      expect(collapsedVisible).toContain("src/actor.ts");
+      expect(collapsedVisible).toContain("persistent agent · advisor · transcript");
+      expect(collapsedVisible).toContain("src/persistentAgent.ts");
       expect(collapsedVisible).not.toContain("const before = 1;");
       expect(collapsedVisible).not.toContain("const after = 2;");
       expect(collapsedVisible).toContain("ctrl+o expand tools");
       const collapsedRows = collapsedVisible.split("\n");
-      const collapsedGrepRow = collapsedRows.findIndex((line) => line.includes("actorValue"));
+      const collapsedGrepRow = collapsedRows.findIndex((line) => line.includes("persistentAgentValue"));
       expect(collapsedGrepRow).toBeGreaterThan(0);
       expect(collapsedRows[collapsedGrepRow - 1]!.slice(1, -1).trim()).not.toBe("");
 
@@ -1969,26 +1987,26 @@ describe("Fabric dynamic UI", () => {
       expect(expanded).not.toContain(nestedErrorBackground);
       expect(expandedVisible).toContain("const before = 1;");
       expect(expandedVisible).toContain("const after = 2;");
-      expect(expandedVisible).toContain("const actorValue = true;");
+      expect(expandedVisible).toContain("const persistentAgentValue = true;");
       expect(expandedVisible).toContain("ctrl+o collapse tools");
       const expandedRows = expandedVisible.split("\n");
-      const expandedGrepRow = expandedRows.findIndex((line) => line.includes("actorValue"));
+      const expandedGrepRow = expandedRows.findIndex((line) => line.includes("persistentAgentValue"));
       expect(expandedGrepRow).toBeGreaterThan(0);
       expect(expandedRows[expandedGrepRow - 1]!.slice(1, -1).trim()).toBe("");
 
       dashboard.handleInput("g");
       dashboard.handleInput("k");
       expect(loadOlderTranscript).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "actor-1", name: "advisor" }),
+        expect.objectContaining({ id: "persistentAgent-1", name: "advisor" }),
       );
       dashboard.render(100);
       dashboard.handleInput("j");
       expect(loadNewerTranscript).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "actor-1", name: "advisor" }),
+        expect.objectContaining({ id: "persistentAgent-1", name: "advisor" }),
       );
       dashboard.handleInput("G");
       expect(loadLatestTranscript).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "actor-1", name: "advisor" }),
+        expect.objectContaining({ id: "persistentAgent-1", name: "advisor" }),
       );
       expect(dashboard.render(100).join("\n")).toContain("G follow:on");
     } finally {
@@ -2245,8 +2263,8 @@ describe("Fabric dynamic UI", () => {
     const current = snapshot();
     current.runs = [];
     current.agents = [];
-    current.actors = [];
-    current.globalActors = [];
+    current.persistentAgents = [];
+    current.agentTemplates = [];
     current.state = [];
     current.events = [];
     current.main.status = "idle";
@@ -2400,13 +2418,13 @@ describe("Fabric dynamic UI", () => {
       expect(topologyParticipantGroup("root")).toEqual({ id: "sessions", label: "Sessions", order: 0 });
       expect(topologyParticipantGroup("peer")).toEqual({ id: "sessions", label: "Sessions", order: 0 });
       expect(topologyParticipantGroup("agent")).toEqual({ id: "agents", label: "Agents", order: 1 });
-      expect(topologyParticipantGroup("actor")).toEqual({ id: "actors", label: "Actors", order: 2 });
+      expect(topologyParticipantGroup("persistentAgent")).toEqual({ id: "agents", label: "Agents", order: 1 });
       expect(topologyTopicGroupPath("fabric.state")).toEqual([
         { id: "fabric", label: "Fabric" },
       ]);
-      expect(topologyTopicGroupPath("fabric.actor.input")).toEqual([
+      expect(topologyTopicGroupPath("fabric.persistentAgent.input")).toEqual([
         { id: "fabric", label: "Fabric" },
-        { id: "fabric:actor", label: "Actor" },
+        { id: "fabric:persistentAgent", label: "PersistentAgent" },
       ]);
       expect(topologyTopicGroupPath("team.review")).toEqual([
         { id: "project", label: "Project topics" },
@@ -2490,7 +2508,7 @@ describe("Fabric dynamic UI", () => {
     current.main.cwd = root;
     current.runs = [];
     current.agents = [];
-    current.actors = [];
+    current.persistentAgents = [];
     current.events = [];
     current.state = [{
       key: "state/complexity/src/answer.ts",
@@ -2557,7 +2575,7 @@ describe("Fabric dynamic UI", () => {
   it("centers large graphs on attention and summarizes off-canvas nodes", () => {
     const current = snapshot();
     const run = current.runs[0]!;
-    current.actors = [];
+    current.persistentAgents = [];
     current.state = [];
     current.events = [];
     run.phases = [{
@@ -2601,7 +2619,7 @@ describe("Fabric dynamic UI", () => {
   it("keeps deeply nested selected agents readable in narrow topologies", () => {
     const current = snapshot();
     const run = current.runs[0]!;
-    current.actors = [];
+    current.persistentAgents = [];
     current.state = [];
     current.events = [];
     run.phases = [{
@@ -2642,7 +2660,7 @@ describe("Fabric dynamic UI", () => {
   it("moves the topology camera with a damped spring", () => {
     vi.useFakeTimers();
     const current = snapshot();
-    current.actors = [];
+    current.persistentAgents = [];
     current.state = [];
     current.events = [];
     const root = {
@@ -2701,11 +2719,11 @@ describe("Fabric dynamic UI", () => {
         createdAt: current.now - 1_000,
       },
       {
-        id: "event-actor-output",
+        id: "event-persistentAgent-output",
         sequence: 3,
-        topic: "fabric.actor.output",
+        topic: "fabric.persistentAgent.output",
         kind: "message",
-        from: { id: "actor-coordinator", name: "topology-coordinator", kind: "actor" },
+        from: { id: "persistentAgent-coordinator", name: "topology-coordinator", kind: "persistentAgent" },
         text: "Recent mesh feed stays visible",
         createdAt: current.now,
       },
@@ -2756,7 +2774,7 @@ describe("Fabric dynamic UI", () => {
 
 });
 
-describe("Fabric dashboard global actors and instructions editor", () => {
+describe("Fabric dashboard Agent templates and instructions editor", () => {
   const baseSnapshot = (): FabricDashboardSnapshot => {
     const now = Date.now();
     return {
@@ -2765,10 +2783,16 @@ describe("Fabric dashboard global actors and instructions editor", () => {
       peers: [],
       runs: [],
       agents: [],
-      actors: [
+      persistentAgents: [
         {
-          id: "actor-1",
+          id: "persistentAgent-1",
+          kind: "agent",
+          lifecycle: "persistent",
           name: "advisor",
+          role: "advisor",
+          goal: "Give bounded advice.",
+          completion: "Return one recommendation, then idle.",
+          turnBudget: { maxTurns: 8, graceTurns: 1 },
           status: "idle",
           runner: "pi",
           events: [],
@@ -2785,10 +2809,11 @@ describe("Fabric dashboard global actors and instructions editor", () => {
           recentMessages: [],
         },
       ],
-      globalActors: [
+      agentTemplates: [
         {
-          id: "g-actor-1",
+          id: "g-persistentAgent-1",
           name: "global-reviewer",
+          role: "advisor",
           instructions: "You are a global reviewer template.",
           runner: "pi",
           events: ["turn_end"],
@@ -2819,7 +2844,7 @@ describe("Fabric dashboard global actors and instructions editor", () => {
       expect(dashboard.render(120).join("\n")).toContain("Mailbox only ✓");
       dashboard.handleInput("\x1b[B");
       dashboard.handleInput("\r");
-      expect(onGlobalDeliveryPolicy).toHaveBeenCalledWith("g-actor-1", "steer", false);
+      expect(onGlobalDeliveryPolicy).toHaveBeenCalledWith("g-persistentAgent-1", "steer", false);
     } finally {
       dashboard.dispose();
     }
@@ -2827,28 +2852,28 @@ describe("Fabric dashboard global actors and instructions editor", () => {
 
   it("lists global templates and offers import/instructions/delete in their detail", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 40 } } as unknown as TUI;
-    const onImportActor = vi.fn();
+    const onImportPersistentAgent = vi.fn();
     const onGlobalInstructions = vi.fn();
-    const onRemoveGlobalActor = vi.fn();
+    const onRemoveAgentTemplate = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, baseSnapshot, vi.fn(), {
       onGlobalInstructions,
-      onImportActor,
-      onRemoveGlobalActor,
+      onImportPersistentAgent,
+      onRemoveAgentTemplate,
     });
     try {
       const overview = dashboard.render(120).join("\n");
       expect(overview).toContain("global-reviewer");
       expect(overview).toContain("global template");
 
-      // Move from the project actor to the global template and open its detail.
+      // Move from the project persistentAgent to the global template and open its detail.
       dashboard.handleInput("l");
       dashboard.handleInput("j");
       dashboard.handleInput("p");
       dashboard.handleInput("d");
-      expect(onImportActor).toHaveBeenCalledWith("g-actor-1");
-      expect(onRemoveGlobalActor).toHaveBeenCalledWith("g-actor-1");
-      onImportActor.mockClear();
-      onRemoveGlobalActor.mockClear();
+      expect(onImportPersistentAgent).toHaveBeenCalledWith("g-persistentAgent-1");
+      expect(onRemoveAgentTemplate).toHaveBeenCalledWith("g-persistentAgent-1");
+      onImportPersistentAgent.mockClear();
+      onRemoveAgentTemplate.mockClear();
       dashboard.handleInput("\r");
       const detail = dashboard.render(120).join("\n");
       expect(detail).toContain("Instructions");
@@ -2857,35 +2882,35 @@ describe("Fabric dashboard global actors and instructions editor", () => {
       expect(detail).toContain("d delete");
 
       dashboard.handleInput("p");
-      expect(onImportActor).toHaveBeenCalledWith("g-actor-1");
+      expect(onImportPersistentAgent).toHaveBeenCalledWith("g-persistentAgent-1");
       dashboard.handleInput("d");
-      expect(onRemoveGlobalActor).toHaveBeenCalledWith("g-actor-1");
+      expect(onRemoveAgentTemplate).toHaveBeenCalledWith("g-persistentAgent-1");
     } finally {
       dashboard.dispose();
     }
   });
 
-  it("exports a project actor and edits its instructions in the embedded editor", () => {
+  it("exports a project persistentAgent and edits its instructions in the embedded editor", () => {
     const tui = { requestRender: vi.fn(), terminal: { rows: 40 } } as unknown as TUI;
-    const onActorInstructions = vi.fn();
-    const onExportActor = vi.fn();
+    const onPersistentAgentInstructions = vi.fn();
+    const onExportPersistentAgent = vi.fn();
     const dashboard = new FabricDashboard(tui, theme, baseSnapshot, vi.fn(), {
-      onActorInstructions,
-      onExportActor,
+      onPersistentAgentInstructions,
+      onExportPersistentAgent,
     });
     try {
-      // Open the first entity, the project actor.
+      // Open the first entity, the project persistentAgent.
       dashboard.handleInput("l");
       dashboard.handleInput("x");
-      expect(onExportActor).toHaveBeenCalledWith("actor-1");
-      onExportActor.mockClear();
+      expect(onExportPersistentAgent).toHaveBeenCalledWith("persistentAgent-1");
+      onExportPersistentAgent.mockClear();
       dashboard.handleInput("\r");
       const detail = dashboard.render(120).join("\n");
       expect(detail).toContain("x export→global");
       expect(detail).toContain("i instructions");
 
       dashboard.handleInput("x");
-      expect(onExportActor).toHaveBeenCalledWith("actor-1");
+      expect(onExportPersistentAgent).toHaveBeenCalledWith("persistentAgent-1");
 
       // open the embedded instructions editor
       dashboard.handleInput("i");
@@ -2893,9 +2918,9 @@ describe("Fabric dashboard global actors and instructions editor", () => {
       expect(editor).toContain("instructions · advisor");
       expect(editor).toContain("enter submit");
 
-      // Enter submits the (unchanged) text to the actor callback and returns to detail
+      // Enter submits the (unchanged) text to the persistentAgent callback and returns to detail
       dashboard.handleInput("\r");
-      expect(onActorInstructions).toHaveBeenCalledWith("actor-1", "Advise only when useful.");
+      expect(onPersistentAgentInstructions).toHaveBeenCalledWith("persistentAgent-1", "Advise only when useful.");
       const after = dashboard.render(120).join("\n");
       expect(after).toContain("advisor");
     } finally {

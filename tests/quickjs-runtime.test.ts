@@ -217,7 +217,7 @@ await mesh.publish({ topic: "team.auth", text: "ready" });
 return self.name;
 `,
       async (ref) => {
-        if (ref === "mesh.self") return { id: "actor-1", name: "reviewer", kind: "actor" };
+        if (ref === "mesh.self") return { id: "persistentAgent-1", name: "reviewer", kind: "persistentAgent" };
         if (ref === "mesh.publish") return { sequence: 1 };
         throw new Error(`Unexpected call: ${ref}`);
       },
@@ -722,13 +722,25 @@ return { main, queued };
 const self = await agents.self();
 const members = await agents.members({ scope: "project", kinds: ["agent"] });
 const lineage = await agents.list({ scope: "lineage" });
-return { self, members, lineage };
+const persistent = await agents.list({ lifecycle: "persistent" });
+const roles = await agents.roles({ lifecycle: "persistent" });
+const templates = await agents.templates();
+const telemetry = await agents.telemetry();
+return { self, members, lineage, persistent, roles, templates, telemetry };
 `,
       async (ref, args) => {
         calls.push({ ref, args });
         if (ref === "agents.self") return { id: "agent:self", kind: "agent" };
         if (ref === "agents.members") return [{ id: "agent:peer", kind: "agent" }];
-        if (ref === "agents.list") return [{ id: "agent:self", kind: "agent" }];
+        if (ref === "agents.list") return args.lifecycle === "persistent"
+          ? [{ id: "persistent:self", kind: "agent", lifecycle: "persistent" }]
+          : [{ id: "agent:self", kind: "agent", lifecycle: "one-shot" }];
+        if (ref === "agents.roles") return {
+          roles: [{ name: "supervisor", lifecycle: "persistent" }],
+          diagnostics: [],
+        };
+        if (ref === "agents.templates") return [{ id: "template:self", name: "reviewer" }];
+        if (ref === "agents.telemetry") return { persistent: 1 };
         throw new Error(`Unexpected call: ${ref}`);
       },
       options,
@@ -738,11 +750,19 @@ return { self, members, lineage };
       self: { id: "agent:self" },
       members: [{ id: "agent:peer" }],
       lineage: [{ id: "agent:self" }],
+      persistent: [{ id: "persistent:self", kind: "agent", lifecycle: "persistent" }],
+      roles: { roles: [{ name: "supervisor", lifecycle: "persistent" }], diagnostics: [] },
+      templates: [{ id: "template:self", name: "reviewer" }],
+      telemetry: { persistent: 1 },
     });
     expect(calls).toEqual([
       { ref: "agents.self", args: {} },
       { ref: "agents.members", args: { scope: "project", kinds: ["agent"] } },
       { ref: "agents.list", args: { scope: "lineage" } },
+      { ref: "agents.list", args: { lifecycle: "persistent" } },
+      { ref: "agents.roles", args: { lifecycle: "persistent" } },
+      { ref: "agents.templates", args: {} },
+      { ref: "agents.telemetry", args: {} },
     ]);
   });
 
@@ -784,7 +804,7 @@ return { created, listed, removed };
     ]);
   });
 
-  it("routes agents.setEvents and agents.setInstructions to the actors provider", async () => {
+  it("routes agents.setEvents and agents.setInstructions to the persistentAgents provider", async () => {
     const calls: string[] = [];
     const result = await new QuickJsRuntime().execute(
       `

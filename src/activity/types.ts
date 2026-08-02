@@ -9,7 +9,7 @@ export type FabricActivityStatus =
 
 export type FabricActivityKind =
   | "agent"
-  | "actor"
+  | "persistentAgent"
   | "tool"
   | "extension"
   | "mcp"

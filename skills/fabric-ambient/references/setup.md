@@ -1,9 +1,10 @@
-# Ambient actor setup
+# Persistent Agent profile setup
 
-Pass `strings.name`, `strings.instructions`, JSON `strings.events`, `strings.triggerTurn` (`"true"`/`"false"`), and `strings.model` (key/substring; empty when unset).
+Pass `strings.name`, `strings.role`, `strings.instructions`, JSON `strings.events`, `strings.triggerTurn` (`"true"`/`"false"`), and `strings.model` (key/substring; empty when unset).
 
 ```ts
-const events = JSON.parse(π.events) as FabricActorHostEvent[];
+const events = JSON.parse(π.events) as FabricPersistentAgentHostEvent[];
+const role = π.role || "worker";
 const triggerTurn = π.triggerTurn === "true";
 const desiredTools = ["read", "grep", "find", "ls"];
 let model: string | undefined;
@@ -37,20 +38,21 @@ if (π.model) {
   runner = fuzzy[0].runner;
 }
 
-const existing = (await agents.actors()).find(
-  (actor) => actor.name === π.name && actor.status !== "stopped",
+const existing = (await agents.list({ lifecycle: "persistent" })).find(
+  (agent) => agent.name === π.name && agent.status !== "stopped",
 );
 if (existing) {
   const runnerMatches = !runner || existing.runner === runner;
   const warnings = [
-    ...(existing.status !== "idle" ? [`actor is ${existing.status}; wait until idle or stop it before reconfiguration`] : []),
+    ...(existing.status !== "idle" ? [`persistent agent is ${existing.status}; wait until idle or stop it before reconfiguration`] : []),
+    ...(existing.role !== role ? [`recreate for role=${role}`] : []),
     ...(existing.responseMode !== "directive" ? ["recreate for responseMode=directive"] : []),
     ...(existing.coalesce !== true ? ["recreate for coalesce=true"] : []),
     ...(existing.topics.length !== 0 ? ["recreate without topic subscriptions"] : []),
     ...(!runnerMatches ? [`runner "${runner}" requires recreation`] : []),
     ...(runnerMatches && model && existing.model !== model ? [`model "${model}" requires a dashboard change or recreation`] : []),
   ];
-  if (warnings.length) return { reused: false, actor: existing, warnings };
+  if (warnings.length) return { reused: false, agent: existing, warnings };
 
   await agents.setInstructions({ id: existing.id, instructions: π.instructions });
   if (
@@ -67,13 +69,14 @@ if (existing) {
   }
   return {
     reused: true,
-    actor: await agents.actorStatus({ id: existing.id }),
+    agent: await agents.status({ id: existing.id }),
     warnings: [],
   };
 }
 
-const actor = await agents.create({
+const persistentAgent = await agents.create({
   name: π.name,
+  role,
   instructions: π.instructions,
   events,
   responseMode: "directive",
@@ -84,7 +87,7 @@ const actor = await agents.create({
   ...(runner ? { runner } : {}),
   ...(model ? { model } : {}),
 });
-return { started: true, actor };
+return { started: true, agent: persistentAgent };
 ```
 
-Reuse updates instructions/events/delivery/native tools. Recreate for runner, model, `responseMode`, `coalesce`, or topics. Extension and provider availability follows the configured runner and actor extension policy. Report ID/warnings and messages/stop; do not wait.
+Reuse updates instructions/events/delivery/native tools. Recreate for role, runner, model, `responseMode`, `coalesce`, or topics. Extension and provider availability follows the configured runner and persistent-agent extension policy. Report ID/warnings and messages/stop; do not wait.

@@ -26,6 +26,7 @@ type ClaudeCliModule = typeof import("./agents/claude-cli.js");
 type CompactControlModule = typeof import("./agents/compact-control.js");
 type WorkerOptionsModule = typeof import("./worker/options.js");
 type WorkerRunRecordModule = typeof import("./worker/run-record.js");
+type AgentTurnBudgetModule = typeof import("./agents/turn-budget.js");
 
 const loadWorkerOptions = async (): Promise<WorkerOptionsModule> => {
   if (!import.meta.url.endsWith(".ts")) return import("./worker/options.js");
@@ -37,6 +38,12 @@ const loadWorkerRunRecord = async (): Promise<WorkerRunRecordModule> => {
   if (!import.meta.url.endsWith(".ts")) return import("./worker/run-record.js");
   const sourceModulePath = "./worker/run-record.ts";
   return import(sourceModulePath) as Promise<WorkerRunRecordModule>;
+};
+
+const loadAgentTurnBudget = async (): Promise<AgentTurnBudgetModule> => {
+  if (!import.meta.url.endsWith(".ts")) return import("./agents/turn-budget.js");
+  const sourceModulePath = "./agents/turn-budget.ts";
+  return import(sourceModulePath) as Promise<AgentTurnBudgetModule>;
 };
 
 const loadCompactControl = async (): Promise<CompactControlModule> => {
@@ -209,9 +216,10 @@ process.on("unhandledRejection", (error) => {
 });
 
 const main = async (): Promise<void> => {
-  const [optionHelpers, loadedRunRecordHelpers] = await Promise.all([
+  const [optionHelpers, loadedRunRecordHelpers, turnBudgetHelpers] = await Promise.all([
     loadWorkerOptions(),
     loadWorkerRunRecord(),
+    loadAgentTurnBudget(),
   ]);
   runRecordHelpers = loadedRunRecordHelpers;
   const {
@@ -223,6 +231,7 @@ const main = async (): Promise<void> => {
     updateRunRecord,
     writeRunRecord,
   } = loadedRunRecordHelpers;
+  const { agentTurnBudgetDecision } = turnBudgetHelpers;
   const options = optionHelpers.parseWorkerOptions();
   const thinking =
     options.thinking === "off" ||
@@ -319,8 +328,8 @@ const main = async (): Promise<void> => {
       ...(options.mainAgentId ? { PI_FABRIC_MAIN_AGENT_ID: options.mainAgentId } : {}),
       PI_FABRIC_GRANTED_RISKS: options.grantedRisks.join(","),
       PI_FABRIC_FULL_CODE_MODE: String(options.fullCodeMode),
-      ...(options.actorId ? { PI_FABRIC_ACTOR_ID: options.actorId } : {}),
-      ...(options.actorName ? { PI_FABRIC_ACTOR_NAME: options.actorName } : {}),
+      ...(options.persistentAgentId ? { PI_FABRIC_PERSISTENT_AGENT_ID: options.persistentAgentId } : {}),
+      ...(options.persistentAgentName ? { PI_FABRIC_PERSISTENT_AGENT_NAME: options.persistentAgentName } : {}),
       ...(options.meshRoot ? { PI_FABRIC_MESH_ROOT: options.meshRoot } : {}),
       ...(options.projectRoot ? { PI_FABRIC_PROJECT_ROOT: options.projectRoot } : {}),
       ...(options.consultReadScope !== undefined
@@ -348,11 +357,12 @@ const main = async (): Promise<void> => {
   let terminalError: string | undefined;
   let sawAgentError = false;
   let retryPending = false;
+  let turnBudgetStopTimer: NodeJS.Timeout | undefined;
 
   const update = (): void => updateRunRecord(options.statusFile, record);
 
   // Attributed token telemetry. Every usage-bearing child event emits one
-  // tokens.usage lifecycle entry identified by this run/actor/runner/depth.
+  // tokens.usage lifecycle entry identified by this run/persistentAgent/runner/depth.
   // The manager drains these alongside the pi.* lifecycle stream and appends
   // them to the budget ledger, replacing the old per-settle flat attribution.
   const lastEmittedUsage = emptyUsage();
@@ -378,8 +388,8 @@ const main = async (): Promise<void> => {
       name: options.name,
       runner: options.runner,
       depth: options.depth,
-      ...(options.actorId ? { actorId: options.actorId } : {}),
-      ...(options.actorName ? { actorName: options.actorName } : {}),
+      ...(options.persistentAgentId ? { persistentAgentId: options.persistentAgentId } : {}),
+      ...(options.persistentAgentName ? { persistentAgentName: options.persistentAgentName } : {}),
       cumulativeTokens:
         snapshot.input + snapshot.output + snapshot.cacheRead + snapshot.cacheWrite,
       input: delta?.input ?? 0,
@@ -417,6 +427,27 @@ const main = async (): Promise<void> => {
   // before Pi core compacts. When maxTokens is set and the child's cumulative
   // token usage crosses it, terminate the child like a timeout so the run
   // settles with a terminal status instead of burning to the hour deadline.
+  const enforceTurnBudget = (): void => {
+    if (terminalStatus || !options.turnBudget) return;
+    const decision = agentTurnBudgetDecision(options.turnBudget, record.turns);
+    if (decision === "continue") return;
+    record.turnBudget = {
+      ...options.turnBudget,
+      outcome: decision === "wrap-up" ? "wrap-up-requested" : "exceeded",
+    };
+    if (decision !== "stop" || turnBudgetStopTimer) return;
+    turnBudgetStopTimer = setTimeout(() => {
+      turnBudgetStopTimer = undefined;
+      if (terminalStatus || child.exitCode !== null) return;
+      terminalStatus = "timed_out";
+      terminalError = `Agent turn budget reached: ${record.turns} turns (limit ${options.turnBudget!.maxTurns} + grace ${options.turnBudget!.graceTurns})`;
+      terminateChild(child, "SIGTERM");
+      setTimeout(() => terminateChild(child, "SIGKILL"), KILL_GRACE_MS).unref();
+      child.stdin?.end();
+    }, 500);
+    turnBudgetStopTimer.unref();
+  };
+
   const enforceTokenLimit = (): void => {
     if (terminalStatus || !options.maxTokens || options.maxTokens <= 0) return;
     const total =
@@ -771,6 +802,7 @@ const main = async (): Promise<void> => {
         ...(typeof event.turnIndex === "number" ? { turnIndex: event.turnIndex } : {}),
       });
       record.turns++;
+      enforceTurnBudget();
       update();
       return;
     }
@@ -813,6 +845,10 @@ const main = async (): Promise<void> => {
       return;
     }
     if (event.type === "agent_end") {
+      if (event.willRetry !== true && turnBudgetStopTimer) {
+        clearTimeout(turnBudgetStopTimer);
+        turnBudgetStopTimer = undefined;
+      }
       emitLifecycle("pi.agent_end", { willRetry: event.willRetry === true });
       retryPending = event.willRetry === true;
       return;
@@ -1033,6 +1069,7 @@ const main = async (): Promise<void> => {
 
   if (steerTimer) clearInterval(steerTimer);
   if (claudeCloseTimer) clearTimeout(claudeCloseTimer);
+  if (turnBudgetStopTimer) clearTimeout(turnBudgetStopTimer);
   clearTimeout(timeout);
   if (process.env.PI_FABRIC_INJECT_CRASH === "close") throw new Error("simulated close crash");
   outputBuffer += outputDecoder.end();
@@ -1068,6 +1105,13 @@ const main = async (): Promise<void> => {
         claudeSteering.length === 0 &&
         claudeFollowUps.length === 0));
   record.status = terminalStatus ?? (childCompleted ? "completed" : "failed");
+  if (options.turnBudget) {
+    const exceeded = terminalError?.startsWith("Agent turn budget reached:") === true;
+    record.turnBudget = {
+      ...options.turnBudget,
+      outcome: exceeded ? "exceeded" : "within-budget",
+    };
+  }
   if (terminalError) record.error = terminalError;
   if (record.status === "failed" && !record.error) {
     record.error =

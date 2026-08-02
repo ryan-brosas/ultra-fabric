@@ -1,8 +1,8 @@
-import type { QuickJsRuntime } from "../runtime/quickjs-runtime.js";
+import type { QuickJsRuntime } from "../../runtime/quickjs-runtime.js";
 import type {
-  FabricActorValidityDecision,
-  FabricActorValidityFacts,
-  FabricActorValidWhileSource,
+  FabricPersistentAgentValidityDecision,
+  FabricPersistentAgentValidityFacts,
+  FabricPersistentAgentValidWhileSource,
 } from "./types.js";
 
 const PREDICATE_VERSION = 1;
@@ -15,7 +15,7 @@ const PREDICATE_MEMORY_BYTES = 16 * 1024 * 1024;
 // initialization work in execution-service.
 let runtimeInstance: QuickJsRuntime | undefined;
 const runtime = async (): Promise<QuickJsRuntime> =>
-  runtimeInstance ??= new (await import("../runtime/quickjs-runtime.js")).QuickJsRuntime();
+  runtimeInstance ??= new (await import("../../runtime/quickjs-runtime.js")).QuickJsRuntime();
 
 const predicateProgram = (source: string, invoke: boolean): string => [
   `const predicate = (${source});`,
@@ -36,7 +36,7 @@ const predicateProgram = (source: string, invoke: boolean): string => [
     : 'return true;',
 ].join("\n");
 
-const execute = async (source: FabricActorValidWhileSource, facts?: FabricActorValidityFacts) => {
+const execute = async (source: FabricPersistentAgentValidWhileSource, facts?: FabricPersistentAgentValidityFacts) => {
   const result = await (await runtime()).execute(
     predicateProgram(source.source, facts !== undefined),
     async () => {
@@ -55,8 +55,8 @@ const execute = async (source: FabricActorValidWhileSource, facts?: FabricActorV
   return result.value;
 };
 
-export const validateActorValidWhile = async (
-  value: FabricActorValidWhileSource | undefined,
+export const validatePersistentAgentValidWhile = async (
+  value: FabricPersistentAgentValidWhileSource | undefined,
 ): Promise<void> => {
   if (!value) return;
   if (value.version !== PREDICATE_VERSION) {
@@ -69,14 +69,14 @@ export const validateActorValidWhile = async (
   await execute(value);
 };
 
-export const evaluateActorValidWhile = async (
-  source: FabricActorValidWhileSource,
-  facts: FabricActorValidityFacts,
+export const evaluatePersistentAgentValidWhile = async (
+  source: FabricPersistentAgentValidWhileSource,
+  facts: FabricPersistentAgentValidityFacts,
 ): Promise<{ valid: boolean; reason?: string }> => {
   const value = await execute(source, facts);
   if (typeof value === "boolean") return { valid: value };
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    const decision = value as Partial<FabricActorValidityDecision>;
+    const decision = value as Partial<FabricPersistentAgentValidityDecision>;
     if (typeof decision.valid === "boolean") {
       return {
         valid: decision.valid,

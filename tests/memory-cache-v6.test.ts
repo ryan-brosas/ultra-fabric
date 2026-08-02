@@ -92,7 +92,7 @@ describe("memory cache V6", () => {
       const rare = index === 0 ? " rarelexeme_000 Ωmega雪" : "";
       const file = writeSessionFile(sessionDirectory, `${String(index).padStart(4, "0")}.jsonl`, [
         sessionHeader(`session-${index}`, cwd),
-        message(`entry-${index}`, `common distractor_${index}${rare}`, index),
+        message(`entry-${index}`, `common distrpersistentAgent_${index}${rare}`, index),
       ]);
       fs.utimesSync(file, base + index, base + index);
       if (index === 0) oldest = file;

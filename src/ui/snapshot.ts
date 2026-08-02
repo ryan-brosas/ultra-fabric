@@ -131,8 +131,8 @@ export const createDashboardSnapshot = (
       ...(isRunRecord(record) && record.logFile ? { logFile: record.logFile } : {}),
       ...(record.branch ? { branch: record.branch } : {}),
       ...(record.worktree ? { worktree: record.worktree } : {}),
-      ...(record.actorId ? { actorId: record.actorId } : {}),
-      ...(record.actorName ? { actorName: record.actorName } : {}),
+      ...(record.persistentAgentId ? { persistentAgentId: record.persistentAgentId } : {}),
+      ...(record.persistentAgentName ? { persistentAgentName: record.persistentAgentName } : {}),
       ...(parentId ? { parentId } : {}),
       ...(nestingDepth > 0 ? { nestingDepth } : {}),
       ...(linked ? { runId: linked.runId } : parent?.runId ? { runId: parent.runId } : {}),
@@ -180,15 +180,15 @@ export const createDashboardSnapshot = (
       : [];
   const participantById = new Map(participants.map((participant) => [participant.id, participant]));
   const canonicalDirectoryActive = participants.length > 0;
-  const actors = state.actors
+  const persistentAgents = state.persistentAgents
     .list()
     .filter(
-      (actor) =>
-        !canonicalDirectoryActive || participantById.get(actor.id)?.local === true,
+      (persistentAgent) =>
+        !canonicalDirectoryActive || participantById.get(persistentAgent.id)?.local === true,
     )
-    .map((actor) => {
+    .map((persistentAgent) => {
       const worker = allAgents
-        .filter((agent) => agent.actorId === actor.id)
+        .filter((agent) => agent.persistentAgentId === persistentAgent.id)
         .sort((left, right) => {
           const active =
             Number(activeStatuses.has(right.status)) -
@@ -199,14 +199,14 @@ export const createDashboardSnapshot = (
           return active || recency;
         })[0];
       return {
-        ...actor,
-        instructions: state.actors.instructions(actor.id),
-        recentMessages: state.actors.messages(actor.id, 12),
+        ...persistentAgent,
+        instructions: state.persistentAgents.instructions(persistentAgent.id),
+        recentMessages: state.persistentAgents.messages(persistentAgent.id, 12),
         ...(worker ? { worker } : {}),
       };
     });
   const localAgents = allAgents
-    .filter((agent) => !agent.actorId)
+    .filter((agent) => !agent.persistentAgentId)
     .map((agent) => {
       const participant = participantById.get(agent.id);
       return participant
@@ -269,7 +269,7 @@ export const createDashboardSnapshot = (
   const stateEntries = meshEntries
     .filter(
       (entry) =>
-        !entry.key.startsWith("actors/") &&
+        !entry.key.startsWith("persistentAgents/") &&
         !entry.key.startsWith("sessions/") &&
         !entry.key.startsWith("topology/") &&
         !entry.key.startsWith("outcomes/"),
@@ -289,9 +289,9 @@ export const createDashboardSnapshot = (
     peers: typeof state.peerInfos === "function" ? state.peerInfos() : [],
     participants,
     widgetDismissedAt: state.widgetDismissedAt,
-    globalActors: state.globalActors.list(),
+    agentTemplates: state.templates.list(),
     agents: visibleAgents,
-    actors: actors.sort((left, right) => {
+    persistentAgents: persistentAgents.sort((left, right) => {
       const leftActive = activeStatuses.has(left.status) ? 1 : 0;
       const rightActive = activeStatuses.has(right.status) ? 1 : 0;
       return rightActive - leftActive || right.updatedAt - left.updatedAt;
@@ -305,10 +305,10 @@ export const createDashboardSnapshot = (
         retiredChars: 0,
         protectedResults: 0,
       },
-      actorBudgets: typeof state.actors.telemetry === "function"
-        ? state.actors.telemetry()
+      persistentAgentBudgets: typeof state.persistentAgents.telemetry === "function"
+        ? state.persistentAgents.telemetry()
         : {
-            actors: 0,
+            persistentAgents: 0,
             open: 0,
             lifetimeExhausted: 0,
             windowExhausted: 0,

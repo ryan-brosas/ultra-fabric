@@ -1,13 +1,11 @@
-import { ActorManager } from "../actors/manager.js";
-import { GlobalActorRegistry } from "../actors/global-registry.js";
-import { FABRIC_ACTOR_HOST_EVENTS, isFabricActorHostEvent } from "../actors/types.js";
+import { FABRIC_PERSISTENT_AGENT_HOST_EVENTS, isFabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import type {
-  FabricActorDelivery,
-  FabricActorHostEvent,
-  FabricActorInfo,
-  FabricActorMessage,
-  FabricActorRequest,
-} from "../actors/types.js";
+  FabricPersistentAgentDelivery,
+  FabricPersistentAgentHostEvent,
+  FabricPersistentAgentInfo,
+  FabricPersistentAgentMessage,
+  FabricPersistentAgentRequest,
+} from "../agents/persistent/types.js";
 import type {
   FabricAgentMessageResult,
   FabricMainAgentTarget,
@@ -26,9 +24,11 @@ import {
   type FabricControlCommand,
   type FabricControlAcceptance,
 } from "../topology/control-plane.js";
-import type {
-  FabricParticipantScope,
-  FabricParticipantSource,
+import {
+  toPublicAgentParticipant,
+  type FabricParticipantScope,
+  type FabricParticipantSource,
+  type FabricPublicParticipantInfo,
 } from "../topology/types.js";
 import type {
   FabricActionDescriptor,
@@ -48,6 +48,7 @@ import type {
   AgentSessionSeed,
 } from "../agents/types.js";
 import { isFabricThinking } from "../thinking.js";
+import { normalizeFabricAgentRole } from "../agents/role.js";
 import { AgentTranscriptReader, recentTranscriptTools } from "../ui/transcript.js";
 import {
   routeModel,
@@ -55,9 +56,27 @@ import {
   type ModelRouteRequirements,
 } from "../routing/model-router.js";
 
+const turnBudgetSchema = {
+  type: "object",
+  properties: {
+    maxTurns: { type: "number", minimum: 1 },
+    graceTurns: { type: "number", minimum: 0 },
+  },
+  required: ["maxTurns", "graceTurns"],
+  additionalProperties: false,
+};
+
 const runProperties = {
   task: { type: "string", description: "A self-contained task for the child agent" },
   name: { type: "string" },
+  goal: { type: "string", description: "Concrete outcome for this Agent; defaults to the selected role profile." },
+  completion: { type: "string", description: "Observable definition of done; defaults to the selected role profile." },
+  turnBudget: turnBudgetSchema,
+  role: {
+    type: "string",
+    pattern: "^[a-z][a-z0-9-]{0,31}$",
+    description: "Purpose label such as scout, explorer, worker, or reviewer.",
+  },
   runner: {
     type: "string",
     enum: ["pi", "claude"],
@@ -188,12 +207,29 @@ const tailCodePoints = (value: string, limit: number): string => {
   return Array.from(value.slice(-limit * 2)).slice(-limit).join("");
 };
 
+type AgentLifecycle = "one-shot" | "persistent" | "all";
+type AgentListEntry =
+  | AgentRunRecord
+  | AgentHandleInfo
+  | FabricPersistentAgentInfo
+  | FabricPublicParticipantInfo;
+
 const descriptors: FabricActionDescriptor[] = [
   {
     name: "run",
     description: "Run a child agent through Pi or Claude Code and wait for its final result",
     inputSchema: runSchema,
     risk: "agent",
+  },
+  {
+    name: "roles",
+    description: "List built-in and custom Agent role profiles, including lifecycle, behavioral contract, tools, and execution bounds",
+    inputSchema: {
+      type: "object",
+      properties: { lifecycle: { type: "string", enum: ["one-shot", "persistent"] } },
+      additionalProperties: false,
+    },
+    risk: "read",
   },
   {
     name: "handoff",
@@ -223,24 +259,27 @@ const descriptors: FabricActionDescriptor[] = [
   },
   {
     name: "list",
-    description: "List agent participants locally, across the current lineage, or across the project",
+    description: "List one-shot agents, persistent agents, or both locally, across the current lineage, or across the project",
     inputSchema: {
       type: "object",
-      properties: { scope: { type: "string", enum: ["local", "lineage", "project"] } },
+      properties: {
+        scope: { type: "string", enum: ["local", "lineage", "project"] },
+        lifecycle: { type: "string", enum: ["one-shot", "persistent", "all"] },
+      },
       additionalProperties: false,
     },
     risk: "read",
   },
   {
     name: "members",
-    description: "List the unified project topology of roots, agents, and actors",
+    description: "List the unified project topology of roots and agents across both lifecycles.",
     inputSchema: {
       type: "object",
       properties: {
         scope: { type: "string", enum: ["local", "lineage", "project"] },
         kinds: {
           type: "array",
-          items: { type: "string", enum: ["root", "agent", "actor"] },
+          items: { type: "string", enum: ["root", "agent"] },
         },
         includeStale: { type: "boolean" },
       },
@@ -318,7 +357,7 @@ const descriptors: FabricActionDescriptor[] = [
   },
   {
     name: "stop",
-    description: "Stop a local or remotely owned agent or actor that advertises the stop capability",
+    description: "Stop a local or remotely owned agent from either lifecycle when it advertises the stop capability",
     inputSchema: idSchema,
     risk: "agent",
   },
@@ -339,17 +378,25 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "create",
     description:
-      'Create a persistent actor with a mailbox and optional subscriptions to any session-bound Pi event or mesh topic. Image-bearing events attach images to the actor model automatically while persistent event data stays redacted. Use scope "global" to save a reusable project-independent template to the global registry instead of a live project actor; global templates are not live and carry no history.',
+      'Create a persistent agent with a mailbox and optional subscriptions to any session-bound Pi event or mesh topic. Image-bearing events attach images to the agent model automatically while persistent event data stays redacted. Use scope "global" to save a reusable project-independent template instead of a live persistent agent; templates are not live and carry no history.',
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string" },
+        role: {
+          type: "string",
+          pattern: "^[a-z][a-z0-9-]{0,31}$",
+          description: "Agent responsibility, such as worker, supervisor, or advisor",
+        },
         instructions: { type: "string" },
+        goal: runProperties.goal,
+        completion: runProperties.completion,
+        turnBudget: turnBudgetSchema,
         events: {
           type: "array",
           items: {
             type: "string",
-            enum: [...FABRIC_ACTOR_HOST_EVENTS],
+            enum: [...FABRIC_PERSISTENT_AGENT_HOST_EVENTS],
           },
         },
         topics: { type: "array", items: { type: "string" } },
@@ -410,7 +457,7 @@ const descriptors: FabricActionDescriptor[] = [
   },
   {
     name: "ask",
-    description: "Send a message to a persistent actor and wait for its next response",
+    description: "Send a message to a persistent agent and wait for its next response",
     inputSchema: {
       type: "object",
       properties: {
@@ -426,7 +473,7 @@ const descriptors: FabricActionDescriptor[] = [
   },
   {
     name: "tell",
-    description: "Queue a message for a persistent actor without waiting",
+    description: "Queue a message for a persistent agent without waiting",
     inputSchema: {
       type: "object",
       properties: {
@@ -443,7 +490,7 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "steer",
     description:
-      "Steer Main, a running one-shot agent between turns, or a persistent actor through its mailbox. The stable id alias main targets the root user-facing Pi session. Non-local targets route over the project mesh.",
+      "Steer Main, a running one-shot agent between turns, or a persistent agent through its mailbox. The stable id alias main targets the root user-facing Pi session. Non-local targets route over the project mesh.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "string" }, message: { type: "string" }, data: {} },
@@ -455,7 +502,7 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "followUp",
     description:
-      "Queue a follow-up for Main or a running one-shot agent, or enqueue a persistent actor mailbox message. The stable id alias main targets the root user-facing Pi session. Non-local targets route over the project mesh.",
+      "Queue a follow-up for Main or a running one-shot agent, or enqueue a persistent agent mailbox message. The stable id alias main targets the root user-facing Pi session. Non-local targets route over the project mesh.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "string" }, message: { type: "string" }, data: {} },
@@ -513,31 +560,20 @@ const descriptors: FabricActionDescriptor[] = [
     risk: "agent",
   },
   {
-    name: "actorStatus",
-    description: "Read one persistent actor's status",
-    inputSchema: idSchema,
+    name: "telemetry",
+    description: "Read aggregate persistent-agent activation, token, and quota-rejection telemetry",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
     risk: "read",
   },
   {
-    name: "actors",
-    description:
-      'List persistent actors. Default scope "project" lists live actors in this Fabric session; scope "global" lists project-independent templates in the global registry.',
-    inputSchema: {
-      type: "object",
-      properties: { scope: { type: "string", enum: ["project", "global"] } },
-      additionalProperties: false,
-    },
-    risk: "read",
-  },
-  {
-    name: "actorTelemetry",
-    description: "Read aggregate actor activation, token, and quota-rejection telemetry",
+    name: "templates",
+    description: "List reusable persistent-agent definitions. Templates are not live agents and carry no mailbox or run history.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     risk: "read",
   },
   {
     name: "messages",
-    description: "Read a persistent actor's bounded inbox and outbox history",
+    description: "Read a persistent agent's bounded inbox and outbox history",
     inputSchema: {
       type: "object",
       properties: { id: { type: "string" }, limit: { type: "number", minimum: 1 } },
@@ -549,7 +585,7 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "retryDelivery",
     description:
-      "Retry failed mesh/Main delivery for one actor outbox message under its stable message id. Exhaustion dead-letters the failed channel.",
+      "Retry failed mesh/Main delivery for one persistent-agent outbox message under its stable message id. Exhaustion dead-letters the failed channel.",
     inputSchema: {
       type: "object",
       properties: {
@@ -564,7 +600,7 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "setModel",
     description:
-      "Change or clear a persistent actor's model override for its next activation without discarding its session trajectory",
+      "Change or clear a persistent agent's model override for its next activation without discarding its session trajectory",
     inputSchema: {
       type: "object",
       properties: { id: { type: "string" }, model: { type: "string" } },
@@ -576,7 +612,7 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "setThinking",
     description:
-      "Change or clear a persistent actor's reasoning effort for its next activation",
+      "Change or clear a persistent agent's reasoning effort for its next activation",
     inputSchema: {
       type: "object",
       properties: { id: { type: "string" }, thinking: runProperties.thinking },
@@ -588,7 +624,7 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "setTools",
     description:
-      "Replace a persistent actor's tool allowlist. Takes effect on its next queued message; an empty list disables optional tools.",
+      "Replace a persistent agent's tool allowlist. Takes effect on its next queued message; an empty list disables optional tools.",
     inputSchema: {
       type: "object",
       properties: {
@@ -603,7 +639,7 @@ const descriptors: FabricActionDescriptor[] = [
   },
   {
     name: "setEvents",
-    description: "Replace a persistent actor's session-bound Pi and synthetic tool_error event subscriptions",
+    description: "Replace a persistent agent's session-bound Pi and synthetic tool_error event subscriptions",
     inputSchema: {
       type: "object",
       properties: {
@@ -612,7 +648,7 @@ const descriptors: FabricActionDescriptor[] = [
           type: "array",
           items: {
             type: "string",
-            enum: [...FABRIC_ACTOR_HOST_EVENTS],
+            enum: [...FABRIC_PERSISTENT_AGENT_HOST_EVENTS],
           },
         },
       },
@@ -624,7 +660,7 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "setDeliveryPolicy",
     description:
-      "Replace a project actor or global template delivery policy. steer/followUp require an explicit triggerTurn choice; mailbox/nextTurn require false.",
+      "Replace a persistent agent or template delivery policy. steer/followUp require an explicit triggerTurn choice; mailbox/nextTurn require false.",
     inputSchema: {
       type: "object",
       properties: {
@@ -643,14 +679,14 @@ const descriptors: FabricActionDescriptor[] = [
   },
   {
     name: "clearMessages",
-    description: "Clear a persistent actor's recorded message history",
+    description: "Clear a persistent agent's recorded message history",
     inputSchema: idSchema,
     risk: "write",
   },
   {
     name: "remove",
     description:
-      'Stop and remove a persistent actor. Default scope "project" removes a live project actor; scope "global" removes a project-independent template from the global registry.',
+      'Stop and remove a persistent agent. Default scope "project" removes a live persistent agent from the project; scope "global" removes a project-independent template from the global registry.',
     inputSchema: {
       type: "object",
       properties: {
@@ -665,7 +701,7 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "setInstructions",
     description:
-      'Replace an actor\'s default instruction (its persona / system-prompt body). Default scope "project" edits a live project actor; scope "global" edits a project-independent template. Takes effect on the actor\'s next queued message.',
+      'Replace a persistent agent or template default instruction (its persona / system-prompt body). Default scope "project" edits a live agent; scope "global" edits a project-independent template. Takes effect on the next queued message.',
     inputSchema: {
       type: "object",
       properties: {
@@ -681,13 +717,13 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "import",
     description:
-      "Import a project-independent template from the global registry into the current project as a fresh live actor with no inherited history (no messages, session, or run logs). Identify the template by id or name; optionally rename the imported actor with \"as\" to avoid colliding with a live actor.",
+      "Import a project-independent template into the current project as a fresh persistent agent with no inherited history (no messages, session, or run logs). Identify the template by id or name; optionally rename the imported agent with \"as\" to avoid a collision.",
     inputSchema: {
       type: "object",
       properties: {
         id: { type: "string", description: "Template id or name (one of id/name required)" },
         name: { type: "string", description: "Template name (one of id/name required)" },
-        as: { type: "string", description: "Optional new name for the imported live actor" },
+        as: { type: "string", description: "Optional new name for the imported persistent agent" },
       },
       additionalProperties: false,
     },
@@ -696,7 +732,7 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "export",
     description:
-      "Export a live project actor's definition to the global registry as a project-independent template, without any history (no messages, session, or run logs). Throws on a name collision unless overwrite is true.",
+      "Export a live persistent-agent definition as a project-independent template, without any history (no messages, session, or run logs). Throws on a name collision unless overwrite is true.",
     inputSchema: {
       type: "object",
       properties: {
@@ -711,16 +747,16 @@ const descriptors: FabricActionDescriptor[] = [
   {
     name: "log",
     description:
-      "Read an actor or agent run's LLM/agent log: the actor's session transcript (session.jsonl) and/or a retained run's event stream (events.jsonl: tool calls, model responses, usage). Actors retain their last runs so logs survive after success.",
+      "Read an agent log: a persistent-agent session transcript (session.jsonl) and/or a retained lifecycle run event stream (events.jsonl: tool calls, model responses, usage). Persistent agents retain their last runs so logs survive after success.",
     inputSchema: {
       type: "object",
       properties: {
-        id: { type: "string", description: "Actor ID/name or agent run ID" },
+        id: { type: "string", description: "Persistent-agent ID/name or one-shot run ID" },
         type: {
           type: "string",
           enum: ["session", "run", "all"],
           description:
-            "session = actor session transcript (default for actors); run = last retained run's events; all = both",
+            "session = persistent-agent transcript (its default); run = last retained lifecycle run events; all = both",
         },
         lines: { type: "number", minimum: 1, description: "Page line limit (default 200)" },
         before: {
@@ -728,7 +764,7 @@ const descriptors: FabricActionDescriptor[] = [
           minimum: 0,
           description: "Exclusive line cursor returned by a previous page to load older entries",
         },
-        runId: { type: "string", description: "Specific retained run (default: actor's last run)" },
+        runId: { type: "string", description: "Specific retained run (default: persistent agent's last run)" },
       },
       required: ["id"],
       additionalProperties: false,
@@ -794,14 +830,24 @@ const runRequest = (
     : undefined;
   const tools = profile ? [...profile.tools] : stringArray(args.tools);
   const timeoutMs = longerTimeoutOverride(args.timeoutMs, manager);
-  const runner = args.runner === "pi" || args.runner === "claude" ? args.runner : manager.config.runner;
+  const role = normalizeFabricAgentRole(args.role);
+  const roleProfile = manager.roles.require(role, "one-shot");
+  const runner = args.runner === "pi" || args.runner === "claude"
+    ? args.runner
+    : roleProfile.runner ?? manager.config.runner;
   const inheritedModel =
     runner === "pi" && !manager.config.model && context.extensionContext.model
       ? `${context.extensionContext.model.provider}/${context.extensionContext.model.id}`
       : undefined;
   return {
     task: String(args.task),
+    role,
     runner,
+    ...(typeof args.goal === "string" ? { goal: args.goal } : {}),
+    ...(typeof args.completion === "string" ? { completion: args.completion } : {}),
+    ...(typeof args.turnBudget === "object" && args.turnBudget !== null && !Array.isArray(args.turnBudget)
+      ? { turnBudget: args.turnBudget as NonNullable<AgentRunRequest["turnBudget"]> }
+      : {}),
     ...(typeof args.name === "string" ? { name: args.name } : {}),
     ...(transport ? { transport } : {}),
     ...(typeof args.model === "string"
@@ -965,15 +1011,15 @@ const compactHandoffResult = (
   ...(result.error ? { error: result.error } : {}),
 });
 
-const actorRequest = (
+const persistentAgentRequest = (
   args: Record<string, unknown>,
   context: FabricInvocationContext,
   manager: AgentManager,
   inheritModel = true,
-): FabricActorRequest => {
+): FabricPersistentAgentRequest => {
   const events = Array.isArray(args.events)
     ? args.events.filter(
-        (event): event is FabricActorHostEvent => isFabricActorHostEvent(event),
+        (event): event is FabricPersistentAgentHostEvent => isFabricPersistentAgentHostEvent(event),
       )
     : undefined;
   const topics = stringArray(args.topics);
@@ -989,14 +1035,24 @@ const actorRequest = (
     typeof (args.validWhile as { source?: unknown }).source === "string"
     ? { version: 1 as const, source: (args.validWhile as { source: string }).source }
     : undefined;
-  const runner = args.runner === "pi" || args.runner === "claude" ? args.runner : manager.config.runner;
+  const role = normalizeFabricAgentRole(args.role, "advisor");
+  const roleProfile = manager.roles.require(role, "persistent");
+  const runner = args.runner === "pi" || args.runner === "claude"
+    ? args.runner
+    : roleProfile.runner ?? manager.config.runner;
   const inheritedModel =
     inheritModel && runner === "pi" && !manager.config.model && context.extensionContext.model
       ? `${context.extensionContext.model.provider}/${context.extensionContext.model.id}`
       : undefined;
   return {
     name: String(args.name),
+    role,
     instructions: String(args.instructions),
+    ...(typeof args.goal === "string" ? { goal: args.goal } : {}),
+    ...(typeof args.completion === "string" ? { completion: args.completion } : {}),
+    ...(typeof args.turnBudget === "object" && args.turnBudget !== null && !Array.isArray(args.turnBudget)
+      ? { turnBudget: args.turnBudget as NonNullable<FabricPersistentAgentRequest["turnBudget"]> }
+      : {}),
     runner,
     ...(events ? { events } : {}),
     ...(topics ? { topics } : {}),
@@ -1066,10 +1122,10 @@ const attachAgentToolPreview = (
     const preview = {
       kind: "fabric-agent-tools",
       id: status.id,
-      name: status.actorName ?? status.name,
+      name: status.persistentAgentName ?? status.name,
       status: status.status,
       runner: status.runner,
-      owner: status.actorId ? "actor" : "agent",
+      owner: status.persistentAgentId ? "persistentAgent" : "agent",
       ...("text" in status && status.text
         ? { text: tailCodePoints(status.text, AGENT_PREVIEW_TEXT_CODE_POINTS) }
         : {}),
@@ -1114,15 +1170,15 @@ const waitForResultWithProgress = <T>(
     );
   });
 
-const actorWorker = (
+const persistentAgentWorker = (
   manager: AgentManager,
-  actorId: string,
+  persistentAgentId: string,
   includeTerminal: boolean,
 ): ReturnType<AgentManager["list"]>[number] | undefined => {
-  const candidates = manager.list().filter((candidate) => candidate.actorId === actorId);
+  const candidates = manager.list().filter((candidate) => candidate.persistentAgentId === persistentAgentId);
   const active = candidates.find((candidate) => candidate.status === "running");
   if (active || !includeTerminal) return active;
-  // AgentManager.list() preserves run insertion order; the last actor run
+  // AgentManager.list() preserves run insertion order; the last persistentAgent run
   // is therefore the terminal snapshot for the ask that just settled.
   return candidates.at(-1);
 };
@@ -1159,7 +1215,7 @@ const waitWithProgress = async (
       lastPreviewRevision = revision;
       const currentTool =
         "currentTool" in status && status.currentTool ? ` · ${status.currentTool}` : "";
-      const displayName = status.actorName ?? status.name;
+      const displayName = status.persistentAgentName ?? status.name;
       context.update(`Agent ${displayName}: ${status.status}${currentTool}`);
       if ("usage" in status) {
         context.activity?.({
@@ -1181,7 +1237,7 @@ const waitWithProgress = async (
     try {
       const status = manager.status(id);
       attachAgentToolPreview(status, transcripts, context, nestedToolsEnabled);
-      const displayName = status.actorName ?? status.name;
+      const displayName = status.persistentAgentName ?? status.name;
       context.update(`Agent ${displayName}: ${status.status}`);
     } catch {
       // The run may have been cleaned up during cancellation.
@@ -1189,19 +1245,19 @@ const waitWithProgress = async (
   }
 };
 
-const waitWithActorProgress = async (
+const waitWithPersistentAgentProgress = async (
   manager: AgentManager,
   transcripts: AgentTranscriptReader,
-  actorId: string,
-  actorName: string,
-  result: Promise<FabricActorMessage>,
+  persistentAgentId: string,
+  persistentAgentName: string,
+  result: Promise<FabricPersistentAgentMessage>,
   context: FabricInvocationContext,
   nestedToolsEnabled: () => boolean,
-): Promise<FabricActorMessage> => {
+): Promise<FabricPersistentAgentMessage> => {
   let lastPreviewRevision: string | undefined;
   try {
     return await waitForResultWithProgress(result, () => {
-      const worker = actorWorker(manager, actorId, false);
+      const worker = persistentAgentWorker(manager, persistentAgentId, false);
       const revision = worker
         ? attachAgentToolPreview(
             worker,
@@ -1217,12 +1273,12 @@ const waitWithActorProgress = async (
         worker && "currentTool" in worker && worker.currentTool ? ` · ${worker.currentTool}` : "";
       context.update(
         worker
-          ? `Actor ${actorName}: ${worker.status}${currentTool}`
-          : `Actor ${actorName}: queued`,
+          ? `Persistent agent ${persistentAgentName}: ${worker.status}${currentTool}`
+          : `Persistent agent ${persistentAgentName}: queued`,
       );
     });
   } finally {
-    const worker = actorWorker(manager, actorId, true);
+    const worker = persistentAgentWorker(manager, persistentAgentId, true);
     if (worker) attachAgentToolPreview(worker, transcripts, context, nestedToolsEnabled);
   }
 };
@@ -1231,12 +1287,10 @@ export class AgentsProvider implements FabricProvider {
   readonly #transcripts = new AgentTranscriptReader();
   readonly name = "agents";
   readonly description =
-    "The user-facing Main target, one-shot Pi or Claude Code agents, and persistent mailbox actors over process, tmux, screen, LocalTerm, or Herdr";
+    "The user-facing Main target plus one-shot and persistent Pi or Claude Code agents over process, tmux, screen, LocalTerm, or Herdr";
 
   constructor(
     readonly manager: AgentManager,
-    readonly actorManager: ActorManager,
-    readonly globalActors: GlobalActorRegistry,
     readonly mainAgent: FabricMainAgentTarget,
     readonly participants: FabricParticipantSource,
     readonly control: FabricControlPlane | undefined,
@@ -1389,10 +1443,7 @@ export class AgentsProvider implements FabricProvider {
       case "status": {
         const id = String(args.id);
         if (this.mainAgent.matches(id)) {
-          if (this.mainAgent.local) return this.mainAgent.info(context.extensionContext);
-          const root = this.participants.get(this.mainAgent.id);
-          if (!root) throw new Error(`Unknown Fabric Main participant: ${this.mainAgent.id}`);
-          return root;
+          return this.mainAgent.info(context.extensionContext);
         }
         try {
           return this.manager.status(id);
@@ -1400,33 +1451,38 @@ export class AgentsProvider implements FabricProvider {
           if (!(error instanceof Error && /Unknown Fabric agent/.test(error.message))) throw error;
         }
         const known = this.participants.get(id);
-        if (known && !known.local) return known;
+        if (known && !known.local) return toPublicAgentParticipant(known);
         try {
-          return this.actorManager.status(id);
+          return this.manager.persistent.status(id);
         } catch (error) {
-          if (!(error instanceof Error && /Unknown Fabric actor/.test(error.message))) throw error;
+          if (!(error instanceof Error && /Unknown Fabric persistent Agent/.test(error.message))) throw error;
         }
         const participant = this.participants.get(id);
         if (!participant) throw new Error(`Unknown Fabric participant: ${id}`);
-        return participant;
+        return toPublicAgentParticipant(participant);
       }
       case "list":
-        return this.#listAgents(args.scope);
+        return this.#listAgents(args.scope, args.lifecycle);
       case "members": {
         const kinds = Array.isArray(args.kinds)
           ? args.kinds.filter(
-              (kind): kind is "root" | "agent" | "actor" =>
-                kind === "root" || kind === "agent" || kind === "actor",
+              (kind): kind is "root" | "agent" => kind === "root" || kind === "agent",
             )
+          : undefined;
+        const internalKinds = kinds
+          ? [
+              ...(kinds.includes("root") ? (["root"] as const) : []),
+              ...(kinds.includes("agent") ? (["agent", "persistentAgent"] as const) : []),
+            ]
           : undefined;
         return this.participants.list({
           scope: this.#participantScope(args.scope, "project"),
-          ...(kinds ? { kinds } : {}),
+          ...(internalKinds ? { kinds: internalKinds } : {}),
           ...(args.includeStale === true ? { includeStale: true } : {}),
-        });
+        }).map(toPublicAgentParticipant);
       }
       case "self":
-        return this.participants.self();
+        return toPublicAgentParticipant(this.participants.self());
       case "main":
         return this.mainAgent.info(context.extensionContext);
       case "peers":
@@ -1466,6 +1522,18 @@ export class AgentsProvider implements FabricProvider {
         });
       case "unsubscribe":
         return this.lifecycle.unsubscribe(String(args.id));
+      case "roles": {
+        const lifecycle = args.lifecycle === "one-shot" || args.lifecycle === "persistent"
+          ? args.lifecycle
+          : undefined;
+        return {
+          roles: this.manager.roles
+            .list()
+            .filter((profile) => !lifecycle || profile.lifecycle === lifecycle)
+            .map(({ behavior: _behavior, ...profile }) => profile),
+          diagnostics: [...this.manager.roles.diagnostics],
+        };
+      }
       case "models": {
         const runner =
           args.runner === "pi" || args.runner === "claude"
@@ -1500,24 +1568,27 @@ export class AgentsProvider implements FabricProvider {
       case "cleanup":
         return this.manager.cleanup(String(args.id), args.deleteBranch === true);
       case "create": {
+        const request = this.manager.preparePersistentRequest(
+          persistentAgentRequest(args, context, this.manager, args.scope !== "global"),
+        );
         if (args.scope === "global") {
-          return this.globalActors.create(actorRequest(args, context, this.manager, false));
+          return this.manager.templates.create(request);
         }
-        const actor = await this.actorManager.create(actorRequest(args, context, this.manager));
+        const persistentAgent = await this.manager.persistent.create(request);
         this.participants.scheduleRefresh();
-        context.activity?.({ type: "entity", id: actor.id, kind: "actor", name: actor.name });
-        return actor;
+        context.activity?.({ type: "entity", id: persistentAgent.id, kind: "persistentAgent", name: persistentAgent.name });
+        return persistentAgent;
       }
       case "ask": {
-        const actor = this.actorManager.status(String(args.id));
-        context.activity?.({ type: "entity", id: actor.id, kind: "actor", name: actor.name });
-        return waitWithActorProgress(
+        const persistentAgent = this.manager.persistent.status(String(args.id));
+        context.activity?.({ type: "entity", id: persistentAgent.id, kind: "persistentAgent", name: persistentAgent.name });
+        return waitWithPersistentAgentProgress(
           this.manager,
           this.#transcripts,
-          actor.id,
-          actor.name,
-          this.actorManager.ask(
-            actor.id,
+          persistentAgent.id,
+          persistentAgent.name,
+          this.manager.persistent.ask(
+            persistentAgent.id,
             String(args.message),
             args.data,
             context.signal,
@@ -1531,9 +1602,9 @@ export class AgentsProvider implements FabricProvider {
         );
       }
       case "tell": {
-        const actor = this.actorManager.status(String(args.id));
-        context.activity?.({ type: "entity", id: actor.id, kind: "actor", name: actor.name });
-        return this.actorManager.tell(actor.id, String(args.message), args.data, {
+        const persistentAgent = this.manager.persistent.status(String(args.id));
+        context.activity?.({ type: "entity", id: persistentAgent.id, kind: "persistentAgent", name: persistentAgent.name });
+        return this.manager.persistent.tell(persistentAgent.id, String(args.message), args.data, {
           ...(context.run ? { runContext: context.run } : {}),
           ...(typeof args.maxTokens === "number" ? { maxTokens: args.maxTokens } : {}),
         });
@@ -1570,76 +1641,72 @@ export class AgentsProvider implements FabricProvider {
         });
         return result;
       }
-      case "actorStatus":
-        return this.#localActor(String(args.id));
-      case "actorTelemetry":
-        return this.actorManager.telemetry();
-      case "actors":
-        return args.scope === "global"
-          ? this.globalActors.list()
-          : this.actorManager
-              .list()
-              .filter((actor) => this.#actorIsLocal(actor.id));
+      case "telemetry": {
+        const { persistentAgents, ...metrics } = this.manager.persistent.telemetry();
+        return { persistent: persistentAgents, ...metrics };
+      }
+      case "templates":
+        return this.manager.templates.list();
       case "messages": {
-        const actor = this.#localActor(String(args.id));
-        return this.actorManager.messages(
-          actor.id,
+        const persistentAgent = this.#localPersistentAgent(String(args.id));
+        return this.manager.persistent.messages(
+          persistentAgent.id,
           typeof args.limit === "number" ? args.limit : 50,
         );
       }
       case "retryDelivery": {
-        const actor = this.#localActor(String(args.id));
-        return this.actorManager.retryDelivery(actor.id, String(args.messageId));
+        const persistentAgent = this.#localPersistentAgent(String(args.id));
+        return this.manager.persistent.retryDelivery(persistentAgent.id, String(args.messageId));
       }
       case "setModel":
-        return this.actorManager.setModel(
+        return this.manager.persistent.setModel(
           String(args.id),
           typeof args.model === "string" ? args.model : undefined,
         );
       case "setThinking":
-        return this.actorManager.setThinking(
+        return this.manager.persistent.setThinking(
           String(args.id),
           typeof args.thinking === "string" ? args.thinking : undefined,
         );
       case "setTools": {
         const tools = stringArray(args.tools) ?? [];
         if (args.scope === "global") {
-          return this.globalActors.update(String(args.id), { tools });
+          return this.manager.setTemplateTools(String(args.id), tools);
         }
-        return this.actorManager.setTools(String(args.id), tools);
+        return this.manager.setPersistentTools(String(args.id), tools);
       }
       case "setEvents": {
         const events = Array.isArray(args.events)
           ? args.events.filter(
-              (event): event is FabricActorHostEvent => isFabricActorHostEvent(event),
+              (event): event is FabricPersistentAgentHostEvent => isFabricPersistentAgentHostEvent(event),
             )
           : [];
-        return this.actorManager.setEvents(String(args.id), events);
+        return this.manager.persistent.setEvents(String(args.id), events);
       }
       case "setDeliveryPolicy": {
-        const delivery = args.delivery as FabricActorDelivery;
+        const delivery = args.delivery as FabricPersistentAgentDelivery;
         if (typeof args.triggerTurn !== "boolean") {
           throw new Error("setDeliveryPolicy requires explicit triggerTurn: true or false");
         }
         const triggerTurn = args.triggerTurn;
         if (args.scope === "global") {
-          return this.globalActors.update(String(args.id), { delivery, triggerTurn });
+          return this.manager.templates.update(String(args.id), { delivery, triggerTurn });
         }
-        return this.actorManager.setDeliveryPolicy(String(args.id), delivery, triggerTurn);
+        return this.manager.persistent.setDeliveryPolicy(String(args.id), delivery, triggerTurn);
       }
       case "clearMessages":
-        return this.actorManager.clearMessages(String(args.id));
+        return this.manager.persistent.clearMessages(String(args.id));
       case "remove":
         return args.scope === "global"
-          ? this.globalActors.remove(String(args.id))
-          : this.actorManager.remove(String(args.id));
+          ? this.manager.templates.remove(String(args.id))
+          : this.manager.persistent.remove(String(args.id));
       case "setInstructions": {
         const id = String(args.id);
         const instructions = String(args.instructions);
         if (args.scope === "global") {
-          return this.globalActors.update(id, { instructions });
+          return this.manager.templates.update(id, { instructions });
         }
-        return this.actorManager.setInstructions(id, instructions);
+        return this.manager.persistent.setInstructions(id, instructions);
       }
       case "import": {
         const key =
@@ -1649,19 +1716,17 @@ export class AgentsProvider implements FabricProvider {
               ? args.name.trim()
               : "";
         if (!key) throw new Error("Import requires a template id or name");
-        const def = this.globalActors.resolve(key);
-        if (!def) throw new Error(`Unknown global actor: ${key}`);
         const as =
           typeof args.as === "string" && args.as.trim() ? args.as.trim() : undefined;
-        const actor = await this.actorManager.create(this.globalActors.toRequest(def, as));
-        context.activity?.({ type: "entity", id: actor.id, kind: "actor", name: actor.name });
-        return actor;
+        const persistentAgent = await this.manager.importTemplate(key, as);
+        context.activity?.({ type: "entity", id: persistentAgent.id, kind: "persistentAgent", name: persistentAgent.name });
+        return persistentAgent;
       }
       case "export": {
-        const actor = this.#localActor(String(args.id));
+        const persistentAgent = this.#localPersistentAgent(String(args.id));
         const overwrite = args.overwrite === true;
-        const def = this.actorManager.definition(actor.id);
-        return this.globalActors.create(def, overwrite);
+        const def = this.manager.persistent.definition(persistentAgent.id);
+        return this.manager.templates.create(def, overwrite);
       }
       case "log": {
         const id = String(args.id);
@@ -1670,16 +1735,16 @@ export class AgentsProvider implements FabricProvider {
         const runId = typeof args.runId === "string" ? args.runId : undefined;
         const before = typeof args.before === "number" ? args.before : undefined;
         try {
-          const actor = this.#localActor(id);
-          return this.actorManager.readLog(actor.id, {
+          const persistentAgent = this.#localPersistentAgent(id);
+          return this.manager.persistent.readLog(persistentAgent.id, {
             type,
             lines,
             ...(runId ? { runId } : {}),
             ...(before !== undefined ? { before } : {}),
           });
         } catch (error) {
-          if (!(error instanceof Error && /Unknown Fabric actor/.test(error.message))) throw error;
-          /* not an actor — fall through to agent */
+          if (!(error instanceof Error && /Unknown Fabric persistent Agent/.test(error.message))) throw error;
+          /* not an persistentAgent — fall through to agent */
         }
         return this.manager.readLog(id, { lines, ...(before !== undefined ? { before } : {}) });
       }
@@ -1705,7 +1770,7 @@ export class AgentsProvider implements FabricProvider {
           name: "Main",
         });
         return this.mainAgent.deliverAgent({
-          from: options.from ?? this.actorManager.identity,
+          from: options.from ?? this.manager.persistent.identity,
           message,
           delivery: kind,
           ...(typeof options.triggerTurn === "boolean"
@@ -1720,7 +1785,7 @@ export class AgentsProvider implements FabricProvider {
         throw new Error(`Fabric participant ${participant.id} does not support ${kind}`);
       }
       if (!this.control || participant.controlProtocol === "legacy") {
-        return this.actorManager.steerRemote(this.mainAgent.id, message, kind, data);
+        return this.manager.persistent.steerRemote(this.mainAgent.id, message, kind, data);
       }
       return this.control.request(
         participant.ownerHostId,
@@ -1745,17 +1810,17 @@ export class AgentsProvider implements FabricProvider {
       if (!(error instanceof Error && /Unknown Fabric agent/.test(error.message))) throw error;
     }
 
-    // Persistent actors consume both delivery modes through their serial mailbox.
+    // Persistent persistentAgents consume both delivery modes through their serial mailbox.
     try {
-      const actor = this.actorManager.status(id);
-      const ownership = this.participants.get(actor.id);
+      const persistentAgent = this.manager.persistent.status(id);
+      const ownership = this.participants.get(persistentAgent.id);
       if (!ownership || ownership.local) {
-        context?.activity?.({ type: "entity", id: actor.id, kind: "actor", name: actor.name });
-        const result = this.actorManager.tell(actor.id, message, data);
+        context?.activity?.({ type: "entity", id: persistentAgent.id, kind: "persistentAgent", name: persistentAgent.name });
+        const result = this.manager.persistent.tell(persistentAgent.id, message, data);
         return { queued: true, messageId: result.messageId, routed: "local" };
       }
     } catch (error) {
-      if (!(error instanceof Error && /Unknown Fabric actor/.test(error.message))) throw error;
+      if (!(error instanceof Error && /Unknown Fabric persistent Agent/.test(error.message))) throw error;
     }
 
     const participant = this.participants.get(id);
@@ -1764,7 +1829,7 @@ export class AgentsProvider implements FabricProvider {
       throw new Error(`Fabric participant ${id} does not support ${kind}`);
     }
     if (!this.control || participant.controlProtocol === "legacy") {
-      return this.actorManager.steerRemote(id, message, kind, data);
+      return this.manager.persistent.steerRemote(id, message, kind, data);
     }
     return this.control.request(
       participant.ownerHostId,
@@ -1811,16 +1876,16 @@ export class AgentsProvider implements FabricProvider {
         }
       }
       try {
-        const actor = this.actorManager.status(command.targetId);
-        const ownership = this.participants.get(actor.id);
+        const persistentAgent = this.manager.persistent.status(command.targetId);
+        const ownership = this.participants.get(persistentAgent.id);
         if (ownership && !ownership.local) {
-          return { accepted: false, error: `Participant ${actor.id} is owned by ${ownership.ownerHostId}` };
+          return { accepted: false, error: `Participant ${persistentAgent.id} is owned by ${ownership.ownerHostId}` };
         }
-        await this.actorManager.stop(actor.id);
+        await this.manager.persistent.stop(persistentAgent.id);
         this.participants.scheduleRefresh();
         return { accepted: true, messageId: command.commandId };
       } catch (error) {
-        if (!(error instanceof Error && /Unknown Fabric actor/.test(error.message))) {
+        if (!(error instanceof Error && /Unknown Fabric persistent Agent/.test(error.message))) {
           return { accepted: false, error: error instanceof Error ? error.message : String(error) };
         }
       }
@@ -1851,49 +1916,75 @@ export class AgentsProvider implements FabricProvider {
       }
     }
     try {
-      const actor = this.actorManager.status(command.targetId);
-      const ownership = this.participants.get(actor.id);
+      const persistentAgent = this.manager.persistent.status(command.targetId);
+      const ownership = this.participants.get(persistentAgent.id);
       if (ownership && !ownership.local) {
-        return { accepted: false, error: `Participant ${actor.id} is owned by ${ownership.ownerHostId}` };
+        return { accepted: false, error: `Participant ${persistentAgent.id} is owned by ${ownership.ownerHostId}` };
       }
-      const result = this.actorManager.tell(actor.id, message, command.data);
+      const result = this.manager.persistent.tell(persistentAgent.id, message, command.data);
       return { accepted: true, messageId: result.messageId };
     } catch (error) {
-      if (!(error instanceof Error && /Unknown Fabric actor/.test(error.message))) {
+      if (!(error instanceof Error && /Unknown Fabric persistent Agent/.test(error.message))) {
         return { accepted: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
     return { accepted: false, error: `Owner does not control Fabric participant ${command.targetId}` };
   }
 
-  #actorIsLocal(id: string): boolean {
+  #persistentAgentIsLocal(id: string): boolean {
     const participant = this.participants.get(id);
-    return this.actorManager.owns(id) && participant?.local !== false;
+    return this.manager.persistent.owns(id) && participant?.local !== false;
   }
 
-  #localActor(id: string): FabricActorInfo {
-    const actor = this.actorManager.status(id);
-    const participant = this.participants.get(actor.id);
-    if (!this.actorManager.owns(actor.id) || participant?.local === false) {
-      throw new Error(`Fabric actor private data is available only from its owner: ${actor.id}`);
+  #localPersistentAgent(id: string): FabricPersistentAgentInfo {
+    const persistentAgent = this.manager.persistent.status(id);
+    const participant = this.participants.get(persistentAgent.id);
+    if (!this.manager.persistent.owns(persistentAgent.id) || participant?.local === false) {
+      throw new Error(`Fabric persistent Agent private data is available only from its owner: ${persistentAgent.id}`);
     }
-    return actor;
+    return persistentAgent;
   }
 
-  #listAgents(scopeValue: unknown): Array<AgentRunRecord | AgentHandleInfo | ReturnType<FabricParticipantSource["self"]>> {
+  #listAgents(scopeValue: unknown, lifecycleValue: unknown): AgentListEntry[] {
     const scope = this.#participantScope(scopeValue, "local");
-    if (scope === "local") return this.manager.list();
-    const local = new Map<string, AgentRunRecord | AgentHandleInfo>();
+    const lifecycle: AgentLifecycle =
+      lifecycleValue === "persistent" || lifecycleValue === "all"
+        ? lifecycleValue
+        : "one-shot";
+    const oneShot = new Map<string, AgentRunRecord | AgentHandleInfo>();
     const append = (record: AgentRunRecord | AgentHandleInfo): void => {
-      local.set(record.id, record);
+      oneShot.set(record.id, record);
       if ("nestedAgents" in record) {
         for (const nested of record.nestedAgents ?? []) append(nested);
       }
     };
     for (const record of this.manager.list()) append(record);
-    return this.participants
-      .list({ scope, kinds: ["agent"] })
-      .map((participant) => local.get(participant.id) ?? participant);
+    const persistent = this.manager.persistent
+      .list()
+      .filter((agent) => this.#persistentAgentIsLocal(agent.id));
+    if (scope === "local") {
+      if (lifecycle === "persistent") return persistent;
+      if (lifecycle === "all") return [...oneShot.values(), ...persistent];
+      return [...oneShot.values()];
+    }
+    const local = new Map<string, AgentListEntry>([
+      ...oneShot,
+      ...persistent.map((agent) => [agent.id, agent] as const),
+    ]);
+    const projected = this.participants
+      .list({ scope, kinds: ["agent", "persistentAgent"] })
+      .filter((participant) =>
+        lifecycle === "all" ||
+        (lifecycle === "persistent" ? participant.kind === "persistentAgent" : participant.kind === "agent")
+      )
+      .map((participant) => local.get(participant.id) ?? toPublicAgentParticipant(participant));
+    const selectedLocal = lifecycle === "persistent"
+      ? persistent
+      : lifecycle === "all"
+        ? [...oneShot.values(), ...persistent]
+        : [...oneShot.values()];
+    const projectedIds = new Set(projected.map((entry) => entry.id));
+    return [...projected, ...selectedLocal.filter((entry) => !projectedIds.has(entry.id))];
   }
 
   #participantAlias(value: string): string {
@@ -1917,15 +2008,15 @@ export class AgentsProvider implements FabricProvider {
       if (!(error instanceof Error && /Unknown Fabric agent/.test(error.message))) throw error;
     }
     try {
-      const actor = this.actorManager.status(id);
-      const ownership = this.participants.get(actor.id);
+      const persistentAgent = this.manager.persistent.status(id);
+      const ownership = this.participants.get(persistentAgent.id);
       if (!ownership || ownership.local) {
-        const result = await this.actorManager.stop(actor.id);
+        const result = await this.manager.persistent.stop(persistentAgent.id);
         this.participants.scheduleRefresh();
         return result;
       }
     } catch (error) {
-      if (!(error instanceof Error && /Unknown Fabric actor/.test(error.message))) throw error;
+      if (!(error instanceof Error && /Unknown Fabric persistent Agent/.test(error.message))) throw error;
     }
     const participant = this.participants.get(id);
     if (!participant) throw new Error(`Unknown Fabric participant: ${id}`);
@@ -1952,10 +2043,6 @@ export class AgentsProvider implements FabricProvider {
   async close(): Promise<void> {
     this.#transcripts.clear();
     await this.lifecycle.close();
-    try {
-      await this.actorManager.close();
-    } finally {
-      await this.manager.close();
-    }
+    await this.manager.close();
   }
 }

@@ -35,8 +35,8 @@ export const parseWorkerOptions = (
   const imagesFile = optional(args, "images-file");
   const systemPrompt = optional(args, "system-prompt");
   const sessionFile = optional(args, "session-file");
-  const actorId = optional(args, "actor-id");
-  const actorName = optional(args, "actor-name");
+  const persistentAgentId = optional(args, "persistentAgent-id");
+  const persistentAgentName = optional(args, "persistentAgent-name");
   const meshRoot = optional(args, "mesh-root");
   const projectRoot = optional(args, "project-root");
   const ownerHostId = optional(args, "owner-host-id");
@@ -51,12 +51,27 @@ export const parseWorkerOptions = (
   const traceId = optional(args, "trace-id");
   const parentRunId = optional(args, "parent-run-id");
   const parentSpanId = optional(args, "parent-span-id");
+  const role = required(args, "role");
+  const rawTurnBudget = optional(args, "turn-budget");
+  const parsedTurnBudget: unknown = rawTurnBudget ? JSON.parse(rawTurnBudget) : undefined;
+  if (parsedTurnBudget !== undefined && (
+    typeof parsedTurnBudget !== "object" || parsedTurnBudget === null || Array.isArray(parsedTurnBudget) ||
+    !Number.isSafeInteger((parsedTurnBudget as { maxTurns?: unknown }).maxTurns) ||
+    Number((parsedTurnBudget as { maxTurns: number }).maxTurns) < 1 ||
+    !Number.isSafeInteger((parsedTurnBudget as { graceTurns?: unknown }).graceTurns) ||
+    Number((parsedTurnBudget as { graceTurns: number }).graceTurns) < 0
+  )) {
+    throw new Error("Worker turnBudget must contain positive maxTurns and non-negative graceTurns");
+  }
+  const turnBudget = parsedTurnBudget as AgentWorkerOptions["turnBudget"];
   const runner = required(args, "runner");
   if (runner !== "pi" && runner !== "claude") {
     throw new Error(`Unsupported Fabric agent runner: ${runner}`);
   }
   return {
     id: required(args, "id"),
+    role,
+    ...(turnBudget ? { turnBudget } : {}),
     runner,
     name: required(args, "name"),
     taskFile: required(args, "task-file"),
@@ -86,8 +101,8 @@ export const parseWorkerOptions = (
     ...(thinking ? { thinking } : {}),
     ...(systemPrompt ? { systemPrompt } : {}),
     ...(sessionFile ? { sessionFile } : {}),
-    ...(actorId ? { actorId } : {}),
-    ...(actorName ? { actorName } : {}),
+    ...(persistentAgentId ? { persistentAgentId } : {}),
+    ...(persistentAgentName ? { persistentAgentName } : {}),
     ...(meshRoot ? { meshRoot } : {}),
     ...(projectRoot ? { projectRoot } : {}),
     ...(ownerHostId ? { ownerHostId } : {}),

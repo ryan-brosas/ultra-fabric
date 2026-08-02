@@ -140,7 +140,6 @@ const idOnlyAgentActions = new Set([
   "agents.setSteeringMode",
   "agents.setFollowUpMode",
   "agents.compact",
-  "agents.actorStatus",
   "agents.setModel",
   "agents.setThinking",
   "agents.setTools",

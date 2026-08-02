@@ -1,23 +1,24 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { FabricAgentTransport } from "../config.js";
-import { isFabricThinking, type FabricThinking } from "../thinking.js";
-import { resolveActorDeliveryPolicy } from "./delivery-policy.js";
-import { normalizeActorBudgetPolicy } from "./budget.js";
-import { FABRIC_ACTOR_HOST_EVENTS } from "./types.js";
+import type { FabricAgentTransport } from "../../config.js";
+import { normalizeFabricAgentRole } from "../role.js";
+import { isFabricThinking, type FabricThinking } from "../../thinking.js";
+import { resolvePersistentAgentDeliveryPolicy } from "./delivery-policy.js";
+import { normalizePersistentAgentBudgetPolicy } from "./budget.js";
+import { FABRIC_PERSISTENT_AGENT_HOST_EVENTS } from "./types.js";
 import type {
-  FabricActorDelivery,
-  FabricActorHostEvent,
-  FabricActorRequest,
-  FabricActorResponseMode,
-  GlobalActorDefinition,
+  FabricPersistentAgentDelivery,
+  FabricPersistentAgentHostEvent,
+  FabricPersistentAgentRequest,
+  FabricPersistentAgentResponseMode,
+  AgentTemplateDefinition,
 } from "./types.js";
 
-const ACTOR_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9 _.-]{0,59}$/;
+const PERSISTENT_AGENT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9 _.-]{0,59}$/;
 const TOPIC_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/;
-const HOST_EVENTS: ReadonlySet<FabricActorHostEvent> = new Set(FABRIC_ACTOR_HOST_EVENTS);
-const RESPONSE_MODES = new Set<FabricActorResponseMode>(["text", "directive"]);
+const HOST_EVENTS: ReadonlySet<FabricPersistentAgentHostEvent> = new Set(FABRIC_PERSISTENT_AGENT_HOST_EVENTS);
+const RESPONSE_MODES = new Set<FabricPersistentAgentResponseMode>(["text", "directive"]);
 const TRANSPORTS = new Set<FabricAgentTransport>([
   "auto",
   "process",
@@ -29,7 +30,7 @@ const TRANSPORTS = new Set<FabricAgentTransport>([
 
 interface RegistryFile {
   format: 1;
-  actors: GlobalActorDefinition[];
+  persistentAgents: AgentTemplateDefinition[];
 }
 
 const atomicWrite = (filePath: string, value: unknown): void => {
@@ -49,52 +50,50 @@ const clone = <T>(value: T): T => structuredClone(value);
  * Returns undefined when nothing matches, and throws on an ambiguous prefix.
  */
 const resolveDefinition = (
-  actors: Map<string, GlobalActorDefinition>,
+  persistentAgents: Map<string, AgentTemplateDefinition>,
   idOrName: string,
-): GlobalActorDefinition | undefined => {
-  const exact = actors.get(idOrName);
+): AgentTemplateDefinition | undefined => {
+  const exact = persistentAgents.get(idOrName);
   if (exact) return exact;
-  const matches = [...actors.values()].filter(
-    (actor) => actor.id.startsWith(idOrName) || actor.name === idOrName,
+  const matches = [...persistentAgents.values()].filter(
+    (persistentAgent) => persistentAgent.id.startsWith(idOrName) || persistentAgent.name === idOrName,
   );
   if (matches.length === 1 && matches[0]) return matches[0];
-  if (matches.length > 1) throw new Error(`Ambiguous global actor: ${idOrName}`);
+  if (matches.length > 1) throw new Error(`Ambiguous Agent template: ${idOrName}`);
   return undefined;
 };
 
 /**
- * A project-independent library of actor templates. Templates carry only an
- * actor definition (name, instructions, subscriptions, and run settings) plus
- * identity/timestamps — never any history. They are not live actors: importing
- * a template into a project creates a fresh live actor with no inherited
- * session, mailbox, or run logs.
+ * A project-independent library of Agent templates. Templates carry only a
+ * definition, identity, and timestamps, never mailbox or run history. Importing
+ * creates a fresh persistent Agent with no inherited session or logs.
  *
  * The registry lives in the user's agent dir (machine-global), independent of
  * any project or mesh, so the same templates are available across every
  * project. Operations are pure file I/O and do not require the mesh to be
- * enabled; only importing (which creates a live actor via ActorManager) does.
+ * enabled; only importing, which creates a persistent Agent, depends on the runtime.
  * The registry is read into memory once at construction; run `/fabric reload`
  * to pick up templates added by other Pi sessions. Writes are atomic (write
  * to a temp file then rename) so concurrent sessions cannot corrupt the
  * store, though truly simultaneous edits are last-write-wins.
  */
-export class GlobalActorRegistry {
-  readonly #actors = new Map<string, GlobalActorDefinition>();
+export class AgentTemplateRegistry {
+  readonly #persistentAgents = new Map<string, AgentTemplateDefinition>();
   readonly #path: string;
   readonly #maxBytes: number;
 
   constructor(agentDir: string, maxInstructionsBytes: number) {
-    this.#path = path.join(agentDir, "fabric", "actors", "global-actors.json");
+    this.#path = path.join(agentDir, "fabric", "persistentAgents", "global-persistentAgents.json");
     this.#maxBytes = maxInstructionsBytes;
     this.#load();
   }
 
-  list(): GlobalActorDefinition[] {
-    return [...this.#actors.values()].map(clone);
+  list(): AgentTemplateDefinition[] {
+    return [...this.#persistentAgents.values()].map(clone);
   }
 
-  resolve(idOrName: string): GlobalActorDefinition | undefined {
-    const found = resolveDefinition(this.#actors, idOrName);
+  resolve(idOrName: string): AgentTemplateDefinition | undefined {
+    const found = resolveDefinition(this.#persistentAgents, idOrName);
     return found ? clone(found) : undefined;
   }
 
@@ -104,31 +103,31 @@ export class GlobalActorRegistry {
    * existing template is updated in place, keeping its id). Returns the stored
    * definition.
    */
-  create(def: FabricActorRequest, overwrite = false): GlobalActorDefinition {
+  create(def: FabricPersistentAgentRequest, overwrite = false): AgentTemplateDefinition {
     const validated = this.#validate(def);
-    const existing = [...this.#actors.values()].find((actor) => actor.name === validated.name);
+    const existing = [...this.#persistentAgents.values()].find((persistentAgent) => persistentAgent.name === validated.name);
     if (existing) {
       if (!overwrite) {
-        throw new Error(`A global actor named ${validated.name} already exists (${existing.id})`);
+        throw new Error(`An Agent template named ${validated.name} already exists (${existing.id})`);
       }
-      const updated: GlobalActorDefinition = {
+      const updated: AgentTemplateDefinition = {
         ...existing,
         ...validated,
         id: existing.id,
         createdAt: existing.createdAt,
         updatedAt: Date.now(),
       };
-      this.#actors.set(existing.id, updated);
+      this.#persistentAgents.set(existing.id, updated);
       this.#save();
       return clone(updated);
     }
-    const created: GlobalActorDefinition = {
+    const created: AgentTemplateDefinition = {
       ...validated,
       id: randomUUID().replaceAll("-", ""),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    this.#actors.set(created.id, created);
+    this.#persistentAgents.set(created.id, created);
     this.#save();
     return clone(created);
   }
@@ -138,11 +137,12 @@ export class GlobalActorRegistry {
    * the supplied fields are replaced; the rest are preserved. Re-validates any
    * changed field.
    */
-  update(idOrName: string, patch: Partial<FabricActorRequest>): GlobalActorDefinition {
-    const existing = resolveDefinition(this.#actors, idOrName);
-    if (!existing) throw new Error(`Unknown global actor: ${idOrName}`);
-    const merged: FabricActorRequest = {
+  update(idOrName: string, patch: Partial<FabricPersistentAgentRequest>): AgentTemplateDefinition {
+    const existing = resolveDefinition(this.#persistentAgents, idOrName);
+    if (!existing) throw new Error(`Unknown Agent template: ${idOrName}`);
+    const merged: FabricPersistentAgentRequest = {
       name: patch.name ?? existing.name,
+      role: patch.role ?? existing.role,
       instructions: patch.instructions ?? existing.instructions,
       events: patch.events ?? existing.events,
       topics: patch.topics ?? existing.topics,
@@ -174,42 +174,43 @@ export class GlobalActorRegistry {
     };
     const validated = this.#validate(merged);
     if (validated.name !== existing.name) {
-      const clash = [...this.#actors.values()].find(
-        (actor) => actor.id !== existing.id && actor.name === validated.name,
+      const clash = [...this.#persistentAgents.values()].find(
+        (persistentAgent) => persistentAgent.id !== existing.id && persistentAgent.name === validated.name,
       );
       if (clash) {
-        throw new Error(`A global actor named ${validated.name} already exists (${clash.id})`);
+        throw new Error(`An Agent template named ${validated.name} already exists (${clash.id})`);
       }
     }
-    const updated: GlobalActorDefinition = {
+    const updated: AgentTemplateDefinition = {
       ...validated,
       id: existing.id,
       createdAt: existing.createdAt,
       updatedAt: Date.now(),
     };
-    this.#actors.set(existing.id, updated);
+    this.#persistentAgents.set(existing.id, updated);
     this.#save();
     return clone(updated);
   }
 
   remove(idOrName: string): { removed: boolean } {
-    const existing = resolveDefinition(this.#actors, idOrName);
+    const existing = resolveDefinition(this.#persistentAgents, idOrName);
     if (!existing) return { removed: false };
-    this.#actors.delete(existing.id);
+    this.#persistentAgents.delete(existing.id);
     this.#save();
     return { removed: true };
   }
 
   /**
    * Strip identity/timestamps from a stored template to produce the request
-   * shape ActorManager.create expects. Optionally rename the imported actor so
+   * shape PersistentAgentRuntime.create expects. Optionally rename the imported persistentAgent so
    * a template can be stamped into a project under a different name (e.g. to
-   * avoid a collision with a live actor).
+   * avoid a collision with a live persistentAgent).
    */
-  toRequest(def: GlobalActorDefinition, as?: string): FabricActorRequest {
+  toRequest(def: AgentTemplateDefinition, as?: string): FabricPersistentAgentRequest {
     const name = as?.trim() || def.name;
-    const request: FabricActorRequest = {
+    const request: FabricPersistentAgentRequest = {
       name,
+      role: def.role,
       instructions: def.instructions,
       events: [...def.events],
       topics: [...def.topics],
@@ -230,31 +231,32 @@ export class GlobalActorRegistry {
     return request;
   }
 
-  #validate(def: FabricActorRequest): Omit<GlobalActorDefinition, "id" | "createdAt" | "updatedAt"> {
+  #validate(def: FabricPersistentAgentRequest): Omit<AgentTemplateDefinition, "id" | "createdAt" | "updatedAt"> {
     const name = def.name.trim();
-    if (!ACTOR_NAME_PATTERN.test(name)) throw new Error(`Invalid global actor name: ${def.name}`);
+    if (!PERSISTENT_AGENT_NAME_PATTERN.test(name)) throw new Error(`Invalid Agent template name: ${def.name}`);
+    const role = normalizeFabricAgentRole(def.role);
     const instructions = def.instructions;
-    if (!instructions.trim()) throw new Error("Global actor instructions must not be empty");
+    if (!instructions.trim()) throw new Error("Agent template instructions must not be empty");
     if (Buffer.byteLength(instructions, "utf8") > this.#maxBytes) {
-      throw new Error(`Global actor instructions exceed ${this.#maxBytes} bytes`);
+      throw new Error(`Agent template instructions exceed ${this.#maxBytes} bytes`);
     }
     const events = [...new Set(def.events ?? [])];
     for (const event of events) {
-      if (!HOST_EVENTS.has(event)) throw new Error(`Unsupported global actor event: ${event}`);
+      if (!HOST_EVENTS.has(event)) throw new Error(`Unsupported Agent template event: ${event}`);
     }
     const topics = [...new Set(def.topics ?? [])];
     for (const topic of topics) {
-      if (!TOPIC_PATTERN.test(topic)) throw new Error(`Invalid global actor topic: ${topic}`);
+      if (!TOPIC_PATTERN.test(topic)) throw new Error(`Invalid Agent template topic: ${topic}`);
     }
-    const deliveryPolicy = resolveActorDeliveryPolicy(def.delivery, def.triggerTurn);
+    const deliveryPolicy = resolvePersistentAgentDeliveryPolicy(def.delivery, def.triggerTurn);
     const responseMode = def.responseMode ?? "text";
     if (!RESPONSE_MODES.has(responseMode)) {
-      throw new Error(`Invalid global actor response mode: ${def.responseMode}`);
+      throw new Error(`Invalid Agent template response mode: ${def.responseMode}`);
     }
     const coalesce = def.coalesce ?? true;
     const runner = def.runner ?? "pi";
     if (runner !== "pi" && runner !== "claude") {
-      throw new Error(`Invalid global actor runner: ${String(def.runner)}`);
+      throw new Error(`Invalid Agent template runner: ${String(def.runner)}`);
     }
     const model = typeof def.model === "string" && def.model.trim() ? def.model.trim() : undefined;
     const thinking =
@@ -272,11 +274,12 @@ export class GlobalActorRegistry {
       def.validWhile.source.length <= 16_000
       ? clone(def.validWhile)
       : undefined;
-    if (def.validWhile && !validWhile) throw new Error("Invalid global actor validWhile predicate");
-    const budget = normalizeActorBudgetPolicy(def.budget);
+    if (def.validWhile && !validWhile) throw new Error("Invalid Agent template validWhile predicate");
+    const budget = normalizePersistentAgentBudgetPolicy(def.budget);
     const budgetConfigured = budget.lifetimeActivations > 0 || budget.windowActivations > 0;
     return {
       name,
+      role,
       instructions,
       events,
       topics,
@@ -305,16 +308,16 @@ export class GlobalActorRegistry {
       return;
     }
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
-    const records = (parsed as { actors?: unknown }).actors;
+    const records = (parsed as { persistentAgents?: unknown }).persistentAgents;
     if (!Array.isArray(records)) return;
     for (const value of records) {
       if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
-      const record = value as Partial<GlobalActorDefinition>;
+      const record = value as Partial<AgentTemplateDefinition>;
       if (
         typeof record.id !== "string" ||
         !/^[a-f0-9]{32}$/.test(record.id) ||
         typeof record.name !== "string" ||
-        !ACTOR_NAME_PATTERN.test(record.name) ||
+        !PERSISTENT_AGENT_NAME_PATTERN.test(record.name) ||
         typeof record.instructions !== "string" ||
         Buffer.byteLength(record.instructions, "utf8") > this.#maxBytes ||
         typeof record.createdAt !== "number"
@@ -322,18 +325,18 @@ export class GlobalActorRegistry {
         continue;
       }
       const events = Array.isArray(record.events)
-        ? record.events.filter((event): event is FabricActorHostEvent => HOST_EVENTS.has(event))
+        ? record.events.filter((event): event is FabricPersistentAgentHostEvent => HOST_EVENTS.has(event))
         : [];
       const topics = Array.isArray(record.topics)
         ? record.topics.filter(
             (topic): topic is string => typeof topic === "string" && TOPIC_PATTERN.test(topic),
           )
         : [];
-      const delivery: FabricActorDelivery =
+      const delivery: FabricPersistentAgentDelivery =
         record.delivery === "steer" || record.delivery === "followUp" || record.delivery === "nextTurn"
           ? record.delivery
           : "mailbox";
-      const responseMode: FabricActorResponseMode =
+      const responseMode: FabricPersistentAgentResponseMode =
         record.responseMode === "directive" ? "directive" : "text";
       const triggerTurn =
         (delivery === "steer" || delivery === "followUp") && record.triggerTurn === true;
@@ -354,11 +357,12 @@ export class GlobalActorRegistry {
         record.validWhile.source.length <= 16_000
         ? clone(record.validWhile)
         : undefined;
-      const budget = normalizeActorBudgetPolicy(record.budget);
+      const budget = normalizePersistentAgentBudgetPolicy(record.budget);
       const budgetConfigured = budget.lifetimeActivations > 0 || budget.windowActivations > 0;
-      const def: GlobalActorDefinition = {
+      const def: AgentTemplateDefinition = {
         id: record.id,
         name: record.name,
+        role: normalizeFabricAgentRole(record.role),
         instructions: record.instructions,
         events,
         topics,
@@ -378,12 +382,12 @@ export class GlobalActorRegistry {
         ...(validWhile ? { validWhile } : {}),
         ...(budgetConfigured ? { budget } : {}),
       };
-      this.#actors.set(def.id, def);
+      this.#persistentAgents.set(def.id, def);
     }
   }
 
   #save(): void {
-    const file: RegistryFile = { format: 1, actors: [...this.#actors.values()] };
+    const file: RegistryFile = { format: 1, persistentAgents: [...this.#persistentAgents.values()] };
     atomicWrite(this.#path, file);
   }
 }

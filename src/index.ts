@@ -8,7 +8,7 @@ import {
   type FabricToolShellDecorator,
   withCodePreviewShell,
 } from "./ui/code-preview-shell.js";
-import { registerFabricActorHostEventObservers } from "./actors/host-event-observer.js";
+import { registerFabricPersistentAgentHostEventObservers } from "./agents/persistent/host-event-observer.js";
 import { CapturedToolCatalog } from "./capture/catalog.js";
 import { installRegisteredToolCapture } from "./capture/interceptor.js";
 import { registerFabricCommand } from "./commands/fabric.js";
@@ -57,7 +57,7 @@ import { fileURLToPath } from "node:url";
 // Absolute path to the Fabric skills bundled with this extension. Resolved
 // relative to the extension entry so it works both in development (src/) and
 // in an installed package (dist/). Contributed via resources_discover so child
-// Pi processes that load Fabric with -e (agents and actors) discover the
+// Pi processes that load Fabric with -e (agents across both lifecycles) discover the
 // same fabric-exec / fabric-advisor / fabric-council skill references as the
 // main agent, which gets them through the package manifest.
 const FABRIC_EXTENSION_ENTRY_PATH = path.resolve(fileURLToPath(import.meta.url));
@@ -158,14 +158,14 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
   };
 
   // ESC stop-the-world: a lone Escape (debounced to ignore escape sequences
-  // such as arrow keys) halts every persistent actor — aborting in-flight runs
+  // such as arrow keys) halts every persistent agent — aborting in-flight runs
   // and cancelling queued work — and arms a stop-the-world gate that freezes
-  // host-event and mesh dispatch so the interrupted actors are not re-armed by
+  // host-event and mesh dispatch so the interrupted persistentAgents are not re-armed by
   // the interrupt's own turn_end / agent_settled events. The gate lifts when the
   // user resumes by sending a new message (the "input" host event). Escape is
   // observed but not consumed, so Pi's native cancel-streaming still fires;
   // single ESC therefore stops the current turn and the advisor/supervisor
-  // actors at once. Disabled when mesh/actors are off or ui.haltOnEscape is
+  // persistentAgents at once. Disabled when mesh/persistentAgents are off or ui.haltOnEscape is
   // false.
   let haltOnEscapeUnsubscribe: (() => void) | undefined;
   const uninstallHaltOnEscape = (): void => {
@@ -189,17 +189,17 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
         // so don't repeat the notice — a double-Esc to open /tree would
         // otherwise pop it on every press. Only the first Esc of a halt
         // session notifies.
-        if (state.actors.halted) return;
-        halted = state.actors.haltAll().halted;
+        if (state.persistentAgents.halted) return;
+        halted = state.persistentAgents.haltAll().halted;
       } catch {
         return;
       }
       // Nothing had work to abort: the gate armed silently, so skip the
-      // notice — a lone Esc with no active actors should not pop a
-      // "halted 0 actors" line.
+      // notice — a lone Esc with no active persistent Agents should not pop a
+      // "halted 0 persistent Agents" line.
       if (halted === 0) return;
       context.ui.notify(
-        `Fabric: halted ${halted} actor${halted === 1 ? "" : "s"} (Esc) · resumes on next message`,
+        `Fabric: halted ${halted} persistent Agent${halted === 1 ? "" : "s"} (Esc) · resumes on next message`,
         "warning",
       );
     };
@@ -426,9 +426,9 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     await state.publishHostLifecycle("pi.session_compact", event);
   });
 
-  // Deterministic, LLM-free compaction is registered unconditionally and is
-  // active by default. The documented "pi" escape hatch returns early so
-  // pi-core's own summarization proceeds normally.
+  // Fabric owns the default compaction route and always keeps a deterministic
+  // portable summary, with compatible model-native backends layered on top.
+  // The documented "pi" escape hatch leaves compaction to pi-core.
   registerCompactionHook(pi, {
     getEngine: () =>
       state.initialized
@@ -524,7 +524,7 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     };
   });
 
-  registerFabricActorHostEventObservers(pi, (eventName, event, context) => {
+  registerFabricPersistentAgentHostEventObservers(pi, (eventName, event, context) => {
     if (!state.initialized) return;
     state.dispatchHostEvent(eventName, event, context);
   });

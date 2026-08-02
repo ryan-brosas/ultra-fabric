@@ -1,16 +1,16 @@
 import { createHash } from "node:crypto";
 import type { ImageContent } from "@earendil-works/pi-ai";
 
-interface FabricActorHostMediaDescriptor {
+interface FabricPersistentAgentHostMediaDescriptor {
   type: "image";
   mediaIndex: number;
   mimeType: string;
 }
 
-export interface PreparedFabricActorHostPayload {
+export interface PreparedFabricPersistentAgentHostPayload {
   payload: unknown;
   images: ImageContent[];
-  media: FabricActorHostMediaDescriptor[];
+  media: FabricPersistentAgentHostMediaDescriptor[];
 }
 
 const normalizedKey = (key: string): string =>
@@ -60,12 +60,12 @@ const isImageContent = (value: unknown): value is ImageContent =>
   typeof (value as { data?: unknown }).data === "string" &&
   typeof (value as { mimeType?: unknown }).mimeType === "string";
 
-export const prepareFabricActorHostPayload = (
+export const prepareFabricPersistentAgentHostPayload = (
   value: unknown,
   maxChars: number,
-): PreparedFabricActorHostPayload => {
+): PreparedFabricPersistentAgentHostPayload => {
   const images: ImageContent[] = [];
-  const media: FabricActorHostMediaDescriptor[] = [];
+  const media: FabricPersistentAgentHostMediaDescriptor[] = [];
   const imageIndexes = new Map<string, number>();
   const seen = new WeakSet<object>();
   let json: string;

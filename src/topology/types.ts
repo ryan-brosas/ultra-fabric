@@ -2,7 +2,7 @@ import type { FabricAgentRunner, FabricAgentTransport } from "../config.js";
 import type { MeshIdentity } from "../mesh/store.js";
 import type { AgentUsage } from "../agents/types.js";
 
-export type FabricParticipantKind = "root" | "agent" | "actor";
+export type FabricParticipantKind = "root" | "agent" | "persistentAgent";
 export type FabricParticipantScope = "local" | "lineage" | "project";
 export type FabricParticipantCapability =
   | "steer"
@@ -36,8 +36,8 @@ export interface FabricParticipantRecord {
   turns?: number;
   toolCalls?: number;
   usage?: AgentUsage;
-  actorQueued?: number;
-  actorMessages?: number;
+  persistentAgentQueued?: number;
+  persistentAgentMessages?: number;
   controlProtocol: "v1" | "legacy";
 }
 
@@ -45,6 +45,22 @@ export interface FabricParticipantInfo extends FabricParticipantRecord {
   local: boolean;
   stale: boolean;
 }
+
+export type FabricPublicParticipantInfo = Omit<FabricParticipantInfo, "kind"> & {
+  kind: "root" | "agent";
+  lifecycle?: "one-shot" | "persistent";
+};
+
+export const toPublicAgentParticipant = (
+  participant: FabricParticipantInfo,
+): FabricPublicParticipantInfo =>
+  participant.kind === "root"
+    ? { ...participant, kind: "root" }
+    : {
+        ...participant,
+        kind: "agent",
+        lifecycle: participant.kind === "persistentAgent" ? "persistent" : "one-shot",
+      };
 
 export interface FabricHostRecord {
   format: 1;

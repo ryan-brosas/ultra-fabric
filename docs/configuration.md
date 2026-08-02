@@ -7,7 +7,7 @@ Pi Fabric reads configuration from two JSON files. Project values override globa
 
 `/fabric settings` writes changes to the same files: trusted projects write to `<project>/.pi/fabric.json`; untrusted sessions write to the global `~/.pi/agent/fabric.json`.
 
-Configuration documents are versioned with `configVersion`. Fabric migrates each applicable file independently before applying global/project precedence, then atomically rewrites migrated files. Version 0—the historical unversioned format—renames `subagents` to `agents`; when both sections exist, `agents` wins conflicts while non-conflicting values are preserved. Trusted project files are migrated, while untrusted project files are neither read nor rewritten. Future schema changes should be added as sequential migrations rather than runtime aliases.
+Configuration documents are versioned with `configVersion`. Fabric migrates each applicable file independently before applying global/project precedence, then atomically rewrites migrated files. Version 0—the historical unversioned format—migrates its removed child-Agent section to `agents`; when both sections exist, `agents` wins conflicts while non-conflicting values are preserved. Trusted project files are migrated, while untrusted project files are neither read nor rewritten. Future schema changes should be added as sequential migrations rather than runtime aliases.
 
 `executor.runtime` selects `"quickjs"` (the default isolated WASM runtime) or `"node-process"` (a disposable native V8 process). QuickJS memory limits are capped at `4294967295` bytes because its WASM32 `size_t` cannot represent 4 GiB; larger values are rejected rather than wrapped. Node process limits may be set as high as detected physical memory and are passed to V8 as `--max-old-space-size`.
 
@@ -119,28 +119,28 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
   "retention": {
     "orphanedTempRunMs": 21600000,
     "oneShotRunMs": 86400000,
-    "actorRunArchiveMs": 604800000
+    "persistentAgentRunArchiveMs": 604800000
   },
   "mesh": {
     "enabled": true,
-    "actorScope": "project",
+    "persistentAgentScope": "project",
     "maxEventBytes": 262144,
     "maxReadEvents": 500,
-    "actorPollMs": 250,
-    "actorQueueLimit": 32,
-    "actorOverflowPolicy": "reject",
-    "actorRunMaxAttempts": 1,
-    "actorRunBaseDelayMs": 250,
-    "actorRunMaxDelayMs": 5000,
-    "actorRunJitterMs": 100,
-    "actorDeliveryMaxAttempts": 3,
-    "actorDeliveryBaseDelayMs": 100,
-    "actorDeliveryMaxDelayMs": 2000,
-    "actorDeliveryJitterMs": 50,
-    "actorCircuitFailureThreshold": 3,
-    "actorCircuitCooldownMs": 30000,
+    "persistentAgentPollMs": 250,
+    "persistentAgentQueueLimit": 32,
+    "persistentAgentOverflowPolicy": "reject",
+    "persistentAgentRunMaxAttempts": 1,
+    "persistentAgentRunBaseDelayMs": 250,
+    "persistentAgentRunMaxDelayMs": 5000,
+    "persistentAgentRunJitterMs": 100,
+    "persistentAgentDeliveryMaxAttempts": 3,
+    "persistentAgentDeliveryBaseDelayMs": 100,
+    "persistentAgentDeliveryMaxDelayMs": 2000,
+    "persistentAgentDeliveryJitterMs": 50,
+    "persistentAgentCircuitFailureThreshold": 3,
+    "persistentAgentCircuitCooldownMs": 30000,
     "eventContextChars": 40000,
-    "actorContextEntries": 14
+    "persistentAgentContextEntries": 14
   }
 }
 ```
@@ -179,7 +179,7 @@ Set `prewalk.verificationMode` to `"gated"` to require an identity-owned verific
 
 ## Run context and gates
 
-Every `fabric_exec` creates one bounded run envelope with run, trace, span, optional parent, objective digest, deadline, and cancellation-owner identity. The envelope crosses provider and child-agent boundaries; recursive Pi children and direct actor ask/tell activations inherit the same trace. Host calls that legitimately extend the sandbox timeout also extend the immutable envelope snapshot monotonically before provider invocation. `executor.maxRunEvidence` bounds evidence refs; `executor.maxRunTransitions` bounds both typed transitions and ordered gate results, with terminal entries replacing the last non-terminal entry when necessary. `executor.maxGateRevisions` bounds failed `revise` dispositions; an unresolved revision prevents successful settlement, while a crashed gate aborts as infrastructure failure.
+Every `fabric_exec` creates one bounded run envelope with run, trace, span, optional parent, objective digest, deadline, and cancellation-owner identity. The envelope crosses provider and child-agent boundaries; recursive Pi children and direct persistent Agent ask/tell activations inherit the same trace. Host calls that legitimately extend the sandbox timeout also extend the immutable envelope snapshot monotonically before provider invocation. `executor.maxRunEvidence` bounds evidence refs; `executor.maxRunTransitions` bounds both typed transitions and ordered gate results, with terminal entries replacing the last non-terminal entry when necessary. `executor.maxGateRevisions` bounds failed `revise` dispositions; an unresolved revision prevents successful settlement, while a crashed gate aborts as infrastructure failure.
 
 A finite per-call `tokenBudget` is admission-enforced rather than merely observed. Concurrent agent calls reserve before invocation and each child receives a hard `maxTokens` ceiling. Sequential calls reclaim unused reserved tokens. The existing `agents.budgetUsd` ledger remains settlement-based because model cost has no defensible hard pre-run estimate.
 
@@ -187,7 +187,7 @@ A finite per-call `tokenBudget` is admission-enforced rather than merely observe
 
 `executor.resultFormat` sets the default for `fabric_exec` return values and is available under `/fabric settings` → **Executor**. `"auto"` keeps strings as text and renders structured values as syntax-highlighted YAML. `"yaml"`, `"json"`, and `"text"` force the corresponding behavior. A call-level `resultFormat` parameter overrides the configured default.
 
-The compaction engine is available under `/fabric settings` → **Compaction**. Select `"fabric"` for deterministic compaction or `"pi"` to delegate to Pi core.
+The compaction engine is available under `/fabric settings` → **Compaction**. Select `"fabric"` for Fabric-owned model routing with a deterministic portable summary, or `"pi"` to delegate to Pi core.
 
 ## Code modes
 
@@ -224,7 +224,7 @@ Pi core normally includes its model-visible skill catalog only while the native 
 
 ### Orchestration-only mode
 
-Users who want Fabric for MCP, agents, ambient actors, parallel workflows, councils, and recursive delegation — but want Pi's core tools to remain entirely native — can opt out of full code mode:
+Users who want Fabric for MCP, agents, ambient persistent Agents, parallel workflows, councils, and recursive delegation — but want Pi's core tools to remain entirely native — can opt out of full code mode:
 
 ```json
 {
@@ -237,7 +237,7 @@ In orchestration-only mode:
 - Pi's `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` tools stay on Pi's normal model-facing and execution paths. Fabric applies the configured risk approval policy through Pi's native `tool_call` preflight without replacing their execution or rendering.
 - Registered extension tools also remain in Pi's native registry; Fabric does not hide, wrap, or expose them through `extensions.*`. Model-requested direct calls use exact `capture.risks` overrides or the conservative `capture.defaultRisk` approval class.
 - `pi.*`, `extensions.*`, and equivalent `tools.call()` references are unavailable inside `fabric_exec`, including when TypeScript checks are bypassed.
-- MCP and stable Fabric providers remain available through `mcp.*`, `memory.*`, `state.*`, `schema.*`, and `compact.*`; generic discovery and computed refs remain available through `tools.*`. One-shot and recursive agents, persistent ambient actors, dynamic workflows, mesh coordination, councils, explicit Fabric providers, and the Fabric TUI also remain available.
+- MCP and stable Fabric providers remain available through `mcp.*`, `memory.*`, `state.*`, `schema.*`, and `compact.*`; generic discovery and computed refs remain available through `tools.*`. One-shot and recursive agents, persistent ambient persistent Agents, dynamic workflows, mesh coordination, councils, explicit Fabric providers, and the Fabric TUI also remain available.
 - Child agents continue using their allowed Pi tools directly, so parallel and ambient setups do not route their coding operations back through Fabric code mode.
 
 ### Where to set it
@@ -309,9 +309,9 @@ Fabric clears inactive run artifacts by age rather than truncating active JSONL 
 
 - `retention.orphanedTempRunMs` — remove a temporary run root six hours after its owner process dies. Active roots carry a heartbeat marker and are never removed.
 - `retention.oneShotRunMs` — retain terminal one-shot agent run artifacts for 24 hours. Explicit `agents.cleanup()` may remove them sooner; otherwise graceful shutdown marks their temporary root closed for temporal cleanup.
-- `retention.actorRunArchiveMs` — retain terminal actor run archives for seven days. The latest run for each actor is always preserved.
+- `retention.persistentAgentRunArchiveMs` — retain terminal persistent-agent run archives for seven days. The latest run for each persistent agent is always preserved.
 
-Cleanup runs during active Fabric sessions and when a new top-level run manager starts. It never truncates active run logs or actor `session.jsonl` files. `/fabric settings` exposes all three values under **Retention**; changing them requires `/fabric reload`.
+Cleanup runs during active Fabric sessions and when a new top-level run manager starts. It never truncates active run logs or persistent-agent `session.jsonl` files. `/fabric settings` exposes all three values under **Retention**; changing them requires `/fabric reload`.
 
 ## Agents
 
@@ -334,13 +334,13 @@ Other agent settings:
 - `maxPerExecution` — hard cap on children per `fabric_exec` invocation.
 - `maxDepth` — recursion depth bound for `rlm.query()`.
 - `timeoutMs` — default per-child wall-clock budget and floor for per-call overrides (60 minutes by default). Lower per-call values are ignored; callers should only set `timeoutMs` to request a longer run.
-- `extensions` — whether Claude children keep their normal Claude Code customizations.
+- `extensions` — whether ordinary child runners load their normal extensions/customizations. It defaults to `true`; Pi model-provider plugins require it. Recursive Pi children force it on, while `false` starts Claude in safe mode and Pi with `--no-extensions`.
 - `defaultTools` — the default tool allowlist for children.
 - `budgetUsd` — shared append-only cost ledger across a recursion tree (0 disables).
 - `maxTokensPerChild` — per-child cumulative token bound (0 disables).
 - `notifyOnComplete` — send a follow-up completion message for a detached `agents.spawn()`.
 
-See [agents, actors & mesh](agents.md) for the runner and transport details.
+See [agents & mesh](agents.md) for the runner and transport details.
 
 ## Ultra Consult
 
@@ -374,8 +374,8 @@ See the [`mcp` reference](../skills/fabric-exec/references/mcp.md) for the call 
 
 ## UI
 
-- `ui.widget` is `auto`, `always`, or `hidden`. `auto` shows active or retained Fabric runs and worker activity. Active one-shot agents and actor workers occupy rows; their recent nested tools appear beneath them when enabled.
-- `ui.showNestedToolCalls` defaults to `true` and controls child-agent/actor tool rows in both the parent `fabric_exec` card and widget.
+- `ui.widget` is `auto`, `always`, or `hidden`. `auto` shows active or retained Fabric runs and worker activity. Active one-shot agents and persistent Agent workers occupy rows; their recent nested tools appear beneath them when enabled.
+- `ui.showNestedToolCalls` defaults to `true` and controls one-shot/persistent-agent tool rows in both the parent `fabric_exec` card and widget.
 - `ui.nestedToolDebounceMs` defaults to `100` and applies one execution-wide coalescing interval across regular nested calls. Continuous streams emit at most once per interval instead of postponing every render until completion. Set it to `0` to emit every update; accepted values are clamped to `0..2000`.
 - The widget renders above the chat (like `pi-supervisor`); set `ui.enabled` to `false` to disable both the widget and dashboard controller.
 
@@ -383,23 +383,23 @@ See the [interface reference](interface.md).
 
 ## Mesh
 
-Mesh data defaults to `<project>/.pi/fabric/mesh`. Set `mesh.root` to a relative or absolute path to relocate durable topics, shared state, and actor sessions. Add `.pi/fabric/mesh/` to the project's ignore file unless the coordination log is intentionally versioned. Set `mesh.enabled` to `false` to disable both mesh actions and ambient actor restoration.
+Mesh data defaults to `<project>/.pi/fabric/mesh`. Set `mesh.root` to a relative or absolute path to relocate durable topics, shared state, and persistent Agent sessions. Add `.pi/fabric/mesh/` to the project's ignore file unless the coordination log is intentionally versioned. Set `mesh.enabled` to `false` to disable both mesh actions and ambient persistent Agent restoration.
 
-`mesh.actorScope` controls where persistent actor definitions, mailboxes, and child sessions are stored and restored from:
+`mesh.persistentAgentScope` controls where persistent agent definitions, mailboxes, and child sessions are stored and restored from:
 
-- `"project"` (default) keeps a shared actor registry at `.pi/fabric/mesh/actors/`, so actors survive `/new`. The participant directory chooses each live execution owner; other sessions keep passive views and reload on takeover. Registry writes are lock-serialized and merge only locally owned actor records.
-- `"session"` isolates actors per Pi session (under `.pi/fabric/mesh/actors/<sessionId>/`). Use this when you run concurrent Pi sessions in one project and want each to own its own actors.
+- `"project"` (default) keeps a shared persistent Agent registry at `.pi/fabric/mesh/persistentAgents/`, so persistent Agents survive `/new`. The participant directory chooses each live execution owner; other sessions keep passive views and reload on takeover. Registry writes are lock-serialized and merge only locally owned persistent Agent records.
+- `"session"` isolates persistent Agents per Pi session (under `.pi/fabric/mesh/persistentAgents/<sessionId>/`). Use this when you run concurrent Pi sessions in one project and want each to own its own persistent Agents.
 
-Each persistent actor writes accepted queued and in-flight activations to its atomic `inbox.json` before acknowledging them. Interrupted in-flight work re-enters the queue under the same ID. `mesh.actorQueueLimit` bounds pending activations. `mesh.actorOverflowPolicy` is `"reject"` (default), `"coalesce"` by source, `"drop-oldest"`, or `"dead-letter"`; displaced work gets an explicit terminal mailbox record rather than silent loss.
+Each persistent agent writes accepted queued and in-flight activations to its atomic `inbox.json` before acknowledging them. Interrupted in-flight work re-enters the queue under the same ID. `mesh.persistentAgentQueueLimit` bounds pending activations. `mesh.persistentAgentOverflowPolicy` is `"reject"` (default), `"coalesce"` by source, `"drop-oldest"`, or `"dead-letter"`; displaced work gets an explicit terminal mailbox record rather than silent loss.
 
-Zero-effect actor startup failures can retry one-for-one under `mesh.actorRunMaxAttempts` (default 1) with `actorRunBaseDelayMs`, `actorRunMaxDelayMs`, and `actorRunJitterMs`. Fabric retries only when the failed run reports zero turns, zero tool calls, and zero token usage; any observable model/tool activity remains terminal to avoid replaying possible effects. The resulting outbox message records `runAttempts`.
+Zero-effect persistent Agent startup failures can retry one-for-one under `mesh.persistentAgentRunMaxAttempts` (default 1) with `mesh.persistentAgentRunBaseDelayMs`, `mesh.persistentAgentRunMaxDelayMs`, and `mesh.persistentAgentRunJitterMs`. Fabric retries only when the failed run reports zero turns, zero tool calls, and zero token usage; any observable model/tool activity remains terminal to avoid replaying possible effects. The resulting outbox message records `runAttempts`.
 
-Actor output delivery uses `mesh.actorDeliveryMaxAttempts` with exponential delay from `actorDeliveryBaseDelayMs`, capped by `actorDeliveryMaxDelayMs`, plus up to `actorDeliveryJitterMs` jitter. Mesh publication is deduplicated by the actor outbox message ID. Exhausted channels become dead letters. After `actorCircuitFailureThreshold` terminal Main-delivery failures, the persisted circuit opens for `actorCircuitCooldownMs`; one half-open probe then closes or reopens it.
+Persistent Agent output delivery uses `mesh.persistentAgentDeliveryMaxAttempts` with exponential delay from `mesh.persistentAgentDeliveryBaseDelayMs`, capped by `mesh.persistentAgentDeliveryMaxDelayMs`, plus up to `mesh.persistentAgentDeliveryJitterMs` jitter. Mesh publication is deduplicated by the persistent Agent outbox message ID. Exhausted channels become dead letters. After `mesh.persistentAgentCircuitFailureThreshold` terminal Main-delivery failures, the persisted circuit opens for `mesh.persistentAgentCircuitCooldownMs`; one half-open probe then closes or reopens it.
 
-`mesh.eventContextChars` bounds the sanitized JSON context attached to each host-event activation. Images are extracted before this bound, represented by redacted descriptors in actor mailboxes and the registry, and forwarded out of band to the actor runner automatically; the configured character bound does not truncate their base64.
+`mesh.eventContextChars` bounds the sanitized JSON context attached to each host-event activation. Images are extracted before this bound, represented by redacted descriptors in persistent Agent mailboxes and the registry, and forwarded out of band to the persistent Agent runner automatically; the configured character bound does not truncate their base64.
 
-With project scope, each actor has one lifecycle owner and shared registry updates are ownership-aware and lock-serialized. Mesh topics, shared state, and the participant directory are always project-scoped. Every Fabric runtime publishes one short-lived host lease plus canonical records for the roots, agents, and actors it owns. `agents.members()` and `mesh.members()` read that directory; `agents.main()` and `agents.peers()` are root projections. If a host lease expires, all of its participant records disappear from normal discovery together. `mesh.actorPollMs` controls the fallback interval for actor events and owner-addressed control commands when filesystem notifications are unavailable.
+With project scope, each persistent Agent has one lifecycle owner and shared registry updates are ownership-aware and lock-serialized. Mesh topics, shared state, and the participant directory are always project-scoped. Every Fabric runtime publishes one short-lived host lease plus canonical records for the roots, agents, and persistent Agents it owns. `agents.members()` and `mesh.members()` read that directory; `agents.main()` and `agents.peers()` are root projections. If a host lease expires, all of its participant records disappear from normal discovery together. `mesh.persistentAgentPollMs` controls the fallback interval for persistent Agent events and owner-addressed control commands when filesystem notifications are unavailable.
 
 ## Compaction
 
-The deterministic, LLM-free compaction engine is default-on. Set `compaction.engine` to `"pi"` to restore pi-core compaction. When pi-vcc is also installed, Fabric takes precedence for automatic compaction, while an explicit `/pi-vcc` command always uses pi-vcc's engine. See [compaction](compaction.md) for invariants, sections, and limits.
+The Fabric compaction controller is default-on. It always creates a deterministic, LLM-free portable summary; official OpenAI Responses models also receive a provider-native opaque artifact, exact Claude bridge models delegate to the bridge takeover, and other models use only the deterministic result. OpenAI native compaction can incur provider charges and persists its opaque artifact in the local session. Set `compaction.engine` to `"pi"` to restore pi-core compaction. When pi-vcc is also installed, Fabric takes precedence for automatic compaction, while an explicit `/pi-vcc` command always uses pi-vcc's engine. See [compaction](compaction.md) for routing, invariants, data handling, sections, and limits.

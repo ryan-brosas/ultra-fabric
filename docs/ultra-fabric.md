@@ -7,13 +7,13 @@
 
 ## Adoption status
 
-Slices 0-7 now have tested backend contracts. Prewalk v2 owns typed continuity, configurable effect triggers, identity-checked continuation, and bounded execute → verify → revise. Actors own durable inbox/outbox replay, retry/dead-letter/circuit behavior, quotas, telemetry, root traces, and outcomes. Fabric propagates run identity, gates, reservations, durable phase leases, cooperative path leases, deterministic Context QoS, capability/auth routing, explicit delegation intent, capability profiles, and a prompt-free outcome ledger with confidence-bounded recommendations. Automatic policy promotion remains disabled until the Slice 8 benchmark and soak gates are run on representative real tasks.
+Slices 0-7 now have tested backend contracts. Prewalk v2 owns typed continuity, configurable effect triggers, identity-checked continuation, and bounded execute → verify → revise. Persistent Agents own durable inbox/outbox replay, retry/dead-letter/circuit behavior, quotas, telemetry, root traces, and outcomes. Fabric propagates run identity, gates, reservations, durable phase leases, cooperative path leases, deterministic Context QoS, capability/auth routing, explicit delegation intent, capability profiles, and a prompt-free outcome ledger with confidence-bounded recommendations. Automatic policy promotion remains disabled until the Slice 8 benchmark and soak gates are run on representative real tasks.
 
 ## Thesis
 
 Ultra Fabric closes the control loop around Fabric's existing runtime.
 
-Pi Fabric already has the difficult primitives: a typed code-mode boundary, capability discovery, approvals, isolated execution, agents, persistent actors, mesh coordination, state, deterministic compaction, audit traces, and a strong TUI. Its remaining limitations are not a shortage of primitives. They are breaks between sensing, deciding, acting, verifying, recovering, and learning.
+Pi Fabric already has the difficult primitives: a typed code-mode boundary, capability discovery, approvals, isolated execution, agents, persistent agents, mesh coordination, state, deterministic compaction, audit traces, and a strong TUI. Its remaining limitations are not a shortage of primitives. They are breaks between sensing, deciding, acting, verifying, recovering, and learning.
 
 Ultra Fabric turns those pieces into one bounded, recoverable system:
 
@@ -34,7 +34,7 @@ Ultra Fabric turns those pieces into one bounded, recoverable system:
               └───────────┘ └───────────┘ └──────────┘
 ```
 
-The wheel is powerful because every spoke returns to the kernel. No model, actor, workflow, or retry loop gets unbounded authority.
+The wheel is powerful because every spoke returns to the kernel. No model, persistent Agent, workflow, or retry loop gets unbounded authority.
 
 ## Product contract
 
@@ -44,7 +44,7 @@ The default remains zero agents. Power is available, not ambient.
 
 ## What the source audit found
 
-The audit covered current source, tests, and configuration. The broad CodeGraphContext index located the same prewalk and actor seams in the nearby upstream clone but was stale for this checkout and under-reported callers, so every structural claim below was confirmed in current source and tests.
+The audit covered current source, tests, and configuration. The broad CodeGraphContext index located the same prewalk and persistent Agent seams in the nearby upstream clone but was stale for this checkout and under-reported callers, so every structural claim below was confirmed in current source and tests.
 
 ### Existing strengths to preserve
 
@@ -52,7 +52,7 @@ The audit covered current source, tests, and configuration. The broad CodeGraphC
 - QuickJS is the default isolation boundary; the Node executor is explicitly unsafe.
 - Approval, audit, timeout, cancellation, output bounding, and activity reporting share one action path.
 - Agent execution already has concurrency, depth, per-execution calls, token ceilings, worktrees, transports, and a cross-process cost ledger.
-- Actors already have serial execution, fixed capability sets, persistent model sessions, event/topic subscriptions, ownership leases, coalescing, freshness predicates, four delivery modes, and bounded queues.
+- Persistent Agents already have serial execution, fixed capability sets, persistent model sessions, event/topic subscriptions, ownership leases, coalescing, freshness predicates, four delivery modes, and bounded queues.
 - Mesh has append-only topics, compare-and-swap state, participant leases, and owner-addressed at-most-once control.
 - Deterministic compaction normalizes typed Fabric traces instead of trusting prose.
 - The dashboard and topology surfaces already expose most runtime entities.
@@ -65,18 +65,18 @@ The audit covered current source, tests, and configuration. The broad CodeGraphC
 | Prewalk trigger | Every resolved action records its declared risk in live audits and durable traces. Prewalk triggers from bounded `triggerEffects`/`triggerRisks`/`triggerRefs`; defaults preserve the three built-ins and include declared workspace effects without confusing state bookkeeping for code mutation. | Bash remains intentionally opaque unless explicitly named in `triggerRefs`. |
 | Model ownership | In-place Prewalk keeps the executor by default or restores the exact boundary model after the owned continuation settles. | A multi-level planner/executor stack is unnecessary until nested Prewalk phases exist. |
 | Continuity | Hidden messages carry handoff identity; gated mode requires a passing host gate, returns scoped revise evidence to the executor, and blocks missing/aborted/crashed verification within a configured cap. | Legacy prompt-only verification remains the compatibility default until gated mode is measured. |
-| Actor durability | A per-actor atomic `inbox.json` stores accepted queued and in-flight activations by stable ID before acknowledgement; interrupted in-flight work reloads at the head for at-least-once replay. | Media bytes remain transient and replay depends on stable-ID effect deduplication. |
-| Actor recovery | Zero-effect startup failures can retry one-for-one with bounded backoff; outbox delivery has independent retry, explicit stable-ID replay, dead letters, and a persisted closed/open/half-open Main-delivery circuit. | Runs with any turns, tool calls, or token usage remain terminal by design; richer effect evidence is required before safe resume. |
-| Actor delivery | Every completed output records independent mesh and Main receipts with attempts, timestamps, errors, dead-letter/circuit states; actor mesh events deduplicate by the outbox message ID. | Cross-provider Main delivery relies on the stable message ID contract for idempotent adapters. |
-| Backpressure | Queue overflow follows configured reject, source-coalesce, drop-oldest, or dead-letter policy; displaced activations receive explicit terminal records and aggregate queue/dead-letter telemetry. | Per-actor overflow-policy overrides remain out of scope. |
+| Persistent Agent durability | A per-persistent Agent atomic `inbox.json` stores accepted queued and in-flight activations by stable ID before acknowledgement; interrupted in-flight work reloads at the head for at-least-once replay. | Media bytes remain transient and replay depends on stable-ID effect deduplication. |
+| Persistent Agent recovery | Zero-effect startup failures can retry one-for-one with bounded backoff; outbox delivery has independent retry, explicit stable-ID replay, dead letters, and a persisted closed/open/half-open Main-delivery circuit. | Runs with any turns, tool calls, or token usage remain terminal by design; richer effect evidence is required before safe resume. |
+| Persistent Agent delivery | Every completed output records independent mesh and Main receipts with attempts, timestamps, errors, dead-letter/circuit states; persistent Agent mesh events deduplicate by the outbox message ID. | Cross-provider Main delivery relies on the stable message ID contract for idempotent adapters. |
+| Backpressure | Queue overflow follows configured reject, source-coalesce, drop-oldest, or dead-letter policy; displaced activations receive explicit terminal records and aggregate queue/dead-letter telemetry. | Per-persistent Agent overflow-policy overrides remain out of scope. |
 | Workflow durability | `workflow.durable` stores validated phase graphs over mesh CAS with owner leases, idempotent create, expired-lease resume, bounded retry, cancellation, partial failure, evidence refs, and output digests. `durable.run` adapts guest closures without persisting code or raw results. | Replayed phases must recover actual data through artifacts/state because durable storage intentionally retains only output digests. |
 | Spend enforcement | Per-execution agent calls and finite tokens reserve atomically before provider invocation; blocking calls release unused tokens and detached calls commit their full bound. Cost is still appended from observed usage. | Agent/token over-admission is closed; cost can still overshoot because no trustworthy hard pre-run estimate exists. |
-| Budget scope | Actors accept durable per-actor lifetime/window activation quotas; every enqueue path shares the same admission counter and observed token ledger, and aggregate exhaustion is queryable. | Token totals remain observed telemetry rather than a hard lifetime ceiling because no safe per-activation estimate exists for ambient work. |
+| Budget scope | Persistent Agents accept durable per-persistent Agent lifetime/window activation quotas; every enqueue path shares the same admission counter and observed token ledger, and aggregate exhaustion is queryable. | Token totals remain observed telemetry rather than a hard lifetime ceiling because no safe per-activation estimate exists for ambient work. |
 | Admission | Host policy can require a typed delegation reason plus expected artifact. Named capability profiles compile to fixed child tools and recursive risk grants; outcomes retain reason counts. | Semantic value remains recommendation-only rather than a host guess. |
 | Routing | Pi agent and trajectory requests can declare modality, reasoning, context, output, and cost requirements plus an ordered fallback set. The host checks registry availability/auth before launch, allows capability-preserving fallbacks automatically, gates quality downgrade by host policy, and persists a typed route artifact. | Outcome-ranked routes remain recommendations; Fabric never silently rewrites configured defaults. |
 | Context QoS | Every model request gets a deterministic pre-threshold pass that retires only large, old, superseded read/grep/find/ls bodies while preserving message count, call/result pairing, recent turns, errors, mutations, and typed Fabric evidence. Cumulative omission counters are host-visible. | Semantic compression and model-authored summaries remain outside this pass. |
-| Evaluation | Terminal Fabric and ambient actor runs persist prompt-free duration/token/cost/verification/route records. Deterministic fixtures and optional model-judge scores feed sample-gated route reports with Wilson confidence bounds. | The 20-task comparative benchmark remains a rollout gate, not a fabricated in-repository result. |
-| Trace correlation | One run/trace/span envelope crosses providers, recursive children, direct and ambient actor activations; durable phase leases retain owner run/trace/span; final details persist bounded evidence, gates, transitions, and reservations. | External systems still need to propagate the public envelope explicitly. |
+| Evaluation | Terminal Fabric and ambient persistent Agent runs persist prompt-free duration/token/cost/verification/route records. Deterministic fixtures and optional model-judge scores feed sample-gated route reports with Wilson confidence bounds. | The 20-task comparative benchmark remains a rollout gate, not a fabricated in-repository result. |
+| Trace correlation | One run/trace/span envelope crosses providers, recursive children, direct and ambient persistent Agent activations; durable phase leases retain owner run/trace/span; final details persist bounded evidence, gates, transitions, and reservations. | External systems still need to propagate the public envelope explicitly. |
 | Shared writes | `leases.acquire/release/list` atomically owns file/tree paths per run; active foreign leases reject `pi.edit`/`pi.write` before mutation. Worktrees remain available for stronger isolation. | Shell commands are opaque and must use worktrees or explicit coordination. |
 | Policy extensibility | Bounded configuration now controls triggers, admission, profiles, routing downgrade, retry, gates, quotas, and Context QoS; providers contribute declared risk/capability facts. | Arbitrary third-party policy callbacks remain deferred until the stable config contracts are measured. |
 
@@ -121,14 +121,14 @@ It is created once, propagated through child and provider boundaries, and settle
 
 ## Spoke 1: Sense
 
-Normalize host events, tool outcomes, actor mail, workflow transitions, context pressure, and provider health into bounded signals. Signals contain source identity, sequence, freshness, and evidence addresses. Raw prompts and unrestricted tool bodies are not copied into durable telemetry.
+Normalize host events, tool outcomes, persistent Agent mail, workflow transitions, context pressure, and provider health into bounded signals. Signals contain source identity, sequence, freshness, and evidence addresses. Raw prompts and unrestricted tool bodies are not copied into durable telemetry.
 
 Initial signals:
 
 - task accepted / revised / cancelled;
 - successful action with resolved risk and effect class;
 - verification observed with command, exit status, and result address;
-- actor failure / overload / dead letter;
+- persistent Agent failure / overload / dead letter;
 - context occupancy and protected-evidence footprint;
 - model availability, rate limit, latency, and cost settlement.
 
@@ -163,7 +163,7 @@ A restarted host resumes ready work from state rather than rerunning the workflo
 
 ## Spoke 4: Execute
 
-Execution keeps Fabric's existing action registry, QuickJS boundary, agent runners, actors, and transports. Ultra adds two host-owned controls:
+Execution keeps Fabric's existing action registry, QuickJS boundary, agent runners, persistent Agents, and transports. Ultra adds two host-owned controls:
 
 - **effect leases:** optional path/resource ownership for concurrent writers;
 - **capability profiles:** named, versioned grants such as `inspect`, `verify`, `local-write`, and `network-read`, compiled to tools plus approval risk limits.
@@ -223,24 +223,15 @@ Key changes:
 - verification failure returns a scoped revision to execution; it never restarts the whole task automatically;
 - every hidden continuation carries run/phase identity and is rejected when stale.
 
-### Actor supervision
+### Persistent-Agent supervision
 
-Actors gain a host-owned supervision policy:
+The persistent Agent runtime owns durable execution mechanics: serial activation, accepted-before-acknowledge inboxes, independent delivery receipts, bounded zero-effect retry, overflow policy, circuit breaking, quotas, and ownership transfer. A role profile owns behavior, subscriptions, delivery defaults, tools, goal, completion contract, and turn budget.
 
-```ts
-interface ActorSupervisionPolicy {
-  strategy: "stop" | "restart" | "resume";
-  maxAttempts: number;
-  windowMs: number;
-  backoff: { baseMs: number; maxMs: number; jitter: number };
-  overflow: "reject" | "coalesce" | "drop-oldest" | "dead-letter";
-  circuit: { failures: number; resetAfterMs: number };
-}
-```
+The built-in `supervisor` profile is the first-class goal watcher. It runs only on settled/error events, returns schema-validated directives, gives completion precedence over drift, actively steers Main only when useful, coalesces repeated triggers, suppresses directives made stale by a newer event or Main revision, and has a four-turn activation limit plus one wrap-up turn. `fabric-supervisor` is only an idempotent setup skill around `agents.create({ role: "supervisor" })`; no separate supervisor manager or extension exists.
 
 The durable inbox stores accepted activations before acknowledgement. The outbox tracks mailbox-recorded, mesh-published, Main-delivered, and dead-lettered states independently. Ownership transfer can resume an accepted activation by ID without duplicating a delivered side effect.
 
-The first supervision release is one-for-one. Supervision trees are deferred until one-for-one recovery is measured and stable.
+Supervision remains one-for-one. Nested supervision trees are deferred until one-for-one recovery is measured and stable.
 
 ## Spoke 7: Learn
 
@@ -281,7 +272,7 @@ Provider cost remains telemetry when no defensible upper bound exists. It is nev
 
 ## Context QoS
 
-Fabric's deterministic compaction remains authoritative. Ultra adds a pre-compaction QoS pass based on typed messages and traces:
+Fabric's deterministic portable summary remains the cross-model recovery view. Ultra owns model-aware routing and adds a pre-compaction QoS pass based on typed messages and traces:
 
 1. protect the current user-turn window;
 2. protect unresolved errors, active plans, accepted decisions, file changes, and verification evidence;
@@ -290,7 +281,7 @@ Fabric's deterministic compaction remains authoritative. Ultra adds a pre-compac
 5. preserve assistant tool-call/result structural pairing;
 6. run compaction QA after every transform.
 
-No LLM decides what bytes are safe to delete. Optional model summaries may add a view, but typed source addresses remain the recovery path.
+The deterministic cut and portable summary do not ask an LLM what source bytes are safe to delete. Official OpenAI Responses models may also persist and replay an opaque provider-native artifact, while exact Claude bridge models use the bridge takeover. The session log and typed source addresses remain the recovery path.
 
 ## Admission policy
 
@@ -311,11 +302,11 @@ Host limits validate shape and budget. Semantic judgment initially remains advis
 | P0 | Planner/executor model stack and return policy | planner restored only under configured policy |
 | P0 | Explicit Prewalk blocked/retry/fallback outcomes | auth failure blocks without looping; transient failure retries within cap |
 | P0 | Stale hidden-continuation guard | old run/phase continuation cannot trigger a new task |
-| P0 | Actor delivery receipts | failed Main/mesh delivery is visible and retryable |
-| P0 | Durable actor inbox | accepted queued message survives manager restart |
-| P0 | Actor retry/backoff/circuit breaker | controlled transient success and permanent dead letter |
-| P1 | Configurable actor overflow policy | queue limit exercises reject/coalesce/drop/dead-letter deterministically |
-| P1 | Per-actor lifetime/window budgets | subscribed actor stops admission at quota |
+| P0 | Persistent Agent delivery receipts | failed Main/mesh delivery is visible and retryable |
+| P0 | Durable persistent Agent inbox | accepted queued message survives manager restart |
+| P0 | Persistent Agent retry/backoff/circuit breaker | controlled transient success and permanent dead letter |
+| P1 | Configurable persistent Agent overflow policy | queue limit exercises reject/coalesce/drop/dead-letter deterministically |
+| P1 | Per-persistent Agent lifetime/window budgets | subscribed persistent Agent stops admission at quota |
 | P1 | Atomic run budget reservations | concurrent launches cannot oversubscribe a hard reservable budget |
 | P1 | Durable phase/DAG runner over mesh CAS | interrupted run resumes only ready unfinished phases |
 | P1 | Evidence gate chain | advise/revise/abort and gate crash semantics are executable |
@@ -324,12 +315,12 @@ Host limits validate shape and budget. Semantic judgment initially remains advis
 | P2 | Context QoS with turn/evidence protection | stale duplicate output retires while recent evidence remains exact |
 | P2 | Deterministic admission envelope | zero-agent default and explicit partial coverage |
 | P2 | Capability-aware model router and fallback chain | ineligible model is never selected; fallback is audited |
-| P2 | End-to-end trace/span envelope | one trace correlates provider, tool, agent, actor, gate, and workflow costs |
+| P2 | End-to-end trace/span envelope | one trace correlates provider, tool, agent, persistent Agent, gate, and workflow costs |
 | P3 | Outcome ledger and benchmark-driven recommendations | route report compares quality, cost, and latency with confidence bounds |
 
 ## Delivery slices
 
-Current adoption on `prewalk-continuity`: Slices 0-7 and the Ultra Consult context-delegation increment are implemented and tested. Slice 1 adds configurable effect-aware continuity and gated revision. Slice 2 adds durable actors, delivery recovery, quotas, overload telemetry, and ambient outcomes. Slice 3 propagates run identity, evidence/gates, and atomic reservations. Slice 4 provides durable phase/DAG execution plus owner spans and cooperative write leases. Slice 5 provides deterministic pre-threshold Context QoS. Slice 6 provides explicit admission, capability profiles, and capability/auth-aware routing. Slice 7 provides live health surfaces, derived outcomes, deterministic/model-judge scoring, and confidence-bounded recommendations. The context increment adds one typed `consult.run` surface with context-aware zero-agent admission, bounded fresh read-only workers, Partition/Challenge/Compare semantics, host-resolved file evidence, explicit partial coverage, and prompt-free outcome metrics. Slice 8 remains operational rollout and benchmark evidence, not another backend feature slice.
+Current adoption on `prewalk-continuity`: Slices 0-7 and the Ultra Consult context-delegation increment are implemented and tested. Slice 1 adds configurable effect-aware continuity and gated revision. Slice 2 adds durable persistent Agents, delivery recovery, quotas, overload telemetry, and ambient outcomes. Slice 3 propagates run identity, evidence/gates, and atomic reservations. Slice 4 provides durable phase/DAG execution plus owner spans and cooperative write leases. Slice 5 provides deterministic pre-threshold Context QoS. Slice 6 provides explicit admission, capability profiles, and capability/auth-aware routing. Slice 7 provides live health surfaces, derived outcomes, deterministic/model-judge scoring, and confidence-bounded recommendations. The context increment adds one typed `consult.run` surface with context-aware zero-agent admission, bounded fresh read-only workers, Partition/Challenge/Compare semantics, host-resolved file evidence, explicit partial coverage, and prompt-free outcome metrics. Slice 8 remains operational rollout and benchmark evidence, not another backend feature slice.
 
 ### Slice 0: establish the fork
 
@@ -345,7 +336,7 @@ Current adoption on `prewalk-continuity`: Slices 0-7 and the Ultra Consult conte
 - Blocked/retry/fallback and return policy behind opt-in config.
 - RED/GREEN transition and lifecycle-event tests.
 
-### Slice 2: reliable actors
+### Slice 2: reliable persistent agents
 
 - Durable inbox/outbox schema and migration.
 - Delivery receipts, dead letters, retry/backoff, and circuit breaker.
@@ -403,7 +394,7 @@ This increment closes the context-capacity and fresh-subagent gap identified aft
 - A stale continuation cannot act on a newer task.
 - A continuous run has an explicit maximum number of model/phase cycles.
 
-### Actor reliability
+### Persistent-agent reliability
 
 - An acknowledged inbox item survives process restart and ownership transfer.
 - Every output ends as mailbox-only, mesh-published, Main-delivered, stale, rejected, or dead-lettered.
@@ -430,7 +421,7 @@ Use at least 20 representative repository tasks and compare upstream Fabric with
 
 - completed acceptance criteria;
 - unsupported claims and missed constraints;
-- lost or duplicate actor deliveries;
+- lost or duplicate persistent Agent deliveries;
 - recovery success and dead-letter rate;
 - context tokens before each model request;
 - parent-context tokens;

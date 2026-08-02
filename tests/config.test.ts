@@ -61,17 +61,17 @@ describe("Fabric configuration", () => {
         eventHistory: 0,
       },
       mesh: {
-        actorQueueLimit: 0,
-        actorRunMaxAttempts: 99,
-        actorRunBaseDelayMs: -1,
-        actorRunMaxDelayMs: 99_999,
-        actorRunJitterMs: 99_999,
-        actorDeliveryMaxAttempts: 99,
-        actorDeliveryBaseDelayMs: -1,
-        actorDeliveryMaxDelayMs: 99_999,
-        actorDeliveryJitterMs: 99_999,
-        actorCircuitFailureThreshold: 0,
-        actorCircuitCooldownMs: Number.MAX_SAFE_INTEGER,
+        persistentAgentQueueLimit: 0,
+        persistentAgentRunMaxAttempts: 99,
+        persistentAgentRunBaseDelayMs: -1,
+        persistentAgentRunMaxDelayMs: 99_999,
+        persistentAgentRunJitterMs: 99_999,
+        persistentAgentDeliveryMaxAttempts: 99,
+        persistentAgentDeliveryBaseDelayMs: -1,
+        persistentAgentDeliveryMaxDelayMs: 99_999,
+        persistentAgentDeliveryJitterMs: 99_999,
+        persistentAgentCircuitFailureThreshold: 0,
+        persistentAgentCircuitCooldownMs: Number.MAX_SAFE_INTEGER,
         eventContextChars: 5_000_000,
       },
     });
@@ -100,30 +100,30 @@ describe("Fabric configuration", () => {
       refreshMs: 100,
       eventHistory: 1,
     });
-    expect(config.mesh.actorQueueLimit).toBe(1);
+    expect(config.mesh.persistentAgentQueueLimit).toBe(1);
     expect(config.mesh).toMatchObject({
-      actorRunMaxAttempts: 10,
-      actorRunBaseDelayMs: 0,
-      actorRunMaxDelayMs: 60_000,
-      actorRunJitterMs: 60_000,
-      actorDeliveryMaxAttempts: 10,
-      actorDeliveryBaseDelayMs: 0,
-      actorDeliveryMaxDelayMs: 60_000,
-      actorDeliveryJitterMs: 60_000,
-      actorCircuitFailureThreshold: 1,
-      actorCircuitCooldownMs: 24 * 60 * 60 * 1_000,
+      persistentAgentRunMaxAttempts: 10,
+      persistentAgentRunBaseDelayMs: 0,
+      persistentAgentRunMaxDelayMs: 60_000,
+      persistentAgentRunJitterMs: 60_000,
+      persistentAgentDeliveryMaxAttempts: 10,
+      persistentAgentDeliveryBaseDelayMs: 0,
+      persistentAgentDeliveryMaxDelayMs: 60_000,
+      persistentAgentDeliveryJitterMs: 60_000,
+      persistentAgentCircuitFailureThreshold: 1,
+      persistentAgentCircuitCooldownMs: 24 * 60 * 60 * 1_000,
     });
     expect(config.mesh.eventContextChars).toBe(1_000_000);
   });
 
-  it("normalizes actor overflow policy", () => {
+  it("normalizes persistentAgent overflow policy", () => {
     expect(
-      normalizeFabricConfig({ mesh: { actorOverflowPolicy: "dead-letter" } }).mesh
-        .actorOverflowPolicy,
+      normalizeFabricConfig({ mesh: { persistentAgentOverflowPolicy: "dead-letter" } }).mesh
+        .persistentAgentOverflowPolicy,
     ).toBe("dead-letter");
     expect(
-      normalizeFabricConfig({ mesh: { actorOverflowPolicy: "discard" } }).mesh
-        .actorOverflowPolicy,
+      normalizeFabricConfig({ mesh: { persistentAgentOverflowPolicy: "discard" } }).mesh
+        .persistentAgentOverflowPolicy,
     ).toBe("reject");
   });
 
@@ -399,37 +399,37 @@ describe("Fabric configuration", () => {
     expect(DEFAULT_FABRIC_CONFIG.retention).toEqual({
       orphanedTempRunMs: 6 * 60 * 60 * 1_000,
       oneShotRunMs: 24 * 60 * 60 * 1_000,
-      actorRunArchiveMs: 7 * 24 * 60 * 60 * 1_000,
+      persistentAgentRunArchiveMs: 7 * 24 * 60 * 60 * 1_000,
     });
     expect(
       normalizeFabricConfig({
         retention: {
           orphanedTempRunMs: 2 * 60 * 60 * 1_000,
           oneShotRunMs: 2 * 24 * 60 * 60 * 1_000,
-          actorRunArchiveMs: 30 * 24 * 60 * 60 * 1_000,
+          persistentAgentRunArchiveMs: 30 * 24 * 60 * 60 * 1_000,
         },
       }).retention,
     ).toEqual({
       orphanedTempRunMs: 2 * 60 * 60 * 1_000,
       oneShotRunMs: 2 * 24 * 60 * 60 * 1_000,
-      actorRunArchiveMs: 30 * 24 * 60 * 60 * 1_000,
+      persistentAgentRunArchiveMs: 30 * 24 * 60 * 60 * 1_000,
     });
     expect(
       normalizeFabricConfig({ retention: { orphanedTempRunMs: 1 } }).retention.orphanedTempRunMs,
     ).toBe(60 * 60 * 1_000);
   });
 
-  it("defaults actor scope to project and validates the value", () => {
-    expect(DEFAULT_FABRIC_CONFIG.mesh.actorScope).toBe("project");
-    const session = normalizeFabricConfig({ mesh: { actorScope: "session" } });
-    expect(session.mesh.actorScope).toBe("session");
-    const invalid = normalizeFabricConfig({ mesh: { actorScope: "untrusted" } });
-    expect(invalid.mesh.actorScope).toBe("project");
-    const nonString = normalizeFabricConfig({ mesh: { actorScope: 42 } });
-    expect(nonString.mesh.actorScope).toBe("project");
+  it("defaults persistentAgent scope to project and validates the value", () => {
+    expect(DEFAULT_FABRIC_CONFIG.mesh.persistentAgentScope).toBe("project");
+    const session = normalizeFabricConfig({ mesh: { persistentAgentScope: "session" } });
+    expect(session.mesh.persistentAgentScope).toBe("session");
+    const invalid = normalizeFabricConfig({ mesh: { persistentAgentScope: "untrusted" } });
+    expect(invalid.mesh.persistentAgentScope).toBe("project");
+    const nonString = normalizeFabricConfig({ mesh: { persistentAgentScope: 42 } });
+    expect(nonString.mesh.persistentAgentScope).toBe("project");
   });
 
-  it("normalizes the ESC halt toggle for actors", () => {
+  it("normalizes the ESC halt toggle for persistentAgents", () => {
     expect(DEFAULT_FABRIC_CONFIG.ui.haltOnEscape).toBe(true);
     const disabled = normalizeFabricConfig({ ui: { haltOnEscape: false } });
     expect(disabled.ui.haltOnEscape).toBe(false);

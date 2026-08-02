@@ -11,7 +11,7 @@ const lifecycleFile = args.get("lifecycle-file");
 const id = args.get("id");
 const name = args.get("name");
 const depth = Number(args.get("depth") ?? "1");
-const actorId = args.get("actor-id");
+const persistentAgentId = args.get("persistentAgent-id");
 const occurredAt = Date.now();
 
 const usage = {
@@ -19,7 +19,7 @@ const usage = {
   name,
   runner: "pi",
   depth,
-  ...(actorId ? { actorId } : {}),
+  ...(persistentAgentId ? { persistentAgentId } : {}),
   input: 4,
   output: 6,
   cacheRead: 2,

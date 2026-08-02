@@ -493,8 +493,8 @@ describe("MemoryProvider", () => {
     cwd = "/home/user/provider-proj";
     writeSessionFile(path.join(agentDir, "sessions", encodeCwdDir(cwd)), "1_main.jsonl", [
       sessionHeader("main", cwd),
-      msg("e1", null, ts(0), userMessage("remember the auth refactor")),
-      msg("e2", "e1", ts(1), assistantText("the auth refactor touched login.ts")),
+      msg("e1", null, ts(0), userMessage("remember the auth refpersistentAgent")),
+      msg("e2", "e1", ts(1), assistantText("the auth refpersistentAgent touched login.ts")),
       msg("e3", "e2", ts(2), userMessage("ship the deploy pipeline")),
       msg("e4", "e3", ts(3), assistantText("deploy pipeline configured")),
     ]);
@@ -562,7 +562,7 @@ describe("MemoryProvider", () => {
     const result = (await provider().invoke("expand", { session: "main", indices: [0] }, invocationContext(cwd))) as {
       expanded: { index: number; text: string | null }[];
     };
-    expect(result.expanded[0]!.text).toContain("remember the auth refactor");
+    expect(result.expanded[0]!.text).toContain("remember the auth refpersistentAgent");
   });
 
   it("sessions lists known sessions with entry counts", async () => {

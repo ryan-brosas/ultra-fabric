@@ -54,13 +54,13 @@ export const resolveFabricIdentity = (
   sessionId: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): FabricIdentityResolution => {
-  const actorId = environment.PI_FABRIC_ACTOR_ID?.trim();
+  const persistentAgentId = environment.PI_FABRIC_PERSISTENT_AGENT_ID?.trim();
   const parentAgentId = environment.PI_FABRIC_PARENT_RUN?.trim();
-  const identity: MeshIdentity = actorId
+  const identity: MeshIdentity = persistentAgentId
     ? {
-        id: actorId,
-        name: environment.PI_FABRIC_ACTOR_NAME?.trim() || actorId.slice(0, 8),
-        kind: "actor",
+        id: persistentAgentId,
+        name: environment.PI_FABRIC_PERSISTENT_AGENT_NAME?.trim() || persistentAgentId.slice(0, 8),
+        kind: "persistentAgent",
         sessionId,
       }
     : parentAgentId

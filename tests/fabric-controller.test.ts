@@ -14,8 +14,8 @@ const theme = {
   bold: (t: string) => t,
 } as unknown as Theme;
 
-const stubActor = {
-  id: "actor-1",
+const stubPersistentAgent = {
+  id: "persistentAgent-1",
   name: "advisor",
   status: "idle",
   events: ["turn_end"],
@@ -58,8 +58,8 @@ const stubState = () =>
       routed: "main",
     }),
     agents: { list: vi.fn(() => []), subscribeUi: vi.fn(() => () => {}) },
-    actors: {
-      list: vi.fn(() => [stubActor]),
+    persistentAgents: {
+      list: vi.fn(() => [stubPersistentAgent]),
       messages: vi.fn(() => []),
       instructions: vi.fn(() => "Advise only when useful."),
       setModel: vi.fn().mockResolvedValue(undefined),
@@ -69,7 +69,7 @@ const stubState = () =>
       clearMessages: vi.fn().mockResolvedValue(undefined),
       subscribe: vi.fn(() => () => {}),
     },
-    globalActors: {
+    templates: {
       list: vi.fn(() => []),
       resolve: vi.fn(() => undefined),
       create: vi.fn(() => ({ id: "g1", name: "x", createdAt: 0, updatedAt: 0 })),
@@ -82,7 +82,7 @@ const stubState = () =>
   }) as unknown as FabricState;
 
 describe("FabricUiController dashboard wiring", () => {
-  it("passes every actor callback to the dashboard so all pickers are available", async () => {
+  it("passes every persistentAgent callback to the dashboard so all pickers are available", async () => {
     const state = stubState();
     const controller = new FabricUiController(state);
     const tui = { requestRender: vi.fn() } as unknown as TUI;
@@ -103,7 +103,7 @@ describe("FabricUiController dashboard wiring", () => {
     try {
       await controller.openDashboard(context);
       expect(dashboard).toBeDefined();
-      // Enter the entities pane and open the actor detail.
+      // Enter the entities pane and open the persistentAgent detail.
       dashboard!.handleInput("l");
       dashboard!.handleInput("\r");
       const detail = dashboard!.render(120).join("\n");
@@ -120,7 +120,7 @@ describe("FabricUiController dashboard wiring", () => {
     }
   });
 
-  it("routes Main dashboard messages through FabricState", async () => {
+  it("routes Main and persistent-agent dashboard messages through FabricState", async () => {
     const state = stubState();
     const controller = new FabricUiController(state);
     const tui = { requestRender: vi.fn() } as unknown as TUI;
@@ -154,6 +154,22 @@ describe("FabricUiController dashboard wiring", () => {
         "focus on the failing test",
         "steer",
       );
+
+      dashboard!.handleInput("\x1b");
+      dashboard!.handleInput("h");
+      dashboard!.handleInput("G");
+      dashboard!.handleInput("l");
+      dashboard!.handleInput("u");
+      dashboard!.handleInput("review after current mailbox work");
+      dashboard!.handleInput("\r");
+      expect(state.queueUserMessage).toHaveBeenCalledWith(
+        stubPersistentAgent.id,
+        "review after current mailbox work",
+        "followUp",
+      );
+      await vi.waitFor(() =>
+        expect(context.ui.notify).toHaveBeenCalledWith("Follow-up queued for advisor", "info"),
+      );
     } finally {
       dashboard?.dispose();
       controller.stop();
@@ -164,7 +180,7 @@ describe("FabricUiController dashboard wiring", () => {
     vi.useFakeTimers();
     const state = stubState();
     state.config.ui.refreshMs = 100;
-    vi.mocked(state.actors.list).mockReturnValue([]);
+    vi.mocked(state.persistentAgents.list).mockReturnValue([]);
     const settledRun: FabricActivityRun = {
       id: "settled-run",
       name: "Large settled run",
@@ -203,14 +219,14 @@ describe("FabricUiController dashboard wiring", () => {
     }
   });
 
-  it("wakes settled UI state when actors or detached agents change", async () => {
+  it("wakes settled UI state when persistentAgents or detached agents change", async () => {
     vi.useFakeTimers();
     const state = stubState();
     state.config.ui.refreshMs = 500;
-    let onActor = (): void => {};
+    let onPersistentAgent = (): void => {};
     let onAgent = (): void => {};
-    vi.mocked(state.actors.subscribe).mockImplementation((listener) => {
-      onActor = listener;
+    vi.mocked(state.persistentAgents.subscribe).mockImplementation((listener) => {
+      onPersistentAgent = listener;
       return () => {};
     });
     vi.mocked(state.agents.subscribeUi).mockImplementation((listener) => {
@@ -225,7 +241,7 @@ describe("FabricUiController dashboard wiring", () => {
     try {
       controller.start(context);
       expect(state.activity.runs).toHaveBeenCalledTimes(1);
-      onActor();
+      onPersistentAgent();
       await vi.advanceTimersByTimeAsync(100);
       expect(state.activity.runs).toHaveBeenCalledTimes(2);
       onAgent();

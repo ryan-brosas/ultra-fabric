@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildActorContext } from "../src/actors/context.js";
+import { buildPersistentAgentContext } from "../src/agents/persistent/context.js";
 
 const branch = (messages: unknown[]) => messages.map((message) => ({ type: "message", message }));
 
-describe("buildActorContext", () => {
+describe("buildPersistentAgentContext", () => {
   it("builds a digest with touched files, open errors, and the last user request", () => {
-    const ctx = buildActorContext(
+    const ctx = buildPersistentAgentContext(
       branch([
         { role: "user", content: "Fix the login bug" },
         {
@@ -28,7 +28,7 @@ describe("buildActorContext", () => {
   });
 
   it("compacts the transcript to one-liners in oldest-first order", () => {
-    const ctx = buildActorContext(
+    const ctx = buildPersistentAgentContext(
       branch([
         { role: "user", content: "first" },
         {
@@ -55,7 +55,7 @@ describe("buildActorContext", () => {
 
   it("caps the transcript to the tail count of messages", () => {
     const msgs = Array.from({ length: 20 }, (_, i) => ({ role: "user", content: `turn ${i}` }));
-    const ctx = buildActorContext(branch(msgs), 5, 40_000);
+    const ctx = buildPersistentAgentContext(branch(msgs), 5, 40_000);
     expect(ctx.transcript).toHaveLength(5);
     expect(ctx.transcript[0]).toContain("turn 15");
     expect(ctx.transcript[4]).toContain("turn 19");
@@ -63,7 +63,7 @@ describe("buildActorContext", () => {
 
   it("truncates long content and bounds total transcript chars", () => {
     const long = "x".repeat(5000);
-    const ctx = buildActorContext(
+    const ctx = buildPersistentAgentContext(
       branch([
         { role: "user", content: long },
         { role: "user", content: long },
@@ -77,7 +77,7 @@ describe("buildActorContext", () => {
   });
 
   it("skips thinking blocks and renders bashExecution compactly", () => {
-    const ctx = buildActorContext(
+    const ctx = buildPersistentAgentContext(
       branch([
         { role: "assistant", content: [{ type: "thinking", thinking: "internal", redacted: false }] },
         { role: "bashExecution", command: "rg foo", output: "", exitCode: 0 },
@@ -94,8 +94,8 @@ describe("buildActorContext", () => {
       { role: "user", content: "go" },
       { role: "assistant", content: [{ type: "toolCall", name: "edit", arguments: { path: "b.ts", edits: [] } }] },
     ]);
-    const a = JSON.stringify(buildActorContext(b, 14, 40_000).digest);
-    const c = JSON.stringify(buildActorContext(structuredClone(b), 14, 40_000).digest);
+    const a = JSON.stringify(buildPersistentAgentContext(b, 14, 40_000).digest);
+    const c = JSON.stringify(buildPersistentAgentContext(structuredClone(b), 14, 40_000).digest);
     expect(a).toEqual(c);
   });
 });

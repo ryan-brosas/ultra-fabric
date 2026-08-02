@@ -9,6 +9,9 @@ const usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: 0 };
 
 const record = (id: string, nestedAgents?: AgentRunRecord[]): AgentRunRecord => ({
   id,
+  kind: "agent",
+  lifecycle: "one-shot",
+  role: "worker",
   name: id,
   task: `Inspect ${id}`,
   status: "running",
@@ -60,7 +63,7 @@ const run = (
 const fakeState = (
   runs: FabricActivityRun[],
   records: AgentRunRecord[],
-  actors: unknown[] = [],
+  persistentAgents: unknown[] = [],
   peers: unknown[] = [],
   participants: FabricParticipantInfo[] = [],
 ): FabricState =>
@@ -83,8 +86,8 @@ const fakeState = (
       local: true,
     }),
     agents: { list: () => records },
-    actors: { list: () => actors, instructions: () => "", messages: () => [] },
-    globalActors: { list: () => [] },
+    persistentAgents: { list: () => persistentAgents, instructions: () => "", messages: () => [] },
+    templates: { list: () => [] },
     config: { mesh: { enabled: false } },
     mesh: { list: () => [] },
   }) as unknown as FabricState;
@@ -272,9 +275,9 @@ describe("dashboard snapshot agent ownership", () => {
     expect(snapshot.agents.filter((agent) => agent.local === false)).toHaveLength(239);
   });
 
-  it("does not overlay private local actor state when another host owns it", () => {
-    const actor = {
-      id: "actor:shared",
+  it("does not overlay private local persistentAgent state when another host owns it", () => {
+    const persistentAgent = {
+      id: "persistentAgent:shared",
       name: "shared reviewer",
       status: "idle",
       events: [],
@@ -290,13 +293,13 @@ describe("dashboard snapshot agent ownership", () => {
     };
     const participant: FabricParticipantInfo = {
       format: 1,
-      id: actor.id,
-      kind: "actor",
+      id: persistentAgent.id,
+      kind: "persistentAgent",
       rootId: "session:peer",
       ownerHostId: "session:peer",
       ownerIdentityId: "session:peer",
       parentId: "session:peer",
-      name: actor.name,
+      name: persistentAgent.name,
       status: "idle",
       runner: "pi",
       transport: "host",
@@ -309,28 +312,28 @@ describe("dashboard snapshot agent ownership", () => {
     };
 
     const snapshot = createDashboardSnapshot(
-      fakeState([], [], [actor], [], [participant]),
+      fakeState([], [], [persistentAgent], [], [participant]),
       [],
     );
-    expect(snapshot.actors).toEqual([]);
+    expect(snapshot.persistentAgents).toEqual([]);
     expect(snapshot.participants).toEqual([participant]);
   });
 
-  it("prefers an active actor worker over a newer retained failure", () => {
+  it("prefers an active persistentAgent worker over a newer retained failure", () => {
     const failed = {
-      ...record("actor-failed"),
-      actorId: "actor-1",
+      ...record("persistentAgent-failed"),
+      persistentAgentId: "persistentAgent-1",
       status: "failed" as const,
       updatedAt: 900,
     };
     const running = {
-      ...record("actor-running"),
-      actorId: "actor-1",
+      ...record("persistentAgent-running"),
+      persistentAgentId: "persistentAgent-1",
       status: "running" as const,
       updatedAt: 800,
     };
-    const actor = {
-      id: "actor-1",
+    const persistentAgent = {
+      id: "persistentAgent-1",
       name: "reviewer",
       status: "running",
       events: [],
@@ -345,8 +348,8 @@ describe("dashboard snapshot agent ownership", () => {
       updatedAt: 900,
     };
 
-    const snapshot = createDashboardSnapshot(fakeState([], [failed, running], [actor]), []);
-    expect(snapshot.actors[0]?.worker?.id).toBe("actor-running");
+    const snapshot = createDashboardSnapshot(fakeState([], [failed, running], [persistentAgent]), []);
+    expect(snapshot.persistentAgents[0]?.worker?.id).toBe("persistentAgent-running");
   });
 });
 

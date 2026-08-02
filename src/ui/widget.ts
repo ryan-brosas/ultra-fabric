@@ -94,7 +94,7 @@ export const shouldShowFabricWidget = (
   if (mode === "hidden") return false;
   if (mode === "always") return true;
   if (snapshot.agents.some((agent) => isActiveStatus(agent.status))) return true;
-  if (snapshot.actors.some((actor) => actor.status !== "stopped")) return true;
+  if (snapshot.persistentAgents.some((persistentAgent) => persistentAgent.status !== "stopped")) return true;
   const run = snapshot.runs[0];
   if (!run) return false;
   if (run.status === "running") return true;
@@ -179,19 +179,19 @@ export class FabricWidget implements Component {
             !isActiveStatus(agent.status),
         )
       : [];
-    const visibleActors = snapshot.actors.filter((actor) => actor.status !== "stopped");
-    const activeActorWorkers = visibleActors
-      .filter((actor) => actor.worker && isActiveStatus(actor.worker.status))
-      .map((actor) => ({ ...actor.worker!, name: actor.name }));
-    const terminalActorWorkers = visibleActors
-      .filter((actor) => actor.worker && !isActiveStatus(actor.worker.status))
-      .map((actor) => ({ ...actor.worker!, name: actor.name }));
+    const visiblePersistentAgents = snapshot.persistentAgents.filter((persistentAgent) => persistentAgent.status !== "stopped");
+    const activePersistentAgentWorkers = visiblePersistentAgents
+      .filter((persistentAgent) => persistentAgent.worker && isActiveStatus(persistentAgent.worker.status))
+      .map((persistentAgent) => ({ ...persistentAgent.worker!, name: persistentAgent.name }));
+    const terminalPersistentAgentWorkers = visiblePersistentAgents
+      .filter((persistentAgent) => persistentAgent.worker && !isActiveStatus(persistentAgent.worker.status))
+      .map((persistentAgent) => ({ ...persistentAgent.worker!, name: persistentAgent.name }));
     const nestedCalls =
-      run?.calls.filter((call) => call.kind !== "agent" && call.kind !== "actor") ?? [];
+      run?.calls.filter((call) => call.kind !== "agent" && call.kind !== "persistentAgent") ?? [];
     const title = run?.name ?? "Fabric session";
     const headerStatus =
       run?.status ??
-      (activeAgents.length > 0 || activeActorWorkers.length > 0 ? "running" : "idle");
+      (activeAgents.length > 0 || activePersistentAgentWorkers.length > 0 ? "running" : "idle");
     const parts: string[] = [];
 
     const callTotal = nestedCalls.length;
@@ -214,7 +214,7 @@ export class FabricWidget implements Component {
       }
     }
     if (activeAgents.length > 0) parts.push(`${activeAgents.length} running`);
-    if (visibleActors.length > 0) parts.push(`${visibleActors.length} actor${visibleActors.length === 1 ? "" : "s"}`);
+    if (visiblePersistentAgents.length > 0) parts.push(`${visiblePersistentAgents.length} persistent`);
     const tokens = totalTokens(snapshot, run);
     if (tokens > 0) parts.push(`${formatTokens(tokens)} tok`);
     if (run) parts.push(formatDuration((run.finishedAt ?? snapshot.now) - run.startedAt));
@@ -228,18 +228,18 @@ export class FabricWidget implements Component {
 
     lines.push(
       ...activeAgents.flatMap((agent) => agentLines(this.theme, agent, snapshot.now)),
-      ...activeActorWorkers.flatMap((agent) =>
+      ...activePersistentAgentWorkers.flatMap((agent) =>
         agentLines(this.theme, agent, snapshot.now),
       ),
-      ...terminalActorWorkers.flatMap((agent) =>
+      ...terminalPersistentAgentWorkers.flatMap((agent) =>
         agentLines(this.theme, agent, snapshot.now),
       ),
       ...terminalAgents.flatMap((agent) => agentLines(this.theme, agent, snapshot.now)),
     );
     const ambientOwners = [
       ...activeAgents.map((agent) => `agent:${agent.id}`),
-      ...visibleActors.map(
-        (actor) => `actor:${actor.id}:${actor.worker?.id ?? actor.lastRunId ?? "idle"}`,
+      ...visiblePersistentAgents.map(
+        (persistentAgent) => `persistentAgent:${persistentAgent.id}:${persistentAgent.worker?.id ?? persistentAgent.lastRunId ?? "idle"}`,
       ),
     ];
     return {

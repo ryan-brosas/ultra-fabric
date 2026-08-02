@@ -5,12 +5,13 @@ import type {
   FabricProviderListRequest,
 } from "../protocol.js";
 import { MeshStore, type MeshIdentity } from "../mesh/store.js";
-import type { FabricParticipantSource } from "../topology/types.js";
+import { toPublicAgentParticipant, type FabricParticipantSource } from "../topology/types.js";
 import { FABRIC_PARTICIPANT_LIFECYCLE_TOPIC } from "../lifecycle/types.js";
 
 const emptySchema = { type: "object", properties: {}, additionalProperties: false };
-const INTERNAL_STATE_PREFIXES = ["topology/", "sessions/", "actors/"];
+const INTERNAL_STATE_PREFIXES = ["topology/", "sessions/", "persistentAgents/"];
 const INTERNAL_CONTROL_PREFIX = "fabric.control.";
+
 
 const assertPublicStateKey = (key: string): void => {
   if (INTERNAL_STATE_PREFIXES.some((prefix) => key.startsWith(prefix))) {
@@ -28,7 +29,7 @@ const descriptors: FabricActionDescriptor[] = [
   },
   {
     name: "publish",
-    description: "Append a durable event to a mesh topic, optionally addressed to one actor",
+    description: "Append a durable event to a mesh topic, optionally addressed to one Agent",
     inputSchema: {
       type: "object",
       properties: {
@@ -62,14 +63,14 @@ const descriptors: FabricActionDescriptor[] = [
   },
   {
     name: "members",
-    description: "List roots, agents, and actors in the unified project participant directory",
+    description: "List roots and Agents in the unified project participant directory",
     inputSchema: {
       type: "object",
       properties: {
         scope: { type: "string", enum: ["local", "lineage", "project"] },
         kinds: {
           type: "array",
-          items: { type: "string", enum: ["root", "agent", "actor"] },
+          items: { type: "string", enum: ["root", "agent"] },
         },
         includeStale: { type: "boolean" },
         limit: { type: "number", minimum: 1 },
@@ -203,9 +204,15 @@ export class MeshProvider implements FabricProvider {
       case "members": {
         const kinds = Array.isArray(args.kinds)
           ? args.kinds.filter(
-              (kind): kind is "root" | "agent" | "actor" =>
-                kind === "root" || kind === "agent" || kind === "actor",
+              (kind): kind is "root" | "agent" =>
+                kind === "root" || kind === "agent",
             )
+          : undefined;
+        const internalKinds = kinds
+          ? [
+              ...(kinds.includes("root") ? (["root"] as const) : []),
+              ...(kinds.includes("agent") ? (["agent", "persistentAgent"] as const) : []),
+            ]
           : undefined;
         const scope =
           args.scope === "local" || args.scope === "lineage" || args.scope === "project"
@@ -215,10 +222,11 @@ export class MeshProvider implements FabricProvider {
         return this.participants
           .list({
             scope,
-            ...(kinds ? { kinds } : {}),
+            ...(internalKinds ? { kinds: internalKinds } : {}),
             ...(args.includeStale === true ? { includeStale: true } : {}),
           })
-          .slice(0, limit);
+          .slice(0, limit)
+          .map(toPublicAgentParticipant);
       }
       case "get":
         return this.store.get(String(args.key)) ?? null;

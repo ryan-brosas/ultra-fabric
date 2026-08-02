@@ -505,7 +505,6 @@ const providerCallDetail = (
       case "cleanup":
       case "wait":
       case "status":
-      case "actorStatus":
       case "messages":
         return previewName ?? name ?? id ?? "";
       case "ask":
@@ -516,7 +515,6 @@ const providerCallDetail = (
       case "run":
       case "spawn":
         return name ?? (task ? truncateOneLine(task, 64) : previewName ?? "");
-      case "actors":
       case "list":
       case "models":
       case "peers":

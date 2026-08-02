@@ -77,5 +77,5 @@ export const piHostCompatibilityWarning = (
   if (!version) return undefined;
   const comparison = compareVersions(version, MINIMUM_PI_HOST_VERSION);
   if (comparison === undefined || comparison >= 0) return undefined;
-  return "Pi Fabric requires Pi >= " + MINIMUM_PI_HOST_VERSION + "; detected " + version + ". Actor triggerTurn and other host continuations may be ignored. Upgrade Pi before relying on actor delivery.";
+  return "Pi Fabric requires Pi >= " + MINIMUM_PI_HOST_VERSION + "; detected " + version + ". Persistent Agent triggerTurn and other host continuations may be ignored. Upgrade Pi before relying on persistent Agent delivery.";
 };

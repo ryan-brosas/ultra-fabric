@@ -13,6 +13,7 @@ Hold the main agent's freedom constant: it may plan, spawn agents, run phases, o
 Hard pointer: read `<skill-dir>/../fabric-ambient/references/setup.md` completely before setup, then use its program with:
 
 - `strings.name`: `spec-supervisor`
+- `strings.role`: `supervisor`
 - `strings.events`: `["agent_settled","tool_error"]`
 - `strings.triggerTurn`: `true`
 - `strings.model`: model key or substring, or an empty string when unset
@@ -39,4 +40,4 @@ Idle/error events keep the supervisor off most turns, and coalesced directive re
 
 ## Completion criterion
 
-Complete only when setup returns a `spec-supervisor` with both events, read-only native tools, `triggerTurn: true`, and no recreation warning. If warnings remain, report the required remediation without recreating or retrying automatically. Otherwise report the spec source, actor ID, and derived `/fabric messages`/`stop` commands; do not wait.
+Complete only when setup returns a `spec-supervisor` with both events, read-only native tools, `triggerTurn: true`, and no recreation warning. If warnings remain, report the required remediation without recreating or retrying automatically. Otherwise report the spec source, persistent agent ID, and derived `/fabric messages`/`stop` commands; do not wait.

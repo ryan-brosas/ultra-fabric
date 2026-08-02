@@ -18,6 +18,10 @@ import {
   MAX_TYPED_COMPACTION_SOURCE_BYTES,
 } from "../src/compaction/instructions.js";
 import { normalizeEntries } from "../src/compaction/normalize.js";
+import {
+  compactWithOpenAI,
+  supportsOpenAINativeCompaction,
+} from "../src/compaction/openai-native.js";
 import { project, projectOutstanding } from "../src/compaction/projections.js";
 import {
   buildSessionContext,
@@ -210,8 +214,8 @@ type InteropCompactionEvent = SessionBeforeCompactEvent & {
 
 const compactionHandler = (
   engine: "pi" | "fabric",
-): ((event: SessionBeforeCompactEvent) => unknown) => {
-  let handler: ((event: SessionBeforeCompactEvent) => unknown) | undefined;
+): ((event: SessionBeforeCompactEvent, context?: ExtensionContext) => unknown) => {
+  let handler: ((event: SessionBeforeCompactEvent, context?: ExtensionContext) => unknown) | undefined;
   const pi = {
     on(name: string, candidate: unknown) {
       if (name === "session_before_compact") {
@@ -233,7 +237,103 @@ const compactionEvent = (
   ...(customInstructions === undefined ? {} : { customInstructions }),
 }) as unknown as InteropCompactionEvent;
 
+const OPENAI_TEST_MODEL = {
+  id: "gpt-5.4",
+  name: "GPT-5.4",
+  api: "openai-responses",
+  provider: "openai",
+  baseUrl: "https://api.openai.com/v1",
+  reasoning: true,
+  input: ["text"],
+  contextWindow: 400_000,
+  maxTokens: 128_000,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+} as unknown as NonNullable<ExtensionContext["model"]>;
+
+const openAIContext = (options: {
+  branch?: SessionEntry[];
+  headers?: Record<string, string>;
+} = {}): ExtensionContext => ({
+  model: OPENAI_TEST_MODEL,
+  modelRegistry: {
+    getApiKeyAndHeaders: async () => ({
+      ok: true,
+      apiKey: "test-key",
+      headers: options.headers ?? {},
+    }),
+  },
+  sessionManager: {
+    getSessionId: () => "session-1",
+    getBranch: () => options.branch ?? [],
+  },
+  getSystemPrompt: () => "system",
+  thinkingLevel: "high",
+  hasUI: false,
+}) as unknown as ExtensionContext;
+
+type TestExtensionHandler = (event: unknown, context: ExtensionContext) => unknown;
+
+const compactionHookHarness = (): {
+  handlers: Map<string, TestExtensionHandler[]>;
+  pi: ExtensionAPI;
+} => {
+  const handlers = new Map<string, TestExtensionHandler[]>();
+  const pi = {
+    on(name: string, handler: TestExtensionHandler) {
+      handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+    },
+    getAllTools: () => [],
+    getActiveTools: () => [],
+  } as unknown as ExtensionAPI;
+  registerCompactionHook(pi, { getEngine: () => "fabric" });
+  return { handlers, pi };
+};
+
 describe("compaction pi-vcc interop", () => {
+  it("limits native OpenAI compaction to official endpoints", () => {
+    const directProxy = {
+      provider: "openai",
+      api: "openai-responses",
+      id: "gpt-5.4",
+      baseUrl: "not a URL",
+    } as unknown as NonNullable<ExtensionContext["model"]>;
+    const codexProxy = {
+      provider: "openai-codex",
+      api: "openai-codex-responses",
+      id: "gpt-5.4",
+      baseUrl: "https://proxy.example/v1",
+    } as unknown as NonNullable<ExtensionContext["model"]>;
+
+    expect(supportsOpenAINativeCompaction(directProxy)).toBe(false);
+    expect(supportsOpenAINativeCompaction(codexProxy)).toBe(false);
+  });
+
+  it("rejects oversized OpenAI compaction responses before persistence", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response([
+      'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"opaque"}}',
+      "",
+      'data: {"type":"response.completed","response":{}}',
+      "",
+    ].join("\n"), {
+      status: 200,
+      headers: { "content-length": String(20 * 1024 * 1024 + 1) },
+    });
+    const { pi } = compactionHookHarness();
+    const context = openAIContext();
+    const event = {
+      ...compactionEvent([user("compact this")]),
+      signal: new AbortController().signal,
+    } as SessionBeforeCompactEvent;
+
+    try {
+      await expect(compactWithOpenAI({ pi, event, context }))
+        .rejects.toThrow("response exceeded 20 MiB");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("defers to an explicit /pi-vcc sentinel", () => {
     resetIds();
     resetClock();
@@ -244,6 +344,182 @@ describe("compaction pi-vcc interop", () => {
 
     expect(compactionHandler("fabric")(event)).toBeUndefined();
     expect(event._fabricCompaction).toBeUndefined();
+  });
+
+  it("delegates Claude bridge models to the bridge compactor", () => {
+    resetIds();
+    resetClock();
+    const event = compactionEvent(
+      buildSession(user("compact this"), assistant(textPart("done"))),
+    );
+    const context = {
+      model: { baseUrl: "claude-bridge", api: "claude-bridge", provider: "claude-bridge" },
+    } as unknown as ExtensionContext;
+
+    expect(compactionHandler("fabric")(event, context)).toBeUndefined();
+    expect(event._fabricCompaction).toBeUndefined();
+  });
+
+  it("persists OpenAI native replacement history inside a Fabric compaction", async () => {
+    resetIds();
+    resetClock();
+    const event = compactionEvent(
+      buildSession(
+        user("compact this"),
+        customMessage("checkpoint", "remember this", true),
+        assistant(textPart("done")),
+      ),
+    );
+    const requests: Array<Record<string, unknown>> = [];
+    const requestHeaders: HeadersInit[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      requestHeaders.push(init?.headers ?? {});
+      return new Response([
+        'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"opaque"}}',
+        "",
+        'data: {"type":"response.completed","response":{"usage":{"input_tokens":120,"output_tokens":8,"total_tokens":128,"input_tokens_details":{"cached_tokens":20}}}}',
+        "",
+        "data: [DONE]",
+        "",
+      ].join("\n"), { status: 200 });
+    };
+    const context = openAIContext({
+      headers: { "x-codex-beta-features": "existing_feature" },
+    });
+
+    try {
+      const result = await compactionHandler("fabric")(event, context) as {
+        compaction: { summary: string; details: Record<string, unknown> };
+      };
+      expect(result.compaction.summary).toContain("[Session Goal]");
+      expect(result.compaction.details.remoteCompaction).toMatchObject({
+        version: 1,
+        provider: "openai-responses-compaction",
+        modelKey: "openai:openai-responses:gpt-5.4",
+        replacementHistory: [
+          { role: "user", content: [{ type: "input_text", text: "compact this" }] },
+          { role: "user", content: [{ type: "input_text", text: "remember this" }] },
+          { type: "compaction", encrypted_content: "opaque" },
+        ],
+        usage: {
+          input: 100,
+          output: 8,
+          cacheRead: 20,
+          cacheWrite: 0,
+          totalTokens: 128,
+        },
+      });
+      expect(requests).toHaveLength(1);
+      expect((requests[0]!.input as unknown[]).at(-1)).toEqual({ type: "compaction_trigger" });
+      expect(new Headers(requestHeaders[0]).get("x-codex-beta-features"))
+        .toBe("existing_feature,remote_compaction_v2");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("replays persisted OpenAI replacement history on the next provider request", () => {
+    const { handlers } = compactionHookHarness();
+    const compactionEntry = {
+      id: "compact-1",
+      parentId: null,
+      timestamp: "2026-04-15T00:00:00.000Z",
+      type: "compaction",
+      summary: "portable",
+      firstKeptEntryId: "",
+      tokensBefore: 1000,
+      details: {
+        compactor: "fabric",
+        version: 2,
+        remoteCompaction: {
+          version: 1,
+          provider: "openai-responses-compaction",
+          modelKey: "openai:openai-responses:gpt-5.4",
+          replacementHistory: [{ type: "compaction", encrypted_content: "opaque" }],
+        },
+      },
+    } as unknown as SessionEntry;
+    const context = openAIContext({ branch: [compactionEntry] });
+
+    for (const handler of handlers.get("session_start") ?? []) {
+      handler({ type: "session_start", reason: "resume" }, context);
+    }
+    const nextUser = {
+      role: "user",
+      content: [{ type: "text", text: "continue" }],
+      timestamp: Date.now(),
+    };
+    for (const handler of handlers.get("message_end") ?? []) {
+      handler({ type: "message_end", message: nextUser }, context);
+    }
+    let payload: unknown = { model: "gpt-5.4", input: [{ role: "user", content: "wrong history" }] };
+    for (const handler of handlers.get("before_provider_request") ?? []) {
+      payload = handler({ type: "before_provider_request", payload }, context) ?? payload;
+    }
+
+    expect(payload).toMatchObject({
+      input: [
+        { type: "compaction", encrypted_content: "opaque" },
+        { role: "user", content: [{ type: "input_text", text: "continue" }] },
+      ],
+    });
+  });
+
+  it("feeds prior native history into repeated OpenAI compaction", async () => {
+    const { handlers } = compactionHookHarness();
+    const priorCompaction = {
+      id: "compact-1",
+      parentId: null,
+      timestamp: "2026-04-15T00:00:00.000Z",
+      type: "compaction",
+      summary: "portable",
+      firstKeptEntryId: "",
+      tokensBefore: 1000,
+      details: {
+        remoteCompaction: {
+          version: 1,
+          provider: "openai-responses-compaction",
+          modelKey: "openai:openai-responses:gpt-5.4",
+          replacementHistory: [{ type: "compaction", encrypted_content: "prior-opaque" }],
+        },
+      },
+    } as unknown as SessionEntry;
+    const context = openAIContext({ branch: [priorCompaction] });
+    for (const handler of handlers.get("session_start") ?? []) {
+      handler({ type: "session_start", reason: "resume" }, context);
+    }
+    const latestUserEntry = user("compact again");
+    for (const handler of handlers.get("message_end") ?? []) {
+      handler({ type: "message_end", message: latestUserEntry.message }, context);
+    }
+    const requests: Array<Record<string, unknown>> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response([
+        'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"next-opaque"}}',
+        "",
+        'data: {"type":"response.completed","response":{}}',
+        "",
+      ].join("\n"), { status: 200 });
+    };
+
+    try {
+      const event = compactionEvent([priorCompaction, latestUserEntry]);
+      for (const handler of handlers.get("session_before_compact") ?? []) {
+        await handler(event, context);
+      }
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.input).toEqual([
+        { type: "compaction", encrypted_content: "prior-opaque" },
+        { role: "user", content: [{ type: "input_text", text: "compact again" }] },
+        { type: "compaction_trigger" },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("marks the mutable event when fabric claims compaction", () => {
@@ -472,10 +748,10 @@ describe("Pi custom_message compaction", () => {
     resetIds();
     resetClock();
     const visible = customMessage(
-      "pi-fabric-actor",
-      [{ type: "text", text: "actor completed <typed>" }],
+      "pi-fabric-persistentAgent",
+      [{ type: "text", text: "persistentAgent completed <typed>" }],
       true,
-      { message: { status: "completed", sequence: 7 }, actor: { id: "actor-1" } },
+      { message: { status: "completed", sequence: 7 }, persistentAgent: { id: "persistentAgent-1" } },
     );
     const hidden = customMessage(
       "before-agent-start",
@@ -490,22 +766,22 @@ describe("Pi custom_message compaction", () => {
     ]);
     expect(events.map((event) => event.kind)).toEqual(["customMessage", "customMessage"]);
     expect(events).toMatchObject([
-      { customType: "pi-fabric-actor", text: "actor completed <typed>", display: true },
+      { customType: "pi-fabric-persistentAgent", text: "persistentAgent completed <typed>", display: true },
       { customType: "before-agent-start", text: "hidden injected context", display: false },
     ]);
     expect(JSON.stringify(events)).not.toContain("PLAIN_CUSTOM_POISON");
   });
 
-  it("includes actor and agent completions in cumulative summaries deterministically", () => {
+  it("includes persistentAgent and agent completions in cumulative summaries deterministically", () => {
     resetIds();
     resetClock();
     const session = buildSession(
       user("Original task"),
-      customMessage("pi-fabric-actor", "Actor says: keep ACTOR_FACT_17", true, {
-        actor: { id: "actor-17" },
+      customMessage("pi-fabric-persistentAgent", "Persistent Agent says: keep PERSISTENT_AGENT_FACT_17", true, {
+        persistentAgent: { id: "persistentAgent-17" },
         message: { status: "completed" },
       }),
-      assistant(textPart("actor received")),
+      assistant(textPart("persistentAgent received")),
       customMessage("pi-fabric-agent-complete", "Fabric agent abc completed: AGENT_FACT_23", false, {
         id: "agent-23",
         status: "completed",
@@ -517,8 +793,8 @@ describe("Pi custom_message compaction", () => {
     const second = compileFabricSummary(session, 1_000);
     if (!("compaction" in first) || !("compaction" in second)) throw new Error("expected compaction");
     expect(second.compaction.summary).toBe(first.compaction.summary);
-    expect(first.compaction.summary).toContain('custom "pi-fabric-actor" (visible)');
-    expect(first.compaction.summary).toContain("ACTOR_FACT_17");
+    expect(first.compaction.summary).toContain('custom "pi-fabric-persistentAgent" (visible)');
+    expect(first.compaction.summary).toContain("PERSISTENT_AGENT_FACT_17");
     expect(first.compaction.summary).toContain('custom "pi-fabric-agent-complete" (hidden)');
     expect(first.compaction.summary).toContain("AGENT_FACT_23");
     expect(first.compaction.details?.counts.cumulativeSourceEntries).toBe(5);
@@ -669,7 +945,7 @@ describe("compaction cumulative endurance", () => {
     appendLinked(
       branch,
       user("Original First goal: preserve PINNED_RARE_FACT_7 and finish the module."),
-      customMessage("pi-fabric-actor", "Preserve CUSTOM_CYCLE_FACT_31", false, { status: "completed" }),
+      customMessage("pi-fabric-persistentAgent", "Preserve CUSTOM_CYCLE_FACT_31", false, { status: "completed" }),
       assistant(toolCallPart(initialRead, "read", { path: "src/a.ts" })),
       toolResult(initialRead, "read", "a contents"),
       assistant(toolCallPart(initialError, "read", { path: "src/never-existed.ts" })),

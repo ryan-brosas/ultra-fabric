@@ -66,6 +66,17 @@ input.on("line", (line) => {
     return;
   }
 
+  if (task.includes("EXCEED_TURN_BUDGET")) {
+    const message = successMessage("still working");
+    send({ type: "message_end", message });
+    send({ type: "turn_end", message, toolResults: [] });
+    setTimeout(() => {
+      send({ type: "message_end", message });
+      send({ type: "turn_end", message, toolResults: [] });
+    }, 25);
+    return;
+  }
+
   if (task.includes("REPORT_CONSULT_SCOPE")) {
     finishAttempt(
       successMessage(JSON.stringify({
@@ -95,7 +106,7 @@ input.on("line", (line) => {
 
   const value = {
     action: "message",
-    message: `validated actor response:${process.env.PI_FABRIC_FULL_CODE_MODE ?? "missing"}`,
+    message: `validated persistentAgent response:${process.env.PI_FABRIC_FULL_CODE_MODE ?? "missing"}`,
   };
   finishAttempt(successMessage(JSON.stringify(value)), false);
 });

@@ -68,8 +68,8 @@ export interface FabricTokenUsagePayload {
   name: string;
   runner: FabricAgentRunner;
   depth: number;
-  actorId?: string;
-  actorName?: string;
+  persistentAgentId?: string;
+  persistentAgentName?: string;
   cumulativeTokens: number;
   input: number;
   output: number;
@@ -138,7 +138,7 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const participantKind = (value: unknown): FabricParticipantKind | undefined =>
-  value === "root" || value === "agent" || value === "actor" ? value : undefined;
+  value === "root" || value === "agent" || value === "persistentAgent" ? value : undefined;
 
 export const lifecycleSourceIdentity = (source: FabricLifecycleSource): MeshIdentity => ({
   id: source.id,
@@ -222,7 +222,7 @@ export const lifecycleSubscriptionFromValue = (
     typeof value.createdBy.name !== "string" ||
     (value.createdBy.kind !== "main" &&
       value.createdBy.kind !== "agent" &&
-      value.createdBy.kind !== "actor")
+      value.createdBy.kind !== "persistentAgent")
   ) {
     return undefined;
   }

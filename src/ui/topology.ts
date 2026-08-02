@@ -3,7 +3,7 @@ import type { FabricActivityRun } from "../activity/types.js";
 import type { MeshEvent } from "../mesh/store.js";
 import type { FabricParticipantInfo } from "../topology/types.js";
 import type {
-  FabricUiActor,
+  FabricUiPersistentAgent,
   FabricUiAgent,
   FabricUiMain,
   FabricUiStateEntry,
@@ -372,7 +372,7 @@ export interface FabricProjectMeshRoute {
   fromKind: string;
   targetId: string;
   targetName: string;
-  targetKind: "main" | "actor" | "agent" | "topic";
+  targetKind: "main" | "persistentAgent" | "agent" | "topic";
   topic: string;
   kind: string;
   status: string;
@@ -385,7 +385,7 @@ interface FabricProjectMeshRootRow {
   kind: "meshRoot";
   entityId: string;
   main: FabricUiMain;
-  actors: number;
+  persistentAgents: number;
   agents: number;
   topics: number;
   state: number;
@@ -398,10 +398,10 @@ interface FabricProjectMeshSectionRow {
   count: number;
 }
 
-interface FabricProjectMeshActorRow {
-  kind: "meshActor";
+interface FabricProjectMeshPersistentAgentRow {
+  kind: "meshPersistentAgent";
   entityId: string;
-  actor: FabricUiActor;
+  persistentAgent: FabricUiPersistentAgent;
 }
 
 interface FabricProjectMeshAgentRow {
@@ -447,7 +447,7 @@ interface FabricProjectMeshOmissionRow {
   rows: number;
   nodes: number;
   main: number;
-  actors: number;
+  persistentAgents: number;
   agents: number;
   topics: number;
   state: number;
@@ -460,7 +460,7 @@ interface FabricProjectMeshOmissionRow {
 export type FabricProjectMeshRow =
   | FabricProjectMeshRootRow
   | FabricProjectMeshSectionRow
-  | FabricProjectMeshActorRow
+  | FabricProjectMeshPersistentAgentRow
   | FabricProjectMeshAgentRow
   | FabricProjectMeshTopicRow
   | FabricProjectMeshLinkRow
@@ -478,9 +478,9 @@ export interface FabricProjectMeshModel {
 }
 
 const SYSTEM_TOPICS = new Set([
-  "fabric.actor.input",
-  "fabric.actor.output",
-  "fabric.actor.lifecycle",
+  "fabric.persistentAgent.input",
+  "fabric.persistentAgent.output",
+  "fabric.persistentAgent.lifecycle",
   "fabric.compact",
   "fabric.participant.lifecycle",
   "fabric.steer",
@@ -489,7 +489,7 @@ const SYSTEM_TOPICS = new Set([
 ]);
 
 const IGNORED_ROUTE_TOPICS = new Set([
-  "fabric.actor.lifecycle",
+  "fabric.persistentAgent.lifecycle",
   "fabric.compact",
   "fabric.control.ack",
 ]);
@@ -518,14 +518,14 @@ const routeStatus = (kind: string): string =>
 
 const projectMeshRoutes = (
   main: FabricUiMain,
-  actors: FabricUiActor[],
+  persistentAgents: FabricUiPersistentAgent[],
   agents: FabricUiAgent[],
   events: MeshEvent[],
 ): FabricProjectMeshRoute[] => {
-  const actorByKey = new Map<string, FabricUiActor>();
-  for (const actor of actors) {
-    actorByKey.set(actor.id, actor);
-    actorByKey.set(actor.name, actor);
+  const persistentAgentByKey = new Map<string, FabricUiPersistentAgent>();
+  for (const persistentAgent of persistentAgents) {
+    persistentAgentByKey.set(persistentAgent.id, persistentAgent);
+    persistentAgentByKey.set(persistentAgent.name, persistentAgent);
   }
   const agentByKey = new Map<string, FabricUiAgent>();
   for (const agent of agents) {
@@ -549,26 +549,26 @@ const projectMeshRoutes = (
     let targetId: string;
     let targetName: string;
     let targetKind: FabricProjectMeshRoute["targetKind"];
-    const actorInputId =
-      event.topic === "fabric.actor.input" && typeof data?.actorId === "string"
-        ? data.actorId
+    const persistentAgentInputId =
+      event.topic === "fabric.persistentAgent.input" && typeof data?.persistentAgentId === "string"
+        ? data.persistentAgentId
         : undefined;
     const controlTarget =
       event.topic === "fabric.control.command" && typeof data?.targetId === "string"
         ? data.targetId
         : undefined;
-    const addressed = controlTarget ?? event.to ?? actorInputId;
+    const addressed = controlTarget ?? event.to ?? persistentAgentInputId;
     const targetMain = addressed ? mainByKey.get(addressed) : undefined;
-    const targetActor = addressed ? actorByKey.get(addressed) : undefined;
+    const targetPersistentAgent = addressed ? persistentAgentByKey.get(addressed) : undefined;
     const targetAgent = addressed ? agentByKey.get(addressed) : undefined;
     if (targetMain) {
       targetId = addressed!;
       targetName = targetMain;
       targetKind = "main";
-    } else if (targetActor) {
-      targetId = targetActor.id;
-      targetName = targetActor.name;
-      targetKind = "actor";
+    } else if (targetPersistentAgent) {
+      targetId = targetPersistentAgent.id;
+      targetName = targetPersistentAgent.name;
+      targetKind = "persistentAgent";
     } else if (targetAgent) {
       targetId = targetAgent.id;
       targetName = targetAgent.name;
@@ -577,7 +577,7 @@ const projectMeshRoutes = (
       targetId = addressed;
       targetName = addressed;
       targetKind = "agent";
-    } else if (event.topic === "fabric.actor.output") {
+    } else if (event.topic === "fabric.persistentAgent.output") {
       targetId = main.id;
       targetName = main.name;
       targetKind = "main";
@@ -752,13 +752,13 @@ const projectParticipantTree = (
 };
 
 const projectMeshTopics = (
-  actors: FabricUiActor[],
+  persistentAgents: FabricUiPersistentAgent[],
   events: MeshEvent[],
   now: number,
 ): FabricProjectMeshTopic[] => {
   const names = new Set<string>();
-  for (const actor of actors) {
-    for (const topic of actor.topics) names.add(topic);
+  for (const persistentAgent of persistentAgents) {
+    for (const topic of persistentAgent.topics) names.add(topic);
   }
   for (const event of events) {
     if (!SYSTEM_TOPICS.has(event.topic)) names.add(event.topic);
@@ -771,9 +771,9 @@ const projectMeshTopics = (
         (latest, event) => Math.max(latest, event.createdAt),
         0,
       );
-      const subscribers = actors
-        .filter((actor) => actor.topics.includes(name))
-        .map((actor) => ({ id: actor.id, name: actor.name, status: actor.status }));
+      const subscribers = persistentAgents
+        .filter((persistentAgent) => persistentAgent.topics.includes(name))
+        .map((persistentAgent) => ({ id: persistentAgent.id, name: persistentAgent.name, status: persistentAgent.status }));
       return {
         id: `topic:${name}`,
         name,
@@ -788,20 +788,20 @@ const projectMeshTopics = (
 
 export const buildProjectMeshTopology = (input: {
   main: FabricUiMain;
-  actors: FabricUiActor[];
+  persistentAgents: FabricUiPersistentAgent[];
   agents: FabricUiAgent[];
   state: FabricUiStateEntry[];
   events: MeshEvent[];
   participants?: FabricParticipantInfo[];
   now: number;
 }): FabricProjectMeshModel => {
-  const topics = projectMeshTopics(input.actors, input.events, input.now);
-  const routes = projectMeshRoutes(input.main, input.actors, input.agents, input.events);
-  const localActorIds = new Set(input.actors.map((actor) => actor.id));
+  const topics = projectMeshTopics(input.persistentAgents, input.events, input.now);
+  const routes = projectMeshRoutes(input.main, input.persistentAgents, input.agents, input.events);
+  const localPersistentAgentIds = new Set(input.persistentAgents.map((persistentAgent) => persistentAgent.id));
   const directoryParticipants = (input.participants ?? []).filter(
     (participant) =>
       participant.id !== input.main.id &&
-      !(participant.kind === "actor" && localActorIds.has(participant.id)),
+      !(participant.kind === "persistentAgent" && localPersistentAgentIds.has(participant.id)),
   );
   const participants = projectMeshParticipants(input.agents, routes, directoryParticipants);
   const rows: FabricProjectMeshRow[] = [
@@ -809,17 +809,17 @@ export const buildProjectMeshTopology = (input: {
       kind: "meshRoot",
       entityId: `main:${input.main.id}`,
       main: input.main,
-      actors: input.actors.length,
+      persistentAgents: input.persistentAgents.length,
       agents: participants.length,
       topics: topics.length,
       state: input.state.length,
       routes: routes.length,
     },
   ];
-  if (input.actors.length > 0) {
-    rows.push({ kind: "meshSection", label: "Persistent actors", count: input.actors.length });
-    for (const actor of input.actors) {
-      rows.push({ kind: "meshActor", entityId: `actor:${actor.id}`, actor });
+  if (input.persistentAgents.length > 0) {
+    rows.push({ kind: "meshSection", label: "Persistent agents", count: input.persistentAgents.length });
+    for (const persistentAgent of input.persistentAgents) {
+      rows.push({ kind: "meshPersistentAgent", entityId: `persistentAgent:${persistentAgent.id}`, persistentAgent });
     }
   }
   if (participants.length > 0) {
@@ -881,14 +881,14 @@ const projectMeshOmission = (
   rows: FabricProjectMeshRow[],
 ): FabricProjectMeshOmissionRow => {
   const rootRows = rows.filter((row) => row.kind === "meshRoot");
-  const actorRows = rows.filter((row) => row.kind === "meshActor");
+  const persistentAgentRows = rows.filter((row) => row.kind === "meshPersistentAgent");
   const agentRows = rows.filter((row) => row.kind === "meshAgent");
   const topicRows = rows.filter((row) => row.kind === "meshTopic");
   const stateRows = rows.filter((row) => row.kind === "meshState");
   const routeRows = rows.filter((row) => row.kind === "meshRoute");
   const statuses = [
     ...rootRows.map((row) => row.main.status),
-    ...actorRows.map((row) => (row.actor.lastError ? "failed" : row.actor.status)),
+    ...persistentAgentRows.map((row) => (row.persistentAgent.lastError ? "failed" : row.persistentAgent.status)),
     ...agentRows.map((row) => row.participant.status),
     ...topicRows.map((row) => row.topic.status),
     ...stateRows.map((row) => row.state.status),
@@ -900,13 +900,13 @@ const projectMeshOmission = (
     rows: rows.length,
     nodes:
       rootRows.length +
-      actorRows.length +
+      persistentAgentRows.length +
       agentRows.length +
       topicRows.length +
       stateRows.length +
       routeRows.length,
     main: rootRows.length,
-    actors: actorRows.length,
+    persistentAgents: persistentAgentRows.length,
     agents: agentRows.length,
     topics: topicRows.length,
     state: stateRows.length,

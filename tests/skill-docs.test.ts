@@ -38,10 +38,10 @@ describe("fabric-exec skill provider contracts", () => {
     const extension = fs.readFileSync("src/index.ts", "utf8");
 
     expect(skill).toContain("multiline or syntax-heavy payloads");
-    expect(skill).toContain("Omit `timeoutMs` for agents and actors");
+    expect(skill).toContain("Omit `timeoutMs` for agents across both lifecycles");
     expect(extension).not.toContain("Shorthands (all accepted)");
     expect(extension).not.toContain("mcp.fal_ai.get_model_schema");
-    expect(extension).not.toContain("For agents and actors, omit timeoutMs");
+    expect(extension).not.toContain("For agents and persistentAgents, omit timeoutMs");
     expect(extension).not.toContain("FABRIC_TEMPLATE_LITERAL_CAVEAT");
   });
 
@@ -54,7 +54,7 @@ describe("fabric-exec skill provider contracts", () => {
     expect(frontmatter).not.toContain("before the first Fabric call");
   });
 
-  it("centralizes ambient actor setup outside the profile skills", () => {
+  it("centralizes ambient persistent-agent setup outside the profile skills", () => {
     const setup = fs.readFileSync(
       "skills/fabric-ambient/references/setup.md",
       "utf8",
@@ -66,13 +66,12 @@ describe("fabric-exec skill provider contracts", () => {
     expect(setup).toContain("existing.topics.length !== 0");
     expect(setup).not.toContain("existing.extensions === false");
     expect(setup).not.toContain("extensions: false");
-    expect(setup).toContain("follows the configured runner and actor extension policy");
+    expect(setup).toContain("follows the configured runner and persistent-agent extension policy");
     expect(setup).toContain("empty when unset");
 
     const profiles = {
       "fabric-advisor": "../fabric-ambient/references/setup.md",
       "fabric-spec": "../fabric-ambient/references/setup.md",
-      "fabric-supervisor": "../fabric-ambient/references/setup.md",
       "fabric-ambient": "references/setup.md",
     } as const;
     for (const [name, reference] of Object.entries(profiles)) {
@@ -86,8 +85,13 @@ describe("fabric-exec skill provider contracts", () => {
       expect(skill).not.toContain("agents.setDeliveryPolicy({");
     }
 
-    expect(fs.readFileSync("skills/fabric-supervisor/SKILL.md", "utf8"))
-      .toContain("request credentials");
+    const supervisor = fs.readFileSync("skills/fabric-supervisor/SKILL.md", "utf8");
+    expect(supervisor).toContain("agents.roles({ lifecycle: \"persistent\" })");
+    expect(supervisor).toContain("agents.create({");
+    expect(supervisor).toContain('role: "supervisor"');
+    expect(supervisor).not.toContain("../fabric-ambient/references/setup.md");
+    expect(supervisor).not.toContain('events: ["agent_settled"');
+    expect(supervisor).not.toContain('responseMode: "directive"');
     expect(fs.readFileSync("skills/fabric-ambient/SKILL.md", "utf8"))
       .toContain("request credentials");
   });
@@ -144,7 +148,7 @@ describe("fabric-exec skill provider contracts", () => {
       "fabric-fusion": ["2–8 model panel", "PanelOutcome", "ambiguous", 'status: "partial"', "automatic full-panel rerun"],
       "fabric-rlm": ["strings.task", "context-sized", "recursive=true only", "all-failed batch", "full `FabricAgentResult` objects never return", "never rerun successful partitions"],
       "fabric-schema": ["one same-`fabric_exec`", "Evidence is not proof", 'status: commit.outcome === "committed"', "actually inspected"],
-      "fabric-supervisor": ["agent_settled", "tool_error", "Goal verified complete", "without recreating or retrying automatically"],
+      "fabric-supervisor": ["agents.roles", 'role: "supervisor"', "existing.goal !== goal", "Do not override", "agents.messages", "does not become a second implementer"],
       "fabric-swarm": ["ifVersion: 0", "observed version", "CAS-unblock dependents", "agents.tell"],
       "fabric-workflow": ["parallel(thunks", "WorkOutcome", 'status: "partial"', "fallback: completed", "automatic whole-workflow rerun"],
       "fabric-spec": ["agent_settled", "tool_error", "Spec verified complete", "never the approach", "without recreating or retrying automatically"],

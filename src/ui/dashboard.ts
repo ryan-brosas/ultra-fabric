@@ -16,7 +16,7 @@ import {
 import type { FabricActivityCall, FabricActivityRun } from "../activity/types.js";
 import type { MeshEvent } from "../mesh/store.js";
 import type { FabricAgentMessageDelivery } from "../main-agent.js";
-import type { FabricActorDelivery, FabricActorHostEvent } from "../actors/types.js";
+import type { FabricPersistentAgentDelivery, FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import { isFabricThinking, type FabricThinking } from "../thinking.js";
 import {
   entitiesForOverview,
@@ -39,8 +39,8 @@ import {
   type FabricGraphPoint,
 } from "./dashboard-fabric-graph.js";
 import { FabricHostEventSelector } from "./fabric-host-event-selector.js";
-import { FabricActorDeliverySelector } from "./fabric-actor-delivery-selector.js";
-import { FabricActorToolSelector } from "./fabric-actor-tool-selector.js";
+import { FabricPersistentAgentDeliverySelector } from "./fabric-persistent-agent-delivery-selector.js";
+import { FabricPersistentAgentToolSelector } from "./fabric-persistent-agent-tool-selector.js";
 import { FabricModelSelector } from "./fabric-model-selector.js";
 import { coreToolTitle, renderCoreToolBody } from "./core-tool-render.js";
 import { nestedEditDiff, renderBoundedLines } from "./fabric-render.js";
@@ -56,7 +56,7 @@ import {
   type FabricProjectMeshRoute,
 } from "./topology.js";
 import type { FabricAgentTranscript, FabricTranscriptEntry } from "./transcript.js";
-import type { FabricDashboardSnapshot, FabricUiActor, FabricUiAgent } from "./types.js";
+import type { FabricDashboardSnapshot, FabricUiPersistentAgent, FabricUiAgent } from "./types.js";
 import { isActiveStatus } from "./types.js";
 
 const editorTheme = (theme: Theme): EditorTheme => ({
@@ -113,10 +113,10 @@ const safeMarkdownText = (value: string): string =>
 export interface FabricDashboardMessageTarget {
   id: string;
   name: string;
-  kind: "main" | "peer" | "agent" | "actor" | "meshParticipant";
+  kind: "main" | "peer" | "agent" | "persistentAgent" | "meshParticipant";
 }
 
-type FabricTranscriptTarget = FabricUiAgent | FabricUiActor;
+type FabricTranscriptTarget = FabricUiAgent | FabricUiPersistentAgent;
 
 interface FabricDashboardKeybindings {
   matches(data: string, keybinding: "app.tools.expand"): boolean;
@@ -178,12 +178,12 @@ export class FabricDashboard implements Component, Focusable {
   private picker:
     | FabricModelSelector
     | FabricThinkingSelector
-    | FabricActorDeliverySelector
+    | FabricPersistentAgentDeliverySelector
     | FabricHostEventSelector
-    | FabricActorToolSelector
+    | FabricPersistentAgentToolSelector
     | undefined;
   private editor: Editor | undefined;
-  private editorActorName: string | undefined;
+  private editorPersistentAgentName: string | undefined;
   private agentMessageTarget:
     | (FabricDashboardMessageTarget & { delivery: FabricAgentMessageDelivery })
     | undefined;
@@ -203,42 +203,42 @@ export class FabricDashboard implements Component, Focusable {
   private readonly agentTranscript:
     | ((agent: FabricUiAgent, followLatest: boolean) => FabricAgentTranscript)
     | undefined;
-  private readonly actorTranscript:
-    | ((actor: FabricUiActor, followLatest: boolean) => FabricAgentTranscript)
+  private readonly persistentAgentTranscript:
+    | ((persistentAgent: FabricUiPersistentAgent, followLatest: boolean) => FabricAgentTranscript)
     | undefined;
   private readonly loadOlderTranscript: ((target: FabricTranscriptTarget) => boolean) | undefined;
   private readonly loadNewerTranscript: ((target: FabricTranscriptTarget) => boolean) | undefined;
   private readonly loadLatestTranscript: ((target: FabricTranscriptTarget) => boolean) | undefined;
-  private readonly onActorModel:
-    | ((actorId: string, model: string | undefined) => void)
+  private readonly onPersistentAgentModel:
+    | ((persistentAgentId: string, model: string | undefined) => void)
     | undefined;
-  private readonly onActorThinking:
-    | ((actorId: string, thinking: FabricThinking | undefined) => void)
+  private readonly onPersistentAgentThinking:
+    | ((persistentAgentId: string, thinking: FabricThinking | undefined) => void)
     | undefined;
-  private readonly onActorEvents:
-    | ((actorId: string, events: FabricActorHostEvent[]) => void)
+  private readonly onPersistentAgentEvents:
+    | ((persistentAgentId: string, events: FabricPersistentAgentHostEvent[]) => void)
     | undefined;
-  private readonly onActorDeliveryPolicy:
-    | ((actorId: string, delivery: FabricActorDelivery, triggerTurn: boolean) => void)
+  private readonly onPersistentAgentDeliveryPolicy:
+    | ((persistentAgentId: string, delivery: FabricPersistentAgentDelivery, triggerTurn: boolean) => void)
     | undefined;
   private readonly onGlobalDeliveryPolicy:
-    | ((actorId: string, delivery: FabricActorDelivery, triggerTurn: boolean) => void)
+    | ((persistentAgentId: string, delivery: FabricPersistentAgentDelivery, triggerTurn: boolean) => void)
     | undefined;
-  private readonly onActorTools: ((actorId: string, tools: string[]) => void) | undefined;
-  private readonly actorDefaultTools: string[];
-  private readonly onClearMessages: ((actorId: string) => void) | undefined;
-  private readonly onActorInstructions:
-    | ((actorId: string, instructions: string) => void)
+  private readonly onPersistentAgentTools: ((persistentAgentId: string, tools: string[]) => void) | undefined;
+  private readonly persistentAgentDefaultTools: string[];
+  private readonly onClearMessages: ((persistentAgentId: string) => void) | undefined;
+  private readonly onPersistentAgentInstructions:
+    | ((persistentAgentId: string, instructions: string) => void)
     | undefined;
   private readonly onGlobalInstructions:
-    | ((globalActorId: string, instructions: string) => void)
+    | ((agentTemplateId: string, instructions: string) => void)
     | undefined;
-  private readonly onImportActor: ((globalActorId: string) => void) | undefined;
-  private readonly onExportActor: ((actorId: string) => void) | undefined;
-  private readonly onRemoveGlobalActor: ((globalActorId: string) => void) | undefined;
+  private readonly onImportPersistentAgent: ((agentTemplateId: string) => void) | undefined;
+  private readonly onExportPersistentAgent: ((persistentAgentId: string) => void) | undefined;
+  private readonly onRemoveAgentTemplate: ((agentTemplateId: string) => void) | undefined;
   private readonly codePreviewSettings: CodePreviewSettings | undefined;
   private readonly keybindings: FabricDashboardKeybindings | undefined;
-  private pickerActorName: string | undefined;
+  private pickerPersistentAgentName: string | undefined;
 
   constructor(
     readonly tui: TUI,
@@ -262,34 +262,34 @@ export class FabricDashboard implements Component, Focusable {
         agent: FabricUiAgent,
         followLatest: boolean,
       ) => FabricAgentTranscript;
-      actorTranscript?: (
-        actor: FabricUiActor,
+      persistentAgentTranscript?: (
+        persistentAgent: FabricUiPersistentAgent,
         followLatest: boolean,
       ) => FabricAgentTranscript;
       loadOlderTranscript?: (target: FabricTranscriptTarget) => boolean;
       loadNewerTranscript?: (target: FabricTranscriptTarget) => boolean;
       loadLatestTranscript?: (target: FabricTranscriptTarget) => boolean;
-      onActorModel?: (actorId: string, model: string | undefined) => void;
-      onActorThinking?: (actorId: string, thinking: FabricThinking | undefined) => void;
-      onActorEvents?: (actorId: string, events: FabricActorHostEvent[]) => void;
-      onActorDeliveryPolicy?: (
-        actorId: string,
-        delivery: FabricActorDelivery,
+      onPersistentAgentModel?: (persistentAgentId: string, model: string | undefined) => void;
+      onPersistentAgentThinking?: (persistentAgentId: string, thinking: FabricThinking | undefined) => void;
+      onPersistentAgentEvents?: (persistentAgentId: string, events: FabricPersistentAgentHostEvent[]) => void;
+      onPersistentAgentDeliveryPolicy?: (
+        persistentAgentId: string,
+        delivery: FabricPersistentAgentDelivery,
         triggerTurn: boolean,
       ) => void;
       onGlobalDeliveryPolicy?: (
-        actorId: string,
-        delivery: FabricActorDelivery,
+        persistentAgentId: string,
+        delivery: FabricPersistentAgentDelivery,
         triggerTurn: boolean,
       ) => void;
-      onActorTools?: (actorId: string, tools: string[]) => void;
-      actorDefaultTools?: string[];
-      onClearMessages?: (actorId: string) => void;
-      onActorInstructions?: (actorId: string, instructions: string) => void;
-      onGlobalInstructions?: (globalActorId: string, instructions: string) => void;
-      onImportActor?: (globalActorId: string) => void;
-      onExportActor?: (actorId: string) => void;
-      onRemoveGlobalActor?: (globalActorId: string) => void;
+      onPersistentAgentTools?: (persistentAgentId: string, tools: string[]) => void;
+      persistentAgentDefaultTools?: string[];
+      onClearMessages?: (persistentAgentId: string) => void;
+      onPersistentAgentInstructions?: (persistentAgentId: string, instructions: string) => void;
+      onGlobalInstructions?: (agentTemplateId: string, instructions: string) => void;
+      onImportPersistentAgent?: (agentTemplateId: string) => void;
+      onExportPersistentAgent?: (persistentAgentId: string) => void;
+      onRemoveAgentTemplate?: (agentTemplateId: string) => void;
     } = {},
   ) {
     this.focused = true;
@@ -302,23 +302,23 @@ export class FabricDashboard implements Component, Focusable {
     this.onAgentStop = options.onAgentStop;
     this.onTargetMessage = options.onTargetMessage;
     this.agentTranscript = options.agentTranscript;
-    this.actorTranscript = options.actorTranscript;
+    this.persistentAgentTranscript = options.persistentAgentTranscript;
     this.loadOlderTranscript = options.loadOlderTranscript;
     this.loadNewerTranscript = options.loadNewerTranscript;
     this.loadLatestTranscript = options.loadLatestTranscript;
-    this.onActorModel = options.onActorModel;
-    this.onActorThinking = options.onActorThinking;
-    this.onActorEvents = options.onActorEvents;
-    this.onActorDeliveryPolicy = options.onActorDeliveryPolicy;
+    this.onPersistentAgentModel = options.onPersistentAgentModel;
+    this.onPersistentAgentThinking = options.onPersistentAgentThinking;
+    this.onPersistentAgentEvents = options.onPersistentAgentEvents;
+    this.onPersistentAgentDeliveryPolicy = options.onPersistentAgentDeliveryPolicy;
     this.onGlobalDeliveryPolicy = options.onGlobalDeliveryPolicy;
-    this.onActorTools = options.onActorTools;
-    this.actorDefaultTools = options.actorDefaultTools ?? [];
+    this.onPersistentAgentTools = options.onPersistentAgentTools;
+    this.persistentAgentDefaultTools = options.persistentAgentDefaultTools ?? [];
     this.onClearMessages = options.onClearMessages;
-    this.onActorInstructions = options.onActorInstructions;
+    this.onPersistentAgentInstructions = options.onPersistentAgentInstructions;
     this.onGlobalInstructions = options.onGlobalInstructions;
-    this.onImportActor = options.onImportActor;
-    this.onExportActor = options.onExportActor;
-    this.onRemoveGlobalActor = options.onRemoveGlobalActor;
+    this.onImportPersistentAgent = options.onImportPersistentAgent;
+    this.onExportPersistentAgent = options.onExportPersistentAgent;
+    this.onRemoveAgentTemplate = options.onRemoveAgentTemplate;
   }
 
   handleInput(data: string): void {
@@ -454,34 +454,34 @@ export class FabricDashboard implements Component, Focusable {
         }
       } else if (data === "m") {
         const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "actor" && detail.status !== "stopped") {
+        if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
           this.openModelPicker(detail);
         }
       } else if (data === "e") {
         const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "actor" && detail.status !== "stopped") {
+        if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
           this.openThinkingPicker(detail);
         }
       } else if (data === "y") {
         const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && (detail.kind === "actor" || detail.kind === "globalActor")) {
+        if (detail && (detail.kind === "persistentAgent" || detail.kind === "agentTemplate")) {
           this.openDeliveryPicker(detail);
         }
       } else if (data === "v") {
         const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "actor" && detail.status !== "stopped") {
+        if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
           this.openEventsPicker(detail);
         }
       } else if (data === "o") {
         const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "actor" && detail.status !== "stopped") {
+        if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
           this.openToolsPicker(detail);
         }
       } else if (data === "c") {
         const detail = allEntities.find((entity) => entity.id === this.detailId);
         if (
           detail &&
-          detail.kind === "actor" &&
+          detail.kind === "persistentAgent" &&
           detail.status !== "stopped" &&
           this.onClearMessages
         ) {
@@ -489,7 +489,7 @@ export class FabricDashboard implements Component, Focusable {
         }
       } else if (data === "i") {
         const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && (detail.kind === "actor" || detail.kind === "globalActor")) {
+        if (detail && (detail.kind === "persistentAgent" || detail.kind === "agentTemplate")) {
           this.openInstructionsEditor(detail);
         }
       } else if (data === "x") {
@@ -498,21 +498,21 @@ export class FabricDashboard implements Component, Focusable {
           this.requestParticipantStop(detail);
         } else if (
           detail &&
-          detail.kind === "actor" &&
+          detail.kind === "persistentAgent" &&
           detail.status !== "stopped" &&
-          this.onExportActor
+          this.onExportPersistentAgent
         ) {
-          this.onExportActor(detail.value.id);
+          this.onExportPersistentAgent(detail.value.id);
         }
       } else if (data === "p") {
         const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "globalActor" && this.onImportActor) {
-          this.onImportActor(detail.value.id);
+        if (detail && detail.kind === "agentTemplate" && this.onImportPersistentAgent) {
+          this.onImportPersistentAgent(detail.value.id);
         }
       } else if (data === "d") {
         const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "globalActor" && this.onRemoveGlobalActor) {
-          this.onRemoveGlobalActor(detail.value.id);
+        if (detail && detail.kind === "agentTemplate" && this.onRemoveAgentTemplate) {
+          this.onRemoveAgentTemplate(detail.value.id);
         }
       }
       this.tui.requestRender();
@@ -656,44 +656,44 @@ export class FabricDashboard implements Component, Focusable {
           this.requestParticipantStop(selected);
         } else if (
           data === "x" &&
-          selected.kind === "actor" &&
+          selected.kind === "persistentAgent" &&
           selected.status !== "stopped" &&
-          this.onExportActor
+          this.onExportPersistentAgent
         ) {
-          this.onExportActor(selected.value.id);
-        } else if (data === "m" && selected.kind === "actor" && selected.status !== "stopped") {
+          this.onExportPersistentAgent(selected.value.id);
+        } else if (data === "m" && selected.kind === "persistentAgent" && selected.status !== "stopped") {
           this.detailId = selected.id;
           this.openModelPicker(selected);
-        } else if (data === "e" && selected.kind === "actor" && selected.status !== "stopped") {
+        } else if (data === "e" && selected.kind === "persistentAgent" && selected.status !== "stopped") {
           this.detailId = selected.id;
           this.openThinkingPicker(selected);
         } else if (
           data === "y" &&
-          (selected.kind === "globalActor" ||
-            (selected.kind === "actor" && selected.status !== "stopped"))
+          (selected.kind === "agentTemplate" ||
+            (selected.kind === "persistentAgent" && selected.status !== "stopped"))
         ) {
           this.detailId = selected.id;
           this.openDeliveryPicker(selected);
-        } else if (data === "v" && selected.kind === "actor" && selected.status !== "stopped") {
+        } else if (data === "v" && selected.kind === "persistentAgent" && selected.status !== "stopped") {
           this.detailId = selected.id;
           this.openEventsPicker(selected);
-        } else if (data === "o" && selected.kind === "actor" && selected.status !== "stopped") {
+        } else if (data === "o" && selected.kind === "persistentAgent" && selected.status !== "stopped") {
           this.detailId = selected.id;
           this.openToolsPicker(selected);
         } else if (
           data === "c" &&
-          selected.kind === "actor" &&
+          selected.kind === "persistentAgent" &&
           selected.status !== "stopped" &&
           this.onClearMessages
         ) {
           this.onClearMessages(selected.value.id);
-        } else if (data === "i" && (selected.kind === "actor" || selected.kind === "globalActor")) {
+        } else if (data === "i" && (selected.kind === "persistentAgent" || selected.kind === "agentTemplate")) {
           this.detailId = selected.id;
           this.openInstructionsEditor(selected);
-        } else if (data === "p" && selected.kind === "globalActor" && this.onImportActor) {
-          this.onImportActor(selected.value.id);
-        } else if (data === "d" && selected.kind === "globalActor" && this.onRemoveGlobalActor) {
-          this.onRemoveGlobalActor(selected.value.id);
+        } else if (data === "p" && selected.kind === "agentTemplate" && this.onImportPersistentAgent) {
+          this.onImportPersistentAgent(selected.value.id);
+        } else if (data === "d" && selected.kind === "agentTemplate" && this.onRemoveAgentTemplate) {
+          this.onRemoveAgentTemplate(selected.value.id);
         }
       }
     } else if (data === " " && this.pane === "entities") {
@@ -824,7 +824,7 @@ export class FabricDashboard implements Component, Focusable {
   dispose(): void {
     this.picker = undefined;
     this.editor = undefined;
-    this.editorActorName = undefined;
+    this.editorPersistentAgentName = undefined;
     this.agentMessageTarget = undefined;
     this.pendingStop = undefined;
     this.stopGraphAnimation();
@@ -834,14 +834,14 @@ export class FabricDashboard implements Component, Focusable {
   }
 
   private transcriptTarget(entity: Entity): FabricTranscriptTarget | undefined {
-    if (entity.kind === "agent" || entity.kind === "actor") return entity.value;
+    if (entity.kind === "agent" || entity.kind === "persistentAgent") return entity.value;
     return undefined;
   }
 
   private hasTranscript(entity: Entity): boolean {
     return (
       (entity.kind === "agent" && this.agentTranscript !== undefined) ||
-      (entity.kind === "actor" && this.actorTranscript !== undefined)
+      (entity.kind === "persistentAgent" && this.persistentAgentTranscript !== undefined)
     );
   }
 
@@ -849,8 +849,8 @@ export class FabricDashboard implements Component, Focusable {
     if (entity.kind === "agent") {
       return this.agentTranscript?.(entity.value, this.transcriptFollowing);
     }
-    if (entity.kind === "actor") {
-      return this.actorTranscript?.(entity.value, this.transcriptFollowing);
+    if (entity.kind === "persistentAgent") {
+      return this.persistentAgentTranscript?.(entity.value, this.transcriptFollowing);
     }
     return undefined;
   }
@@ -880,8 +880,8 @@ export class FabricDashboard implements Component, Focusable {
     if (entity.kind === "agent") {
       return { id: entity.value.id, name: entity.value.name, kind: "agent" };
     }
-    if (entity.kind === "actor") {
-      return { id: entity.value.id, name: entity.value.name, kind: "actor" };
+    if (entity.kind === "persistentAgent") {
+      return { id: entity.value.id, name: entity.value.name, kind: "persistentAgent" };
     }
     if (entity.kind === "meshParticipant") {
       return { id: entity.value.id, name: entity.value.name, kind: "meshParticipant" };
@@ -907,7 +907,7 @@ export class FabricDashboard implements Component, Focusable {
       );
     }
     if (!this.onTargetMessage) return false;
-    if (target.kind === "actor") return entity.status !== "stopped" && delivery === "steer";
+    if (target.kind === "persistentAgent") return entity.status !== "stopped";
     if (target.kind === "meshParticipant" && entity.kind === "meshParticipant") {
       const participant = entity.value.participant;
       return participant
@@ -987,8 +987,10 @@ export class FabricDashboard implements Component, Focusable {
     if (width < 24) return this.renderNarrowFallback(width, `${this.agentMessageTarget.delivery} · ${this.agentMessageTarget.name}`, "esc cancel");
     const target = this.agentMessageTarget;
     const label =
-      target.kind === "actor"
-        ? "queue actor message"
+      target.kind === "persistentAgent"
+        ? target.delivery === "steer"
+          ? "queue persistent agent message"
+          : "queue persistent agent follow-up"
         : target.delivery === "steer"
           ? target.kind === "main"
             ? "message or steer Main"
@@ -1023,34 +1025,35 @@ export class FabricDashboard implements Component, Focusable {
       this.onAgentStop ? "x twice stop" : undefined,
       "enter details",
     ].filter((value): value is string => Boolean(value));
-    const actorActions = [
-      this.actorTranscript ? "space transcript peek" : undefined,
+    const persistentAgentActions = [
+      this.persistentAgentTranscript ? "space transcript peek" : undefined,
       this.onTargetMessage ? "s queue message" : undefined,
-      (this.modelSource || this.claudeModelSource) && this.onActorModel ? "m model" : undefined,
-      this.onActorThinking ? "e thinking" : undefined,
-      this.onActorDeliveryPolicy ? "y delivery policy" : undefined,
-      this.onActorEvents ? "v events" : undefined,
-      this.onActorTools ? "o tools" : undefined,
-      this.onActorInstructions ? "i instructions" : undefined,
+      this.onTargetMessage ? "u queue follow-up" : undefined,
+      (this.modelSource || this.claudeModelSource) && this.onPersistentAgentModel ? "m model" : undefined,
+      this.onPersistentAgentThinking ? "e thinking" : undefined,
+      this.onPersistentAgentDeliveryPolicy ? "y delivery policy" : undefined,
+      this.onPersistentAgentEvents ? "v events" : undefined,
+      this.onPersistentAgentTools ? "o tools" : undefined,
+      this.onPersistentAgentInstructions ? "i instructions" : undefined,
       this.onClearMessages ? "c clear mailbox" : undefined,
-      this.onExportActor ? "x export" : undefined,
+      this.onExportPersistentAgent ? "x export" : undefined,
     ].filter((value): value is string => Boolean(value));
     const templateActions = [
       this.onGlobalDeliveryPolicy ? "y delivery policy" : undefined,
       this.onGlobalInstructions ? "i instructions" : undefined,
-      this.onImportActor ? "p import" : undefined,
-      this.onRemoveGlobalActor ? "d delete" : undefined,
+      this.onImportPersistentAgent ? "p import" : undefined,
+      this.onRemoveAgentTemplate ? "d delete" : undefined,
     ].filter((value): value is string => Boolean(value));
     const help = [
       ["Navigate", "Topology: arrows/h/l move spatially · j/k ordered selection · tab next · enter inspect · esc back"],
       ["Views", "1 Activity · 2 unified Topology"],
-      ["Topology", "Main branches into Participants (sessions, agents, actors) and Mesh (namespaced topics and hierarchical state); traffic travels on decaying edges"],
+      ["Topology", "Main branches into Participants (sessions and agents across both lifecycles) and Mesh (namespaced topics and hierarchical state); traffic travels on decaying edges"],
       ["Motion", "r replay/live · space pause/play · ←/→ step · +/- speed · H history · M reduced motion"],
       ["Runs", "[ older · ] newer · f cycle status filter"],
       ["Commands", "/fabric health runtime summary · /fabric leases inspect or release write leases · /fabric outcomes model report"],
       ...(mainActions.length > 1 ? [["Main", mainActions.join(" · ")]] : []),
       ...(agentActions.length > 1 ? [["Agents", agentActions.join(" · ")]] : []),
-      ...(actorActions.length > 0 ? [["Actors", actorActions.join(" · ")]] : []),
+      ...(persistentAgentActions.length > 0 ? [["Persistent agents", persistentAgentActions.join(" · ")]] : []),
       ...(templateActions.length > 0 ? [["Templates", templateActions.join(" · ")]] : []),
       [
         "Details",
@@ -1071,31 +1074,31 @@ export class FabricDashboard implements Component, Focusable {
     return lines.map((line) => truncateToWidth(line, width, ""));
   }
 
-  private modelSourceForActor(actor: FabricUiActor): ModelSource | undefined {
-    return actor.runner === "claude" ? this.claudeModelSource : this.modelSource;
+  private modelSourceForPersistentAgent(persistentAgent: FabricUiPersistentAgent): ModelSource | undefined {
+    return persistentAgent.runner === "claude" ? this.claudeModelSource : this.modelSource;
   }
 
   private openModelPicker(entity: Entity): void {
-    if (entity.kind !== "actor" || !this.onActorModel) return;
-    const actor = entity.value;
-    const source = this.modelSourceForActor(actor);
+    if (entity.kind !== "persistentAgent" || !this.onPersistentAgentModel) return;
+    const persistentAgent = entity.value;
+    const source = this.modelSourceForPersistentAgent(persistentAgent);
     if (!source) return;
-    this.pickerActorName = actor.name;
+    this.pickerPersistentAgentName = persistentAgent.name;
     this.picker = new FabricModelSelector({
       theme: this.theme,
       source,
-      currentValue: actor.model ?? INHERIT_VALUE,
+      currentValue: persistentAgent.model ?? INHERIT_VALUE,
       headerText:
-        actor.runner === "claude"
-          ? `Model for Claude actor "${actor.name}". Pick Inherit to use the Claude default.`
-          : `Model for actor "${actor.name}". Pick Inherit to use the Fabric Pi default.`,
+        persistentAgent.runner === "claude"
+          ? `Model for Claude persistent agent "${persistentAgent.name}". Pick Inherit to use the Claude default.`
+          : `Model for persistent agent "${persistentAgent.name}". Pick Inherit to use the Fabric Pi default.`,
       inheritName:
-        actor.runner === "claude"
+        persistentAgent.runner === "claude"
           ? "Use the Fabric Claude model (or Claude Code runtime default)"
           : "Use the Fabric Pi model (or host default)",
       onSelect: (value) => {
         const model = value === INHERIT_VALUE ? undefined : value;
-        this.onActorModel!(actor.id, model);
+        this.onPersistentAgentModel!(persistentAgent.id, model);
         this.closeModelPicker();
       },
       onCancel: () => this.closeModelPicker(),
@@ -1105,17 +1108,17 @@ export class FabricDashboard implements Component, Focusable {
   }
 
   private openThinkingPicker(entity: Entity): void {
-    if (entity.kind !== "actor" || !this.onActorThinking) return;
-    const actor = entity.value;
-    this.pickerActorName = actor.name;
+    if (entity.kind !== "persistentAgent" || !this.onPersistentAgentThinking) return;
+    const persistentAgent = entity.value;
+    this.pickerPersistentAgentName = persistentAgent.name;
     this.picker = new FabricThinkingSelector({
       theme: this.theme,
-      currentValue: actor.thinking ?? INHERIT_VALUE,
-      headerText: `Thinking level for actor "${actor.name}". Pick Inherit to use the Fabric default.`,
+      currentValue: persistentAgent.thinking ?? INHERIT_VALUE,
+      headerText: `Thinking level for persistent agent "${persistentAgent.name}". Pick Inherit to use the Fabric default.`,
       inheritName: "Use the Fabric default thinking level",
       onSelect: (value) => {
         const thinking = value === INHERIT_VALUE ? undefined : value;
-        this.onActorThinking!(actor.id, isFabricThinking(thinking) ? thinking : undefined);
+        this.onPersistentAgentThinking!(persistentAgent.id, isFabricThinking(thinking) ? thinking : undefined);
         this.closeModelPicker();
       },
       onCancel: () => this.closeModelPicker(),
@@ -1125,16 +1128,16 @@ export class FabricDashboard implements Component, Focusable {
   }
 
   private openDeliveryPicker(entity: Entity): void {
-    if (entity.kind !== "actor" && entity.kind !== "globalActor") return;
+    if (entity.kind !== "persistentAgent" && entity.kind !== "agentTemplate") return;
     const target = entity.value;
     const callback =
-      entity.kind === "actor" ? this.onActorDeliveryPolicy : this.onGlobalDeliveryPolicy;
-    if (!callback || (entity.kind === "actor" && entity.status === "stopped")) return;
-    this.pickerActorName = target.name;
-    this.picker = new FabricActorDeliverySelector({
+      entity.kind === "persistentAgent" ? this.onPersistentAgentDeliveryPolicy : this.onGlobalDeliveryPolicy;
+    if (!callback || (entity.kind === "persistentAgent" && entity.status === "stopped")) return;
+    this.pickerPersistentAgentName = target.name;
+    this.picker = new FabricPersistentAgentDeliverySelector({
       theme: this.theme,
       currentValue: { delivery: target.delivery, triggerTurn: target.triggerTurn },
-      headerText: `Delivery policy for ${entity.kind === "actor" ? "actor" : "template"} "${target.name}". Active delivery requires an explicit resume choice.`,
+      headerText: `Delivery policy for ${entity.kind === "persistentAgent" ? "persistent agent" : "template"} "${target.name}". Active delivery requires an explicit resume choice.`,
       onSelect: (policy) => {
         callback(target.id, policy.delivery, policy.triggerTurn);
         this.closeModelPicker();
@@ -1146,15 +1149,15 @@ export class FabricDashboard implements Component, Focusable {
   }
 
   private openEventsPicker(entity: Entity): void {
-    if (entity.kind !== "actor" || !this.onActorEvents) return;
-    const actor = entity.value;
-    this.pickerActorName = actor.name;
+    if (entity.kind !== "persistentAgent" || !this.onPersistentAgentEvents) return;
+    const persistentAgent = entity.value;
+    this.pickerPersistentAgentName = persistentAgent.name;
     this.picker = new FabricHostEventSelector({
       theme: this.theme,
-      currentValue: actor.events,
-      headerText: `Host events for actor "${actor.name}". Toggle with space, Enter to apply, Esc to cancel.`,
+      currentValue: persistentAgent.events,
+      headerText: `Host events for persistent agent "${persistentAgent.name}". Toggle with space, Enter to apply, Esc to cancel.`,
       onSelect: (events) => {
-        this.onActorEvents!(actor.id, events);
+        this.onPersistentAgentEvents!(persistentAgent.id, events);
         this.closeModelPicker();
       },
       onCancel: () => this.closeModelPicker(),
@@ -1164,15 +1167,15 @@ export class FabricDashboard implements Component, Focusable {
   }
 
   private openToolsPicker(entity: Entity): void {
-    if (entity.kind !== "actor" || !this.onActorTools) return;
-    const actor = entity.value;
-    this.pickerActorName = actor.name;
-    this.picker = new FabricActorToolSelector({
+    if (entity.kind !== "persistentAgent" || !this.onPersistentAgentTools) return;
+    const persistentAgent = entity.value;
+    this.pickerPersistentAgentName = persistentAgent.name;
+    this.picker = new FabricPersistentAgentToolSelector({
       theme: this.theme,
-      currentValue: actor.tools ?? this.actorDefaultTools,
-      headerText: `Tools for actor "${actor.name}". Toggle with space, Enter to apply, Esc to cancel. Pi actors always retain fabric_exec.`,
+      currentValue: persistentAgent.tools ?? this.persistentAgentDefaultTools,
+      headerText: `Tools for persistent agent "${persistentAgent.name}". Toggle with space, Enter to apply, Esc to cancel. Pi persistent agents always retain fabric_exec.`,
       onSelect: (tools) => {
-        this.onActorTools!(actor.id, tools);
+        this.onPersistentAgentTools!(persistentAgent.id, tools);
         this.closeModelPicker();
       },
       onCancel: () => this.closeModelPicker(),
@@ -1183,31 +1186,31 @@ export class FabricDashboard implements Component, Focusable {
 
   private closeModelPicker(): void {
     this.picker = undefined;
-    this.pickerActorName = undefined;
+    this.pickerPersistentAgentName = undefined;
     this.mode = "detail";
   }
 
   /**
-   * Open the embedded multi-line editor for an actor's default instruction.
+   * Open the embedded multi-line editor for an persistentAgent's default instruction.
    * Matches Pi's editor dialog convention (Enter submit, Shift+Enter newline,
    * Esc/Ctrl+C cancel) so a steering user edits the persona with the same
-   * muscle memory as the chat input. Works for both live project actors and
+   * muscle memory as the chat input. Works for both live project persistentAgents and
    * global templates; the submit routes to the scope-appropriate callback.
    */
   private openInstructionsEditor(entity: Entity): void {
-    let kind: "actor" | "globalActor";
+    let kind: "persistentAgent" | "agentTemplate";
     let id: string;
     let name: string;
     let instructions: string;
-    if (entity.kind === "actor") {
-      if (entity.status === "stopped" || !this.onActorInstructions) return;
-      kind = "actor";
+    if (entity.kind === "persistentAgent") {
+      if (entity.status === "stopped" || !this.onPersistentAgentInstructions) return;
+      kind = "persistentAgent";
       id = entity.value.id;
       name = entity.value.name;
       instructions = entity.value.instructions;
-    } else if (entity.kind === "globalActor") {
+    } else if (entity.kind === "agentTemplate") {
       if (!this.onGlobalInstructions) return;
-      kind = "globalActor";
+      kind = "agentTemplate";
       id = entity.value.id;
       name = entity.value.name;
       instructions = entity.value.instructions;
@@ -1218,24 +1221,24 @@ export class FabricDashboard implements Component, Focusable {
     editor.focused = true;
     editor.setText(instructions);
     editor.onSubmit = (text) => {
-      if (kind === "actor") this.onActorInstructions?.(id, text);
+      if (kind === "persistentAgent") this.onPersistentAgentInstructions?.(id, text);
       else this.onGlobalInstructions?.(id, text);
       this.closeInstructionsEditor();
     };
     this.editor = editor;
-    this.editorActorName = name;
+    this.editorPersistentAgentName = name;
     this.mode = "instructionsEditor";
   }
 
   private closeInstructionsEditor(): void {
     this.editor = undefined;
-    this.editorActorName = undefined;
+    this.editorPersistentAgentName = undefined;
     this.mode = "detail";
   }
 
   private renderPicker(width: number): string[] {
     if (!this.picker) return [];
-    if (width < 24) return this.renderNarrowFallback(width, `actor · ${this.pickerActorName ?? ""}`, "esc cancel");
+    if (width < 24) return this.renderNarrowFallback(width, `persistent agent · ${this.pickerPersistentAgentName ?? ""}`, "esc cancel");
     const kind =
       this.mode === "thinkingPicker"
         ? "thinking"
@@ -1247,7 +1250,7 @@ export class FabricDashboard implements Component, Focusable {
               ? "tools"
               : "model";
     const lines = [
-      this.topBorder(width, `actor · ${this.pickerActorName ?? ""} · ${kind}`),
+      this.topBorder(width, `persistent agent · ${this.pickerPersistentAgentName ?? ""} · ${kind}`),
     ];
     const inner = this.picker.render(width - 2);
     for (const line of inner) lines.push(this.row(width, line));
@@ -1271,9 +1274,9 @@ export class FabricDashboard implements Component, Focusable {
 
   private renderInstructionsEditor(width: number): string[] {
     if (!this.editor) return [];
-    if (width < 24) return this.renderNarrowFallback(width, `instructions · ${this.editorActorName ?? ""}`, "esc cancel");
+    if (width < 24) return this.renderNarrowFallback(width, `instructions · ${this.editorPersistentAgentName ?? ""}`, "esc cancel");
     const innerWidth = width - 2;
-    const lines = [this.topBorder(width, `instructions · ${this.editorActorName ?? ""}`)];
+    const lines = [this.topBorder(width, `instructions · ${this.editorPersistentAgentName ?? ""}`)];
     for (const line of this.editor.render(innerWidth)) {
       lines.push(this.row(width, line));
     }
@@ -1292,7 +1295,7 @@ export class FabricDashboard implements Component, Focusable {
     if (this.overviewView !== "topology") return undefined;
     return buildProjectMeshTopology({
       main: snapshot.main,
-      actors: snapshot.actors,
+      persistentAgents: snapshot.persistentAgents,
       agents: snapshot.agents,
       state: snapshot.state,
       events: snapshot.events,
@@ -1464,7 +1467,7 @@ export class FabricDashboard implements Component, Focusable {
     const elapsed = run
       ? formatDuration(((hasDetachedWork ? snapshot.now : run.finishedAt) ?? snapshot.now) - run.startedAt)
       : undefined;
-    const activeActors = snapshot.actors.filter((actor) => isActiveStatus(actor.status)).length;
+    const activePersistentAgents = snapshot.persistentAgents.filter((persistentAgent) => isActiveStatus(persistentAgent.status)).length;
     const summary = (
       meshModel
         ? [
@@ -1472,7 +1475,7 @@ export class FabricDashboard implements Component, Focusable {
             run?.currentPhaseId
               ? `current ${run.phases.find((phase) => phase.id === run.currentPhaseId)?.name ?? run.currentPhaseId}`
               : undefined,
-            `Participants ${snapshot.agents.filter((agent) => isActiveStatus(agent.status)).length}/${snapshot.agents.length} agents · ${activeActors}/${snapshot.actors.length} actors · ${meshModel.participants.length} remote`,
+            `Participants ${snapshot.agents.filter((agent) => isActiveStatus(agent.status)).length}/${snapshot.agents.length} one-shot · ${activePersistentAgents}/${snapshot.persistentAgents.length} persistent · ${meshModel.participants.length} remote`,
             `Mesh ${meshModel.topics.length} topics · ${snapshot.state.length} state`,
             this.graphReplayIndex !== undefined
               ? `${this.graphReplayPlaying ? "▶" : "Ⅱ"} replay ${this.graphReplayIndex + 1}/${Math.max(1, this.graphReplayLength)} · ${this.graphReplaySpeed}×`
@@ -1484,11 +1487,11 @@ export class FabricDashboard implements Component, Focusable {
             run?.status,
             largeRun ? "⚠ large run" : undefined,
             `${activeAgents}/${runAgents.length} run agents active`,
-            `${snapshot.actors.length} actors`,
+            `${snapshot.persistentAgents.length} persistent`,
             snapshot.observability
               ? [
                   `health ${snapshot.observability.outcomes.verified}/${snapshot.observability.outcomes.records} verified`,
-                  `${snapshot.observability.actorBudgets.rejectedActivations} quota rejects`,
+                  `${snapshot.observability.persistentAgentBudgets.rejectedActivations} quota rejects`,
                   `${snapshot.observability.contextQos.retiredResults} retired`,
                   snapshot.observability.pathLeases > 0
                     ? `${snapshot.observability.pathLeases} write lease${snapshot.observability.pathLeases === 1 ? "" : "s"}`
@@ -1554,7 +1557,7 @@ export class FabricDashboard implements Component, Focusable {
     if (this.overviewView === "topology") {
       const topology = meshModel ?? buildProjectMeshTopology({
         main: snapshot.main,
-        actors: snapshot.actors,
+        persistentAgents: snapshot.persistentAgents,
         agents: snapshot.agents,
         state: snapshot.state,
         events: snapshot.events,
@@ -1704,30 +1707,31 @@ export class FabricDashboard implements Component, Focusable {
       ].filter((value): value is string => Boolean(value));
       return `peer actions: ${actions.join(" · ")}`;
     }
-    if (entity.kind === "actor" && entity.status !== "stopped") {
+    if (entity.kind === "persistentAgent" && entity.status !== "stopped") {
       const actions = [
-        this.actorTranscript
+        this.persistentAgentTranscript
           ? `space ${isActiveStatus(entity.status) ? "live " : ""}transcript peek`
           : undefined,
         this.canMessage(entity, "steer") ? "s queue message" : undefined,
-        this.modelSourceForActor(entity.value) && this.onActorModel ? "m model" : undefined,
-        this.onActorThinking ? "e thinking" : undefined,
-        this.onActorDeliveryPolicy ? "y delivery policy" : undefined,
-        this.onActorEvents ? "v events" : undefined,
-        this.onActorTools ? "o tools" : undefined,
-        this.onActorInstructions ? "i instructions" : undefined,
+        this.canMessage(entity, "followUp") ? "u queue follow-up" : undefined,
+        this.modelSourceForPersistentAgent(entity.value) && this.onPersistentAgentModel ? "m model" : undefined,
+        this.onPersistentAgentThinking ? "e thinking" : undefined,
+        this.onPersistentAgentDeliveryPolicy ? "y delivery policy" : undefined,
+        this.onPersistentAgentEvents ? "v events" : undefined,
+        this.onPersistentAgentTools ? "o tools" : undefined,
+        this.onPersistentAgentInstructions ? "i instructions" : undefined,
         this.onClearMessages ? "c clear mailbox" : undefined,
-        this.onExportActor ? "x export" : undefined,
+        this.onExportPersistentAgent ? "x export" : undefined,
         "enter details",
       ].filter((value): value is string => Boolean(value));
-      return `actor actions: ${actions.join(" · ")}`;
+      return `persistent agent actions: ${actions.join(" · ")}`;
     }
-    if (entity.kind === "globalActor") {
+    if (entity.kind === "agentTemplate") {
       const actions = [
         this.onGlobalDeliveryPolicy ? "y delivery policy" : undefined,
         this.onGlobalInstructions ? "i instructions" : undefined,
-        this.onImportActor ? "p import" : undefined,
-        this.onRemoveGlobalActor ? "d delete" : undefined,
+        this.onImportPersistentAgent ? "p import" : undefined,
+        this.onRemoveAgentTemplate ? "d delete" : undefined,
         "enter details",
       ].filter((value): value is string => Boolean(value));
       return `template actions: ${actions.join(" · ")}`;
@@ -1882,7 +1886,7 @@ export class FabricDashboard implements Component, Focusable {
     if (width < 24) return this.renderNarrowDetail(width, snapshot, entity);
     const innerWidth = width - 2;
     const transcriptView =
-      (entity.kind === "agent" || entity.kind === "actor") && this.detailView === "transcript";
+      (entity.kind === "agent" || entity.kind === "persistentAgent") && this.detailView === "transcript";
     const actionLines = wrapPlainText(this.detailActionHint(entity), Math.max(1, innerWidth - 2), 3);
     const viewLabel = transcriptView
       ? ` · transcript · ${isActiveStatus(entity.status) ? "live" : entity.status}`
@@ -1898,7 +1902,9 @@ export class FabricDashboard implements Component, Focusable {
               ? "topic"
               : entity.kind === "meshRoute"
                 ? "route"
-                : entity.kind;
+                : entity.kind === "persistentAgent"
+            ? "persistent agent"
+            : entity.kind;
     const lines = [this.topBorder(width, `${kindLabel} · ${entity.label}${viewLabel}`)];
     const content = transcriptView
       ? this.transcriptLines(entity, innerWidth)
@@ -1939,7 +1945,7 @@ export class FabricDashboard implements Component, Focusable {
     const transcriptCwd =
       entity.kind === "agent"
         ? entity.value.cwd
-        : entity.kind === "actor"
+        : entity.kind === "persistentAgent"
           ? entity.value.worker?.cwd
           : undefined;
     if (!transcript || transcript.entries.length === 0) {
@@ -1948,7 +1954,7 @@ export class FabricDashboard implements Component, Focusable {
           "dim",
           isActiveStatus(entity.status)
             ? "Waiting for streamed agent activity…"
-            : "No retained transcript is available for this agent or actor.",
+            : "No retained transcript is available for this one-shot or persistent Agent.",
         ),
       ];
     }
@@ -2224,23 +2230,24 @@ export class FabricDashboard implements Component, Focusable {
         actions.length > 0
           ? `One-shot agent actions: ${actions.join(" · ")}. `
           : "One-shot agent. ";
-      return `${controls}Model and thinking are fixed at spawn; use a persistent actor for editable runtime settings.`;
+      return `${controls}Model and thinking are fixed at spawn; use a persistent agent for editable runtime settings.`;
     }
-    if (entity.kind === "actor" && entity.status !== "stopped") {
+    if (entity.kind === "persistentAgent" && entity.status !== "stopped") {
       const actions = [
         this.canMessage(entity, "steer") ? "s queue message" : undefined,
-        this.modelSourceForActor(entity.value) && this.onActorModel ? "m model" : undefined,
-        this.onActorThinking ? "e thinking" : undefined,
-        this.onActorDeliveryPolicy ? "y delivery policy" : undefined,
-        this.onActorEvents ? "v events" : undefined,
-        this.onActorTools ? "o tools" : undefined,
+        this.canMessage(entity, "followUp") ? "u queue follow-up" : undefined,
+        this.modelSourceForPersistentAgent(entity.value) && this.onPersistentAgentModel ? "m model" : undefined,
+        this.onPersistentAgentThinking ? "e thinking" : undefined,
+        this.onPersistentAgentDeliveryPolicy ? "y delivery policy" : undefined,
+        this.onPersistentAgentEvents ? "v events" : undefined,
+        this.onPersistentAgentTools ? "o tools" : undefined,
         this.onClearMessages ? "c clear mailbox" : undefined,
-        this.onActorInstructions ? "i instructions" : undefined,
-        this.onExportActor ? "x export→global" : undefined,
+        this.onPersistentAgentInstructions ? "i instructions" : undefined,
+        this.onExportPersistentAgent ? "x export→global" : undefined,
       ].filter((value): value is string => Boolean(value));
       return actions.length > 0
-        ? `Actor actions: ${actions.join(" · ")}`
-        : "Actor settings are read-only in this session.";
+        ? `Persistent agent actions: ${actions.join(" · ")}`
+        : "Persistent agent settings are read-only in this session.";
     }
     if (entity.kind === "meshParticipant") {
       const actions = [
@@ -2252,12 +2259,12 @@ export class FabricDashboard implements Component, Focusable {
         ? `Remote participant actions: ${actions.join(" · ")}`
         : "Remote participant is read-only.";
     }
-    if (entity.kind === "globalActor") {
+    if (entity.kind === "agentTemplate") {
       const actions = [
         this.onGlobalDeliveryPolicy ? "y delivery policy" : undefined,
         this.onGlobalInstructions ? "i instructions" : undefined,
-        this.onImportActor ? "p import" : undefined,
-        this.onRemoveGlobalActor ? "d delete" : undefined,
+        this.onImportPersistentAgent ? "p import" : undefined,
+        this.onRemoveAgentTemplate ? "d delete" : undefined,
       ].filter((value): value is string => Boolean(value));
       return actions.length > 0
         ? `Template actions: ${actions.join(" · ")}`
@@ -2459,35 +2466,35 @@ export class FabricDashboard implements Component, Focusable {
       field("Error", agent.error);
       markdownField("Result", agent.text, "result");
       structuredField("Value", agent.value);
-    } else if (entity.kind === "actor") {
-      const actor = entity.value;
-      field("ID", actor.id);
-      field("Runner", actor.runner);
-      field("Model override", actor.model ?? "inherit");
-      field("Active worker model", actor.worker?.model);
-      field("Thinking override", actor.thinking ?? "inherit");
-      field("Active worker thinking", actor.worker?.thinking);
-      field("Delivery", `${actor.delivery} · ${actor.responseMode}`);
-      field("Trigger turn", actor.triggerTurn ? "yes" : "no");
-      field("Activity", actor.worker?.currentTool);
-      field("Transport", actor.worker?.transport);
+    } else if (entity.kind === "persistentAgent") {
+      const persistentAgent = entity.value;
+      field("ID", persistentAgent.id);
+      field("Runner", persistentAgent.runner);
+      field("Model override", persistentAgent.model ?? "inherit");
+      field("Active worker model", persistentAgent.worker?.model);
+      field("Thinking override", persistentAgent.thinking ?? "inherit");
+      field("Active worker thinking", persistentAgent.worker?.thinking);
+      field("Delivery", `${persistentAgent.delivery} · ${persistentAgent.responseMode}`);
+      field("Trigger turn", persistentAgent.triggerTurn ? "yes" : "no");
+      field("Activity", persistentAgent.worker?.currentTool);
+      field("Transport", persistentAgent.worker?.transport);
       field(
         "Usage",
-        actor.worker?.usage
-          ? `${formatTokens(actor.worker.usage.input + actor.worker.usage.output)} tokens · ${actor.worker.toolCalls ?? 0} tools`
+        persistentAgent.worker?.usage
+          ? `${formatTokens(persistentAgent.worker.usage.input + persistentAgent.worker.usage.output)} tokens · ${persistentAgent.worker.toolCalls ?? 0} tools`
           : undefined,
       );
-      field("Host events", actor.events.join(", "));
-      field("Tools", actor.tools?.join(", ") ?? `inherited (${this.actorDefaultTools.join(", ")})`);
-      field("Topics", actor.topics.join(", "));
-      field("Queue", actor.queued);
-      structuredField("Budget", actor.budget);
-      field("Last error", actor.lastError);
-      field("Instructions", actor.instructions);
-      if (actor.recentMessages.length > 0) {
+      field("Host events", persistentAgent.events.join(", "));
+      field("Tools", persistentAgent.tools?.join(", ") ?? `inherited (${this.persistentAgentDefaultTools.join(", ")})`);
+      field("Topics", persistentAgent.topics.join(", "));
+      field("Queue", persistentAgent.queued);
+      structuredField("Budget", persistentAgent.budget);
+      field("Last error", persistentAgent.lastError);
+      field("Instructions", persistentAgent.instructions);
+      if (persistentAgent.recentMessages.length > 0) {
         lines.push("");
         lines.push(this.theme.fg("accent", "Recent mailbox"));
-        for (const message of actor.recentMessages) {
+        for (const message of persistentAgent.recentMessages) {
           const text = message.text ?? message.error ?? message.action ?? "data";
           field(
             `${message.direction === "in" ? "→" : "←"} ${formatClock(message.createdAt)} ${message.source}`,
@@ -2518,7 +2525,7 @@ export class FabricDashboard implements Component, Focusable {
       field("Current", item.current);
       field("Detail", item.detail);
       structuredField("Data", item.data);
-    } else if (entity.kind === "globalActor") {
+    } else if (entity.kind === "agentTemplate") {
       const def = entity.value;
       field("Scope", "global template");
       field("ID", def.id);
@@ -2745,7 +2752,7 @@ export class FabricDashboard implements Component, Focusable {
     entity: Entity,
   ): string[] {
     const transcriptView =
-      (entity.kind === "agent" || entity.kind === "actor") && this.detailView === "transcript";
+      (entity.kind === "agent" || entity.kind === "persistentAgent") && this.detailView === "transcript";
     const content = transcriptView
       ? this.transcriptLines(entity, width)
       : this.detailLines(entity, width, snapshot.now, snapshot.main.cwd ?? process.cwd());

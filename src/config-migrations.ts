@@ -67,6 +67,12 @@ const configVersion = (document: Readonly<Record<string, unknown>>): number => {
   return value;
 };
 
+export const assertCurrentFabricConfigPatch = (patch: Readonly<Record<string, unknown>>): void => {
+  if (Object.hasOwn(patch, "configVersion") || Object.hasOwn(patch, "subagents")) {
+    throw new Error("Fabric configuration updates must use the current schema");
+  }
+};
+
 export const migrateFabricConfigDocument = (
   input: Readonly<Record<string, unknown>>,
 ): FabricConfigMigrationResult => {

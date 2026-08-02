@@ -9,15 +9,15 @@ import {
   Spacer,
   Text,
 } from "@earendil-works/pi-tui";
-import type { FabricActorDeliveryPolicy } from "../actors/delivery-policy.js";
+import type { FabricPersistentAgentDeliveryPolicy } from "../agents/persistent/delivery-policy.js";
 
 const LAYOUT: SelectListLayoutOptions = {
   minPrimaryColumnWidth: 18,
   maxPrimaryColumnWidth: 34,
 };
 
-const POLICIES: Array<FabricActorDeliveryPolicy & { value: string; label: string; description: string }> = [
-  { value: "mailbox", label: "Mailbox only", description: "keep output in actor history", delivery: "mailbox", triggerTurn: false },
+const POLICIES: Array<FabricPersistentAgentDeliveryPolicy & { value: string; label: string; description: string }> = [
+  { value: "mailbox", label: "Mailbox only", description: "keep output in persistent Agent history", delivery: "mailbox", triggerTurn: false },
   { value: "steer-passive", label: "Steer · passive", description: "deliver now without starting idle Main", delivery: "steer", triggerTurn: false },
   { value: "steer-active", label: "Steer · resume Main", description: "deliver now and start Main when idle", delivery: "steer", triggerTurn: true },
   { value: "followUp-passive", label: "Follow-up · passive", description: "deliver after the run without starting idle Main", delivery: "followUp", triggerTurn: false },
@@ -33,19 +33,19 @@ const selectListTheme = (theme: Theme): SelectListTheme => ({
   noMatch: (text) => theme.fg("muted", text),
 });
 
-export interface FabricActorDeliverySelectorOptions {
+export interface FabricPersistentAgentDeliverySelectorOptions {
   theme: Theme;
-  currentValue: FabricActorDeliveryPolicy;
-  onSelect: (policy: FabricActorDeliveryPolicy) => void;
+  currentValue: FabricPersistentAgentDeliveryPolicy;
+  onSelect: (policy: FabricPersistentAgentDeliveryPolicy) => void;
   onCancel: () => void;
   headerText?: string;
 }
 
-export class FabricActorDeliverySelector extends Container implements Focusable {
+export class FabricPersistentAgentDeliverySelector extends Container implements Focusable {
   private readonly selectList: SelectList;
   focused = false;
 
-  constructor(options: FabricActorDeliverySelectorOptions) {
+  constructor(options: FabricPersistentAgentDeliverySelectorOptions) {
     super();
     const current = POLICIES.find(
       (policy) =>
@@ -61,7 +61,7 @@ export class FabricActorDeliverySelector extends Container implements Focusable 
       new Text(
         options.theme.fg(
           "muted",
-          options.headerText ?? "Choose how actor output enters Main and whether it starts a turn.",
+          options.headerText ?? "Choose how persistent Agent output enters Main and whether it starts a turn.",
         ),
         0,
         0,

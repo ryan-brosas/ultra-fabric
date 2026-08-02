@@ -7,6 +7,8 @@ import type { FabricAgentRunner, FabricAgentTransport } from "../config.js";
 import type { FabricThinking } from "../thinking.js";
 import type { FabricRunEnvelopeV1 } from "../run/context.js";
 import type { ModelRouteDecision } from "../routing/model-router.js";
+import type { FabricAgentRole } from "./role.js";
+import type { AgentTurnBudget } from "./turn-budget.js";
 
 type AgentAdmissionReason =
   | "independent_context"
@@ -44,8 +46,14 @@ export interface AgentSessionSeed {
   outerToolResult: AgentToolResultMessage;
 }
 
+export type FabricAgentLifecycle = "one-shot" | "persistent";
+
 export interface AgentRunRequest {
   task: string;
+  role?: FabricAgentRole;
+  goal?: string;
+  completion?: string;
+  turnBudget?: AgentTurnBudget;
   images?: ImageContent[];
   name?: string;
   runner?: FabricAgentRunner;
@@ -68,8 +76,8 @@ export interface AgentRunRequest {
   consultReadScope?: string[];
   systemPrompt?: string;
   sessionFile?: string;
-  actorId?: string;
-  actorName?: string;
+  persistentAgentId?: string;
+  persistentAgentName?: string;
   meshRoot?: string;
   runnerSessionId?: string;
   /** Host-created Pi branch seed ending with the native outer fabric_exec result. */
@@ -105,8 +113,14 @@ export interface AgentCompactionStatus {
 
 export interface AgentRunRecord {
   id: string;
+  kind: "agent";
+  lifecycle: "one-shot";
+  role: FabricAgentRole;
   name: string;
   task: string;
+  goal?: string;
+  completion?: string;
+  turnBudget?: AgentTurnBudget & { outcome?: "within-budget" | "wrap-up-requested" | "exceeded" };
   status: AgentRunStatus;
   runner: FabricAgentRunner;
   transport: FabricAgentTransport;
@@ -116,8 +130,8 @@ export interface AgentRunRecord {
   profile?: string;
   admission?: AgentAdmissionIntent;
   thinking?: FabricThinking;
-  actorId?: string;
-  actorName?: string;
+  persistentAgentId?: string;
+  persistentAgentName?: string;
   traceId?: string;
   spanId?: string;
   parentRunId?: string;
@@ -153,6 +167,9 @@ export interface AgentRunResult extends AgentRunRecord {
 
 export interface AgentHandleInfo {
   id: string;
+  kind: "agent";
+  lifecycle: "one-shot";
+  role: FabricAgentRole;
   name: string;
   status: AgentRunStatus;
   runner: FabricAgentRunner;
@@ -163,8 +180,8 @@ export interface AgentHandleInfo {
   profile?: string;
   admission?: AgentAdmissionIntent;
   thinking?: FabricThinking;
-  actorId?: string;
-  actorName?: string;
+  persistentAgentId?: string;
+  persistentAgentName?: string;
   traceId?: string;
   spanId?: string;
   parentRunId?: string;
@@ -179,6 +196,8 @@ export interface AgentHandleInfo {
 
 export interface AgentWorkerOptions {
   id: string;
+  role: FabricAgentRole;
+  turnBudget?: AgentTurnBudget;
   runner: FabricAgentRunner;
   name: string;
   taskFile: string;
@@ -208,8 +227,8 @@ export interface AgentWorkerOptions {
   thinking?: string;
   systemPrompt?: string;
   sessionFile?: string;
-  actorId?: string;
-  actorName?: string;
+  persistentAgentId?: string;
+  persistentAgentName?: string;
   meshRoot?: string;
   projectRoot?: string;
   ownerHostId?: string;

@@ -1,8 +1,8 @@
-# Deterministic compaction
+# Fabric compaction
 
-Pi Fabric provides an LLM-free compactor through `session_before_compact`. It is the default engine; set `compaction.engine` to `"pi"` to defer to Pi's compactor.
+Pi Fabric owns compaction policy through `session_before_compact`. The default `"fabric"` engine always produces a deterministic, LLM-free portable summary, then selects a compatible model-native backend when one is available. Set `compaction.engine` to `"pi"` to disable Fabric routing and defer to Pi's compactor.
 
-Fabric targets 65% of the model's advertised context window after compaction by default. This is configurable from `/fabric-settings` or `compaction.targetContextRatio` (bounded to `0.25`–`0.85`):
+Fabric targets 65% of the model's advertised context window for its portable summary after compaction by default. This is configurable from `/fabric-settings` or `compaction.targetContextRatio` (bounded to `0.25`–`0.85`):
 
 ```json
 {
@@ -14,6 +14,23 @@ Fabric targets 65% of the model's advertised context window after compaction by 
 ```
 
 Use `{ "compaction": { "engine": "pi" } }` to disable the Fabric engine.
+
+## Model-aware routing
+
+With `engine: "fabric"`, Ultra Fabric owns one compaction decision and routes by exact active-model metadata:
+
+| Active model | Backend | Portable fallback |
+| --- | --- | --- |
+| Official direct OpenAI Responses (`provider: "openai"`, `api: "openai-responses"`, `api.openai.com`) | OpenAI Responses `compaction_trigger` | deterministic Fabric summary |
+| OpenAI Codex Responses (`api: "openai-codex-responses"`, official ChatGPT endpoint) | OpenAI Responses `compaction_trigger` | deterministic Fabric summary |
+| Claude bridge (`baseUrl: "claude-bridge"`) | delegated to the bridge's own isolated compactor | bridge failure policy |
+| Every other model, including OpenAI-compatible proxies and Azure | deterministic Fabric compactor | same result |
+
+For supported OpenAI models, Fabric sends the current active history, system instructions, active tool schemas, and a trailing `compaction_trigger` to the same configured provider. The request uses `store: false`. Fabric retains recent whole user items within an 80 KB cap, the returned opaque compaction item, and provider token/cost usage under `details.remoteCompaction`. The deterministic summary remains in the normal Pi compaction fields for model switching, export, tree navigation, and recovery.
+
+Compatible later OpenAI requests replay that provider-native history. Replay state is reconstructed from the active branch on resume, compaction, tree navigation, and model selection; malformed, oversized, or cross-model state is rejected. A later native compaction chains from the prior opaque item rather than compacting only the portable text. Provider failure, missing credentials, malformed streams, and unsupported endpoints fall back to the deterministic Fabric result. The explicit `__pi_vcc__` sentinel still bypasses all Fabric routing.
+
+Native OpenAI compaction is a provider request and may incur token charges. Its opaque artifact is persisted in the local session JSONL and is not human-readable. No artifact is sent to a different provider or model key.
 
 ## Pre-threshold Context QoS
 
@@ -77,7 +94,9 @@ active branch entries ─┬─► live window ─► calibrated token budget �
 - `projections.ts` computes goal, file, operation-state, turn, status, and transcript views.
 - `enrichers.ts` permits deterministic optional annotations. Fabric ships no built-in enrichers.
 - `render.ts` independently bounds every rendered block and enforces the global UTF-8 limit.
-- `hook.ts` computes the live cut, selects cumulative source, emits v2 details, and implements Pi/pi-vcc precedence.
+- `hook.ts` computes the live cut, selects cumulative source, emits v2 details, and owns model/Pi/pi-vcc precedence.
+- `openai-native.ts` validates official endpoints, serializes Pi context through the current Responses adapter, requests the native artifact, and bounds persisted history.
+- `openai-native-replay.ts` validates and restores branch-local native history across lifecycle transitions and replaces only exact compatible provider payloads.
 
 ## Live cut and closure
 
@@ -174,7 +193,8 @@ New summaries emit `details.compactor: "fabric"` and `details.version: 2` with:
 - per-projection omission counts and the typed preserve count (valid v1 requests cannot exceed the preserve limit);
 - instruction mode, canonicalization, source size, truncation, and preserve counts;
 - stable kept/source entry-id addresses and the source timestamp;
-- when adaptive budgeting is active: advertised window, target ratio/tokens, Pi reserve and recent settings, raw estimate, calibration scale, fixed overhead, retained raw tokens, and Fabric's `projectedTokensAfter`. Pi core independently recomputes its own `estimatedTokensAfter` after persisting the compaction.
+- when adaptive budgeting is active: advertised window, target ratio/tokens, Pi reserve and recent settings, raw estimate, calibration scale, fixed overhead, retained raw tokens, and Fabric's `projectedTokensAfter`. Pi core independently recomputes its own `estimatedTokensAfter` after persisting the compaction;
+- for successful official OpenAI Responses routing: a versioned `remoteCompaction` envelope with the exact provider/API/model key, bounded recent user items, opaque replacement history, and provider-reported usage/cost.
 
 Only exact Fabric versions 1 and 2 are recognized. v1 details and rendered prose are not reused as truth. On the next compaction, an old session naturally migrates to v2 because the new result is rebuilt from raw active-branch entries. V2 validation accepts the legacy commit-omission counter for old records, but new summaries do not emit a commit projection or counter.
 
@@ -194,13 +214,15 @@ Branch details use `kind: "pi-fabric.branch-summary"`, `version: 1`, stable sour
 
 Nested branch summaries re-emit only valid typed facts; branch summary prose is never normalized. Later compaction can therefore resolve abandoned-branch failures against later exact successes and retain custom context, files, and activity through navigation or forks without parsing prose. Since Pi supplies only the active path or the abandoned `entriesToSummarize` path to each compiler, sibling branches do not contaminate one another.
 
-## pi-vcc precedence
+## Compactor precedence
 
-Precedence remains:
+Precedence is:
 
 1. exact `__pi_vcc__` custom-instruction sentinel;
-2. configured Fabric engine;
+2. configured Fabric engine and its exact model route;
 3. pi-vcc/default Pi behavior.
+
+Within the Fabric route, an exact Claude bridge model is left unclaimed so the bridge's later takeover can run. Supported official OpenAI Responses models are handled inside Fabric. Every other model receives the deterministic Fabric summary.
 
 Fabric marks claimed events with `_fabricCompaction`. If an earlier pi-vcc handler marked `_piVccOverriding` and Fabric has nothing to compact, Fabric does not return a cancellation that would erase the pi-vcc result. With engine `"pi"`, Fabric neither claims nor cancels the event.
 

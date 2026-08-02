@@ -4,6 +4,9 @@ import type { AgentRunRecord } from "../src/agents/types.js";
 
 const baseRecord = (): AgentRunRecord => ({
   id: "id",
+  kind: "agent",
+  lifecycle: "one-shot",
+  role: "worker",
   name: "name",
   task: "task",
   status: "running",

@@ -27,8 +27,8 @@ export interface BudgetLedgerEntry {
   tokens: number;
   ts: number;
   runner?: string;
-  actorId?: string;
-  actorName?: string;
+  persistentAgentId?: string;
+  persistentAgentName?: string;
   input?: number;
   output?: number;
   cacheRead?: number;
@@ -44,7 +44,7 @@ export interface BudgetLedgerDetail {
   cost: number;
   tokens: number;
   byRunner: Record<string, { cost: number; tokens: number }>;
-  byActor: Record<string, { cost: number; tokens: number }>;
+  byPersistentAgent: Record<string, { cost: number; tokens: number }>;
   entries: BudgetLedgerEntry[];
 }
 
@@ -163,14 +163,14 @@ const parseBudgetLedgerEntry = (value: unknown): BudgetLedgerEntry | undefined =
 /**
  * Sum the append-only ledger with full per-attribution breakdown. Reuses the
  * tolerant line-parsing semantics of readBudgetLedger while exposing runner/
- * actor/token-kind rollups for orchestrator decisions.
+ * persistentAgent/token-kind rollups for orchestrator decisions.
  */
 export function readBudgetLedgerDetailed(file: string): BudgetLedgerDetail {
   const detail: BudgetLedgerDetail = {
     cost: 0,
     tokens: 0,
     byRunner: {},
-    byActor: {},
+    byPersistentAgent: {},
     entries: [],
   };
   let raw: string;
@@ -191,10 +191,10 @@ export function readBudgetLedgerDetailed(file: string): BudgetLedgerDetail {
       const runnerRollup = (detail.byRunner[runnerKey] ??= { cost: 0, tokens: 0 });
       runnerRollup.cost += entry.cost;
       runnerRollup.tokens += entry.tokens;
-      if (entry.actorId) {
-        const actorRollup = (detail.byActor[entry.actorId] ??= { cost: 0, tokens: 0 });
-        actorRollup.cost += entry.cost;
-        actorRollup.tokens += entry.tokens;
+      if (entry.persistentAgentId) {
+        const persistentAgentRollup = (detail.byPersistentAgent[entry.persistentAgentId] ??= { cost: 0, tokens: 0 });
+        persistentAgentRollup.cost += entry.cost;
+        persistentAgentRollup.tokens += entry.tokens;
       }
     } catch {
       // Ignore malformed cost lines; the ledger is best-effort.

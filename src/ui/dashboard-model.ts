@@ -5,10 +5,10 @@ import type {
   FabricActivityPhase,
   FabricActivityRun,
 } from "../activity/types.js";
-import type { GlobalActorDefinition } from "../actors/types.js";
+import type { AgentTemplateDefinition } from "../agents/persistent/types.js";
 import type {
   FabricDashboardSnapshot,
-  FabricUiActor,
+  FabricUiPersistentAgent,
   FabricUiAgent,
   FabricUiMain,
   FabricUiPeer,
@@ -27,13 +27,13 @@ export type Entity =
   | { id: string; kind: "main"; label: string; status: string; value: FabricUiMain }
   | { id: string; kind: "peer"; label: string; status: string; value: FabricUiPeer }
   | { id: string; kind: "agent"; label: string; status: string; value: FabricUiAgent }
-  | { id: string; kind: "actor"; label: string; status: string; value: FabricUiActor }
+  | { id: string; kind: "persistentAgent"; label: string; status: string; value: FabricUiPersistentAgent }
   | {
       id: string;
-      kind: "globalActor";
+      kind: "agentTemplate";
       label: string;
       status: string;
-      value: GlobalActorDefinition;
+      value: AgentTemplateDefinition;
     }
   | { id: string; kind: "call"; label: string; status: string; value: FabricActivityCall }
   | { id: string; kind: "item"; label: string; status: string; value: FabricActivityItem }
@@ -79,8 +79,8 @@ export type Pane = "phases" | "entities";
 export type OverviewView = "activity" | "topology";
 
 type EntityGroupKind =
-  | FabricActivityKind
-  | "globalActor"
+  | Exclude<FabricActivityKind, "persistentAgent">
+  | "agentTemplate"
   | "peer"
   | "state"
   | "meshParticipant"
@@ -96,8 +96,7 @@ export interface EntityGroup {
 const entityGroupOrder: readonly EntityGroupKind[] = [
   "agent",
   "peer",
-  "actor",
-  "globalActor",
+  "agentTemplate",
   "tool",
   "extension",
   "mcp",
@@ -113,8 +112,7 @@ const entityGroupOrder: readonly EntityGroupKind[] = [
 const entityGroupLabels: Record<EntityGroupKind, string> = {
   agent: "Agents",
   peer: "Peers",
-  actor: "Actors",
-  globalActor: "Global templates",
+  agentTemplate: "Global templates",
   tool: "Tools",
   extension: "Extensions",
   mcp: "MCP",
@@ -128,16 +126,18 @@ const entityGroupLabels: Record<EntityGroupKind, string> = {
 };
 
 const entityGroupKind = (entity: Entity): EntityGroupKind => {
-  if (entity.kind === "main" || entity.kind === "agent") return "agent";
+  if (entity.kind === "main" || entity.kind === "agent" || entity.kind === "persistentAgent") return "agent";
   if (entity.kind === "peer") return "peer";
-  if (entity.kind === "actor") return "actor";
-  if (entity.kind === "globalActor") return "globalActor";
+  if (entity.kind === "agentTemplate") return "agentTemplate";
   if (entity.kind === "state") return "state";
   if (entity.kind === "meshParticipant") return "meshParticipant";
   if (entity.kind === "meshTopic") return "meshTopic";
   if (entity.kind === "meshRoute") return "meshRoute";
-  if (entity.kind === "call") return entity.value.entityKind ?? entity.value.kind;
-  return entity.value.kind;
+  if (entity.kind === "call") {
+    const kind = entity.value.entityKind ?? entity.value.kind;
+    return kind === "persistentAgent" ? "agent" : kind;
+  }
+  return entity.value.kind === "persistentAgent" ? "agent" : entity.value.kind;
 };
 
 const entityGroupRanks = new Map(
@@ -228,16 +228,16 @@ const entitiesFor = (
       status: peer.status,
       value: peer,
     }));
-    const actors: Entity[] = snapshot.actors.map((actor) => ({
-      id: `actor:${actor.id}`,
-      kind: "actor",
-      label: actor.name,
-      status: actor.lastError ? "failed" : actor.status,
-      value: actor,
+    const persistentAgents: Entity[] = snapshot.persistentAgents.map((persistentAgent) => ({
+      id: `persistentAgent:${persistentAgent.id}`,
+      kind: "persistentAgent",
+      label: persistentAgent.name,
+      status: persistentAgent.lastError ? "failed" : persistentAgent.status,
+      value: persistentAgent,
     }));
-    const globalActors: Entity[] = snapshot.globalActors.map((definition) => ({
-      id: `globalActor:${definition.id}`,
-      kind: "globalActor",
+    const agentTemplates: Entity[] = snapshot.agentTemplates.map((definition) => ({
+      id: `agentTemplate:${definition.id}`,
+      kind: "agentTemplate",
       label: definition.name,
       status: "global",
       value: definition,
@@ -253,8 +253,8 @@ const entitiesFor = (
       mainEntity(snapshot),
       ...unlinkedAgents,
       ...peers,
-      ...actors,
-      ...globalActors,
+      ...persistentAgents,
+      ...agentTemplates,
       ...state,
     ]);
   }
@@ -279,11 +279,11 @@ const entitiesFor = (
         call.kind === "agent" &&
         agentLaunchRefs.has(call.ref) &&
         panelAgents.some((agent) => linkedAgent(call, agent));
-      const representedActorCreation =
-        call.kind === "actor" &&
+      const representedPersistentAgentCreation =
+        call.kind === "persistentAgent" &&
         call.ref === "agents.create" &&
-        snapshot.actors.some((actor) => linkedEntityId(call.entityId, actor.id));
-      return !representedAgentLaunch && !representedActorCreation;
+        snapshot.persistentAgents.some((persistentAgent) => linkedEntityId(call.entityId, persistentAgent.id));
+      return !representedAgentLaunch && !representedPersistentAgentCreation;
     })
     .map((call) => ({
       id: `call:${call.id}`,
@@ -313,7 +313,7 @@ const projectMeshEntitiesFor = (
 ): Entity[] => {
   const model = topology ?? buildProjectMeshTopology({
     main: snapshot.main,
-    actors: snapshot.actors,
+    persistentAgents: snapshot.persistentAgents,
     agents: snapshot.agents,
     state: snapshot.state,
     events: snapshot.events,
@@ -322,13 +322,13 @@ const projectMeshEntitiesFor = (
   });
   return model.rows.flatMap((row): Entity[] => {
     if (row.kind === "meshRoot") return [mainEntity(snapshot)];
-    if (row.kind === "meshActor") {
+    if (row.kind === "meshPersistentAgent") {
       return [{
         id: row.entityId,
-        kind: "actor",
-        label: row.actor.name,
-        status: row.actor.lastError ? "failed" : row.actor.status,
-        value: row.actor,
+        kind: "persistentAgent",
+        label: row.persistentAgent.name,
+        status: row.persistentAgent.lastError ? "failed" : row.persistentAgent.status,
+        value: row.persistentAgent,
       }];
     }
     if (row.kind === "meshAgent") {
@@ -399,12 +399,12 @@ const unifiedTopologyEntitiesFor = (
       status: agent.status,
       value: agent,
     })),
-    ...snapshot.actors.map((actor): Entity => ({
-      id: `actor:${actor.id}`,
-      kind: "actor",
-      label: actor.name,
-      status: actor.lastError ? "failed" : actor.status,
-      value: actor,
+    ...snapshot.persistentAgents.map((persistentAgent): Entity => ({
+      id: `persistentAgent:${persistentAgent.id}`,
+      kind: "persistentAgent",
+      label: persistentAgent.name,
+      status: persistentAgent.lastError ? "failed" : persistentAgent.status,
+      value: persistentAgent,
     })),
     ...snapshot.peers.map((peer): Entity => ({
       id: `peer:${peer.id}`,
@@ -418,7 +418,7 @@ const unifiedTopologyEntitiesFor = (
   const seenParticipantIds = new Set([
     snapshot.main.id,
     ...snapshot.agents.map((agent) => agent.id),
-    ...snapshot.actors.map((actor) => actor.id),
+    ...snapshot.persistentAgents.map((persistentAgent) => persistentAgent.id),
     ...snapshot.peers.map((peer) => peer.id),
   ]);
   for (const entity of projectMeshEntitiesFor(snapshot, topology)) {
@@ -584,11 +584,11 @@ const activityEntitiesByPanel = (
           call.kind === "agent" &&
           agentLaunchRefs.has(call.ref) &&
           panelAgents.some((agent) => linkedAgent(call, agent));
-        const representedActorCreation =
-          call.kind === "actor" &&
+        const representedPersistentAgentCreation =
+          call.kind === "persistentAgent" &&
           call.ref === "agents.create" &&
-          snapshot.actors.some((actor) => linkedEntityId(call.entityId, actor.id));
-        return !representedAgentLaunch && !representedActorCreation;
+          snapshot.persistentAgents.some((persistentAgent) => linkedEntityId(call.entityId, persistentAgent.id));
+        return !representedAgentLaunch && !representedPersistentAgentCreation;
       })
       .map((call) => ({
         id: `call:${call.id}`,

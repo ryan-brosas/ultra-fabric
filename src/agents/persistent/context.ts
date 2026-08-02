@@ -1,4 +1,4 @@
-interface ActorContentBlock {
+interface PersistentAgentContentBlock {
   type?: string;
   text?: string;
   thinking?: string;
@@ -8,7 +8,7 @@ interface ActorContentBlock {
   mimeType?: string;
 }
 
-interface ActorMessage {
+interface PersistentAgentMessage {
   role: string;
   content: unknown;
   toolName?: string;
@@ -18,15 +18,15 @@ interface ActorMessage {
   exitCode?: number;
 }
 
-interface ActorDigest {
+interface PersistentAgentDigest {
   filesTouched: string[];
   openErrors: number;
   lastError: string;
   lastUserRequest: string;
 }
 
-export interface ActorContext {
-  digest: ActorDigest;
+export interface PersistentAgentContext {
+  digest: PersistentAgentDigest;
   transcript: string[];
 }
 
@@ -49,8 +49,8 @@ const textOf = (content: unknown): string => {
   if (Array.isArray(content)) {
     return content
       .map((part) =>
-        part && typeof part === "object" && (part as ActorContentBlock).type === "text"
-          ? String((part as ActorContentBlock).text ?? "")
+        part && typeof part === "object" && (part as PersistentAgentContentBlock).type === "text"
+          ? String((part as PersistentAgentContentBlock).text ?? "")
           : "",
       )
       .join("");
@@ -58,11 +58,11 @@ const textOf = (content: unknown): string => {
   return "";
 };
 
-const isMessage = (value: unknown): value is ActorMessage =>
+const isMessage = (value: unknown): value is PersistentAgentMessage =>
   typeof value === "object" && value !== null && "role" in value;
 
-const extractMessages = (branch: unknown[]): ActorMessage[] => {
-  const messages: ActorMessage[] = [];
+const extractMessages = (branch: unknown[]): PersistentAgentMessage[] => {
+  const messages: PersistentAgentMessage[] = [];
   let foundWrapped = false;
   for (const entry of branch) {
     if (entry && typeof entry === "object" && (entry as { type?: unknown }).type === "message") {
@@ -85,14 +85,14 @@ const argHint = (args: unknown): string => {
   return typeof v === "string" && v ? clip(v, 80) : "";
 };
 
-const scanFiles = (messages: ActorMessage[], cap: number): string[] => {
+const scanFiles = (messages: PersistentAgentMessage[], cap: number): string[] => {
   const seen = new Set<string>();
   for (const m of messages) {
     let hay = typeof m.content === "string" ? m.content : "";
     if (Array.isArray(m.content)) {
       for (const part of m.content) {
         if (!part || typeof part !== "object") continue;
-        const block = part as ActorContentBlock;
+        const block = part as PersistentAgentContentBlock;
         if (block.type === "text") hay += " " + (block.text ?? "");
         else if (block.type === "toolCall") hay += " " + JSON.stringify(block.arguments ?? {});
       }
@@ -108,7 +108,7 @@ const scanFiles = (messages: ActorMessage[], cap: number): string[] => {
   return [...seen].sort().slice(0, cap);
 };
 
-const buildDigest = (messages: ActorMessage[]): ActorDigest => {
+const buildDigest = (messages: PersistentAgentMessage[]): PersistentAgentDigest => {
   let openErrors = 0;
   let lastError = "";
   let lastUserRequest = "";
@@ -127,7 +127,7 @@ const buildDigest = (messages: ActorMessage[]): ActorDigest => {
   return { filesTouched: scanFiles(messages, 30), openErrors, lastError, lastUserRequest };
 };
 
-const compactBlocks = (msg: ActorMessage): string[] => {
+const compactBlocks = (msg: PersistentAgentMessage): string[] => {
   const lines: string[] = [];
   if (msg.role === "user") {
     const t = textOf(msg.content).trim();
@@ -136,7 +136,7 @@ const compactBlocks = (msg: ActorMessage): string[] => {
     if (Array.isArray(msg.content)) {
       for (const part of msg.content) {
         if (!part || typeof part !== "object") continue;
-        const block = part as ActorContentBlock;
+        const block = part as PersistentAgentContentBlock;
         if (block.type === "text") {
           const t = (block.text ?? "").trim();
           if (t) lines.push(`asst: ${clip(t, 200)}`);
@@ -167,11 +167,11 @@ const boundLines = (lines: string[], maxChars: number): string[] => {
   return out;
 };
 
-export const buildActorContext = (
+export const buildPersistentAgentContext = (
   branch: unknown[],
   tailCount: number,
   maxChars: number,
-): ActorContext => {
+): PersistentAgentContext => {
   const messages = extractMessages(branch);
   const digest = buildDigest(messages);
   const lines: string[] = [];

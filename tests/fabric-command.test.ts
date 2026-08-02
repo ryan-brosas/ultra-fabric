@@ -303,9 +303,14 @@ describe("/fabric command", () => {
 
   const registerWith = (state: FabricState) => {
     let handler: ((argumentsText: string, context: ExtensionContext) => Promise<void>) | undefined;
+    let complete: ((prefix: string) => Array<{ value: string }> | null) | undefined;
     const pi = {
-      registerCommand: vi.fn((_name: string, definition: { handler: typeof handler }) => {
+      registerCommand: vi.fn((_name: string, definition: {
+        handler: typeof handler;
+        getArgumentCompletions?: typeof complete;
+      }) => {
         handler = definition.handler;
+        complete = definition.getArgumentCompletions;
       }),
     } as unknown as ExtensionAPI;
     registerFabricCommand(pi, {
@@ -317,8 +322,52 @@ describe("/fabric command", () => {
     });
     const notify = vi.fn();
     const context = { ui: { notify, setStatus: vi.fn() } } as unknown as ExtensionContext;
-    return { run: (args: string) => handler!(args, context), notify };
+    return {
+      run: (args: string) => handler!(args, context),
+      complete: (prefix = "") => complete?.(prefix) ?? [],
+      notify,
+    };
   };
+
+  it("shows both Agent lifecycles in the sole live inventory", async () => {
+    const state = {
+      ensure: vi.fn().mockResolvedValue(undefined),
+      agents: {
+        list: () => [{
+          id: "agent-12345678",
+          status: "running",
+          runner: "pi",
+          transport: "process",
+          name: "review-run",
+        }],
+      },
+      persistentAgents: {
+        list: () => [{
+          id: "persistentAgent-12345678",
+          status: "idle",
+          runner: "claude",
+          queued: 2,
+          name: "reviewer",
+        }],
+      },
+    } as unknown as FabricState;
+    const { run, complete, notify } = registerWith(state);
+
+    expect(complete().map((item) => item.value)).toContain("agents");
+    expect(complete().map((item) => item.value)).not.toContain("persistentAgents");
+
+    await run("agents");
+    expect(notify).toHaveBeenLastCalledWith(
+      expect.stringMatching(/one-shot.*review-run[\s\S]*persistent.*reviewer/),
+      "info",
+    );
+
+    await run("persistentAgents");
+    expect(notify).toHaveBeenLastCalledWith(
+      expect.stringContaining("Usage: /fabric"),
+      "warning",
+    );
+  });
 
   it("lists active path leases and force-releases them for the operator", async () => {
     const forceRelease = vi.fn().mockResolvedValue({ released: ["lease-1"] });
@@ -424,14 +473,14 @@ describe("/fabric command", () => {
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("disabled"), "warning");
   });
 
-  it("summarizes runtime health across actors, QoS, outcomes, and leases", async () => {
+  it("summarizes runtime health across persistentAgents, QoS, outcomes, and leases", async () => {
     const state = {
       ensure: vi.fn().mockResolvedValue(undefined),
       config: { outcomes: { enabled: true }, mesh: { enabled: true } },
       contextQosTelemetry: { passes: 3, retiredResults: 4, retiredChars: 900, protectedResults: 2 },
-      actors: {
+      persistentAgents: {
         telemetry: () => ({
-          actors: 2,
+          persistentAgents: 2,
           open: 1,
           lifetimeExhausted: 0,
           windowExhausted: 1,
@@ -470,7 +519,7 @@ describe("/fabric command", () => {
       config,
       registry: { providers: () => [{ name: "pi", description: "Pi core" }] },
       prewalk: { status: () => ({ state: "idle" as const }) },
-      actors: { list: () => [] },
+      persistentAgents: { list: () => [] },
       mesh: { root: "/repo/.pi/fabric/mesh" },
     } as unknown as FabricState;
     const { run, notify } = registerWith(state);

@@ -970,12 +970,12 @@ return "ok";
     expect(invokedMaxTokens).toEqual([100, 80]);
   });
 
-  it("reserves actor ask admissions under the same finite run budget", async () => {
+  it("reserves persistentAgent ask admissions under the same finite run budget", async () => {
     const observed: number[] = [];
     const registry = new ActionRegistry();
     const descriptor = {
       name: "ask",
-      description: "fake actor ask",
+      description: "fake persistentAgent ask",
       inputSchema: {
         type: "object",
         properties: {
@@ -998,7 +998,7 @@ return "ok";
         await new Promise((resolve) => setTimeout(resolve, 20));
         return {
           action: "message",
-          text: "actor result",
+          text: "persistentAgent result",
           usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 },
         };
       },
@@ -1010,13 +1010,13 @@ return "ok";
     const result = await service.execute({
       code: `
 await Promise.all([
-  agents.ask({ id: "actor", message: "one" }),
-  agents.ask({ id: "actor", message: "two" }),
+  agents.ask({ id: "persistentAgent", message: "one" }),
+  agents.ask({ id: "persistentAgent", message: "two" }),
 ]);
 return "unreachable";
 `,
       signal: undefined,
-      parentToolCallId: "actor-ask-reservations",
+      parentToolCallId: "persistentAgent-ask-reservations",
       context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
       tokenBudget: 100,
       maxAgentCalls: 2,
@@ -1028,11 +1028,11 @@ return "unreachable";
     expect(observed).toEqual([100]);
   });
 
-  it("conservatively commits a failed actor ask reservation", async () => {
+  it("conservatively commits a failed persistentAgent ask reservation", async () => {
     const registry = new ActionRegistry();
     const descriptor = {
       name: "ask",
-      description: "fake actor ask",
+      description: "fake persistentAgent ask",
       inputSchema: {
         type: "object",
         properties: {
@@ -1050,7 +1050,7 @@ return "unreachable";
       description: "fake agents",
       async list() { return [descriptor]; },
       async describe(name) { return name === "ask" ? descriptor : undefined; },
-      async invoke() { throw new Error("actor run failed after launch"); },
+      async invoke() { throw new Error("persistentAgent run failed after launch"); },
     });
     const config = structuredClone(DEFAULT_FABRIC_CONFIG);
     config.fullCodeMode = false;
@@ -1058,11 +1058,11 @@ return "unreachable";
     const service = new FabricExecutionService(registry, config);
     const result = await service.execute({
       code: `
-try { await agents.ask({ id: "actor", message: "fails" }); } catch {}
+try { await agents.ask({ id: "persistentAgent", message: "fails" }); } catch {}
 return workflow.context();
 `,
       signal: undefined,
-      parentToolCallId: "failed-actor-reservation",
+      parentToolCallId: "failed-persistentAgent-reservation",
       context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
       tokenBudget: 100,
       maxAgentCalls: 2,

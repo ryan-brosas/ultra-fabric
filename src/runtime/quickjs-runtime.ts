@@ -278,7 +278,7 @@ globalThis.schema = __providerProxy("schema");
 globalThis.compact = __providerProxy("compact");
 globalThis.outcomes = __providerProxy("outcomes");
 globalThis.leases = __providerProxy("leases");
-const __createActor = async (args = {}) => {
+const __createPersistentAgent = async (args = {}) => {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new TypeError("agents.create expects an options object");
   }
@@ -319,6 +319,7 @@ const __handoff = async (args = {}) => {
 };
 globalThis.agents = Object.freeze({
   run: (args) => __call("agents.run", args),
+  roles: (args = {}) => __call("agents.roles", args),
   handoff: __handoff,
   spawn: (args) => __call("agents.spawn", args),
   wait: (args) => __call("agents.wait", args),
@@ -334,19 +335,19 @@ globalThis.agents = Object.freeze({
   models: (args = {}) => __call("agents.models", args),
   stop: (args) => __call("agents.stop", args),
   cleanup: (args) => __call("agents.cleanup", args),
-  create: __createActor,
+  create: __createPersistentAgent,
+  templates: () => __call("agents.templates", {}),
+  telemetry: () => __call("agents.telemetry", {}),
   ask: (args) => __call("agents.ask", args),
   tell: (args) => __call("agents.tell", args),
   steer: (args) => __call("agents.steer", args),
   followUp: (args) => __call("agents.followUp", args),
   setSteeringMode: (args) => __call("agents.setSteeringMode", args),
   setFollowUpMode: (args) => __call("agents.setFollowUpMode", args),
-  actorStatus: (args) => __call("agents.actorStatus", args),
   setModel: (args) => __call("agents.setModel", args),
   setThinking: (args) => __call("agents.setThinking", args),
   setEvents: (args) => __call("agents.setEvents", args),
   setInstructions: (args) => __call("agents.setInstructions", args),
-  actors: () => __call("agents.actors", {}),
   messages: (args) => __call("agents.messages", args),
   remove: (args) => __call("agents.remove", args),
   log: (args) => __call("agents.log", args),

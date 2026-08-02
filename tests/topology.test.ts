@@ -9,7 +9,7 @@ import {
   windowRunTopologyRows,
 } from "../src/ui/topology.js";
 import type {
-  FabricUiActor,
+  FabricUiPersistentAgent,
   FabricUiAgent,
   FabricUiMain,
   FabricUiStateEntry,
@@ -69,9 +69,15 @@ const agent = (
   ...overrides,
 });
 
-const actor = (overrides: Partial<FabricUiActor> = {}): FabricUiActor => ({
-  id: "actor-1",
+const persistentAgent = (overrides: Partial<FabricUiPersistentAgent> = {}): FabricUiPersistentAgent => ({
+  id: "persistentAgent-1",
+  kind: "agent",
+  lifecycle: "persistent",
   name: "advisor",
+  role: "advisor",
+  goal: "Give bounded advice.",
+  completion: "Return one recommendation, then idle.",
+  turnBudget: { maxTurns: 8, graceTurns: 1 },
   status: "idle",
   runner: "pi",
   events: ["turn_end"],
@@ -108,7 +114,7 @@ const event = (
   sequence,
   topic: "team.review",
   kind: "finding",
-  from: { id: "actor-1", name: "advisor", kind: "actor" },
+  from: { id: "persistentAgent-1", name: "advisor", kind: "persistentAgent" },
   createdAt: sequence * 100,
   ...overrides,
 });
@@ -272,8 +278,8 @@ describe("Project mesh topology layout", () => {
       },
       {
         format: 1,
-        id: "actor:remote",
-        kind: "actor",
+        id: "persistentAgent:remote",
+        kind: "persistentAgent",
         rootId: "session:peer",
         ownerHostId: "session:peer",
         ownerIdentityId: "session:peer",
@@ -293,7 +299,7 @@ describe("Project mesh topology layout", () => {
 
     const model = buildProjectMeshTopology({
       main: main(),
-      actors: [],
+      persistentAgents: [],
       agents: [],
       state: [],
       events: [],
@@ -303,7 +309,7 @@ describe("Project mesh topology layout", () => {
 
     expect(model.participants).toMatchObject([
       { id: "session:peer", name: "Peer peer-ses", participant: { kind: "root" } },
-      { id: "actor:remote", name: "remote advisor", participant: { kind: "actor" } },
+      { id: "persistentAgent:remote", name: "remote advisor", participant: { kind: "persistentAgent" } },
     ]);
     expect(model.rows).toContainEqual({
       kind: "meshSection",
@@ -312,29 +318,29 @@ describe("Project mesh topology layout", () => {
     });
   });
 
-  it("connects actors, topics, shared state, and normalized recent routes", () => {
-    const actors = [actor()];
+  it("connects persistentAgents, topics, shared state, and normalized recent routes", () => {
+    const persistentAgents = [persistentAgent()];
     const events: MeshEvent[] = [
       event("topic", 1),
       event("input", 2, {
-        topic: "fabric.actor.input",
+        topic: "fabric.persistentAgent.input",
         kind: "message",
         from: { id: "main", name: "main", kind: "main" },
-        data: { actorId: "actor-1" },
+        data: { persistentAgentId: "persistentAgent-1" },
       }),
       event("output", 3, {
-        topic: "fabric.actor.output",
+        topic: "fabric.persistentAgent.output",
         kind: "directive",
       }),
       event("lifecycle", 4, {
-        topic: "fabric.actor.lifecycle",
+        topic: "fabric.persistentAgent.lifecycle",
         kind: "settled",
       }),
     ];
 
     const model = buildProjectMeshTopology({
       main: main(),
-      actors,
+      persistentAgents,
       agents: [],
       state: [stateEntry(0)],
       events,
@@ -349,20 +355,20 @@ describe("Project mesh topology layout", () => {
     expect(model.topics).toMatchObject([
       {
         id: "topic:team.review",
-        subscribers: [{ id: "actor-1", name: "advisor" }],
+        subscribers: [{ id: "persistentAgent-1", name: "advisor" }],
         recentEvents: 1,
         status: "running",
       },
     ]);
     expect(model.routes).toHaveLength(3);
     expect(model.routes.map((route) => route.targetKind).sort()).toEqual([
-      "actor",
       "main",
+      "persistentAgent",
       "topic",
     ]);
     expect(model.entityOrder).toEqual([
       "main:session:main",
-      "actor:actor-1",
+      "persistentAgent:persistentAgent-1",
       "topic:team.review",
       "state:tasks/task-0",
       expect.stringContaining("route:"),
@@ -375,7 +381,7 @@ describe("Project mesh topology layout", () => {
   it("aggregates identical traffic routes and keeps the latest payload", () => {
     const model = buildProjectMeshTopology({
       main: main(),
-      actors: [actor()],
+      persistentAgents: [persistentAgent()],
       agents: [],
       state: [],
       events: [
@@ -393,7 +399,7 @@ describe("Project mesh topology layout", () => {
   it("keeps a selected node visible while summarizing a large project mesh", () => {
     const model = buildProjectMeshTopology({
       main: main(),
-      actors: [actor()],
+      persistentAgents: [persistentAgent()],
       agents: [],
       state: Array.from({ length: 40 }, (_, index) => stateEntry(index)),
       events: [],
@@ -418,7 +424,7 @@ describe("Project mesh topology layout", () => {
   it("never exceeds the project topology viewport for selectable nodes", () => {
     const model = buildProjectMeshTopology({
       main: main(),
-      actors: [actor()],
+      persistentAgents: [persistentAgent()],
       agents: [],
       state: Array.from({ length: 12 }, (_, index) => stateEntry(index)),
       events: Array.from({ length: 45 }, (_, index) =>
@@ -442,7 +448,7 @@ describe("Project mesh topology layout", () => {
     const known = agent("worker-1", 1, { name: "researcher", status: "running" });
     const model = buildProjectMeshTopology({
       main: main(),
-      actors: [actor()],
+      persistentAgents: [persistentAgent()],
       agents: [known],
       state: [],
       events: [
@@ -479,7 +485,7 @@ describe("Project mesh topology layout", () => {
   it("keeps structured routes distinct when free-form fields contain separators", () => {
     const model = buildProjectMeshTopology({
       main: main(),
-      actors: [],
+      persistentAgents: [],
       agents: [],
       state: [],
       events: [
@@ -506,7 +512,7 @@ describe("Project mesh topology layout", () => {
   it("recognizes a main-session identity when traffic addresses it", () => {
     const model = buildProjectMeshTopology({
       main: main(),
-      actors: [actor()],
+      persistentAgents: [persistentAgent()],
       agents: [],
       state: [],
       events: [
@@ -526,7 +532,7 @@ describe("Project mesh topology layout", () => {
   it("marks explicit failure event kinds without misclassifying benign substrings", () => {
     const model = buildProjectMeshTopology({
       main: main(),
-      actors: [],
+      persistentAgents: [],
       agents: [],
       state: [],
       events: [

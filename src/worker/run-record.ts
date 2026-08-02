@@ -24,6 +24,12 @@ export const createRunningRecord = (
   startedAt: number,
 ): AgentRunRecord => ({
   id: options.id,
+  kind: "agent",
+  lifecycle: "one-shot",
+  role: options.role,
+  ...(options.turnBudget
+    ? { turnBudget: { ...options.turnBudget, outcome: "within-budget" as const } }
+    : {}),
   name: options.name,
   task,
   status: "running",
@@ -32,8 +38,8 @@ export const createRunningRecord = (
   cwd: options.cwd,
   ...(options.model ? { model: options.model } : {}),
   ...(thinking ? { thinking } : {}),
-  ...(options.actorId ? { actorId: options.actorId } : {}),
-  ...(options.actorName ? { actorName: options.actorName } : {}),
+  ...(options.persistentAgentId ? { persistentAgentId: options.persistentAgentId } : {}),
+  ...(options.persistentAgentName ? { persistentAgentName: options.persistentAgentName } : {}),
   ...(options.traceId ? { traceId: options.traceId, spanId: options.id } : {}),
   ...(options.parentRunId ? { parentRunId: options.parentRunId } : {}),
   ...(options.parentSpanId ? { parentSpanId: options.parentSpanId } : {}),

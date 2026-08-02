@@ -1,6 +1,6 @@
-# Agents and rlm reference
+# Agent lifecycles and RLM reference
 
-`fabric_exec` can spawn one-shot child agents, create persistent event-driven actors, and run recursive queries. For the sandbox model and `tools` discovery, see the parent `fabric-exec` skill; for actor coordination across sessions, see `mesh.md`.
+`fabric_exec` can run one-shot agents, create persistent event-driven agents, and run recursive queries. Agent is the public concept; choose a one-shot or persistent lifecycle. For the sandbox model and `tools` discovery, see the parent `fabric-exec` skill; for durable coordination across sessions, see `mesh.md`.
 
 Every method takes a single options object.
 
@@ -8,7 +8,7 @@ Every method takes a single options object.
 
 - `agents.run(args)` runs to completion and returns `FabricAgentResult` with `{ id, runner, status, text, value?, error?, usage, turns, toolCalls, traceId?, spanId?, parentRunId?, parentSpanId?, runnerSessionId? }`.
 - `agents.spawn(args)` returns a background `FabricAgentHandle` with an `id`. Then use `agents.wait({ id })`, `agents.status({ id })`, `agents.stop({ id })`.
-- `agents.list({ scope? })` returns agent participants. `scope` defaults to `"local"`; use `"lineage"` for every agent under the same root across recursive runtimes, or `"project"` for all live project agents. Local entries retain full run detail; remote entries are bounded participant summaries.
+- `agents.list({ scope?, lifecycle? })` returns live agents. `lifecycle` defaults to `"one-shot"`; use `"persistent"` or `"all"` to select the other lifecycle or combine both. `scope` defaults to `"local"`; use `"lineage"` for the same root or `"project"` for all live project agents. Local entries retain full detail; remote entries are bounded participant summaries.
 - `agents.cleanup({ id, deleteBranch? })` returns `{ cleaned }` and removes a worktree branch.
 
 `args` is a `FabricAgentRequest`: `{ task, name?, runner?, transport?, model?, fallbackModels?, requirements?, allowQualityDowngrade?, profile?, admission?, thinking?, tools?, timeoutMs?, maxTokens?, extensions?, recursive?, worktree?, schema? }`. Inside a finite `fabric_exec tokenBudget`, the host injects or narrows `maxTokens` from an atomic reservation before launch.
@@ -23,6 +23,7 @@ Every method takes a single options object.
 - `schema` is a JSON Schema; the worker returns validated structured data in `result.value`.
 - `worktree: true` creates a dedicated Git worktree on branch `pi-fabric/<name>-<id>`, retained until `agents.cleanup()`.
 - Omit `timeoutMs` normally. It defaults to `agents.timeoutMs` (60 minutes by default), and per-call values below that configured default are ignored. Set it only to request a longer run.
+- Pi model-provider extensions and `~/.pi/agent/models.json` entries are read from Pi's effective ModelRegistry. Use `tools.models()` or `agents.models({ runner: "pi" })`; there is no Fabric provider allowlist. Installed/global and trusted project provider plugins load in ordinary Pi children because extensions default on. `extensions: false` disables provider plugins, and a one-off parent `pi -e provider.ts` path is not propagated to children, so install or auto-discover the provider before selecting its model.
 
 ```ts
 const result = await agents.run({
@@ -88,7 +89,7 @@ Use `leases.acquire({ paths: [{ path, scope: "file" | "tree" }], ttlMs })`, then
 
 ## Participant lifecycle subscriptions
 
-Lifecycle subscriptions are durable, source-qualified mesh routes. They let Main, an actor, or an active agent react to another root/agent/actor without model-authored polling.
+Lifecycle subscriptions are durable, source-qualified mesh routes. They let Main, a persistent agent, or an active agent react to another participant without model-authored polling.
 
 - `agents.subscribe({ from, events, to?, delivery, triggerTurn, once? })` creates a subscription. `from` is an exact participant id; `"main"` means the caller's lineage root. `to` defaults to that Main id.
 - `agents.subscriptions({ from?, to? })` lists project subscriptions.
@@ -97,9 +98,9 @@ Lifecycle subscriptions are durable, source-qualified mesh routes. They let Main
 - `once: true` removes the subscription after its first successful matching delivery. Omitted keeps it active.
 - Creation starts at the current mesh sequence, so old lifecycle events are not replayed. Delivery cursors persist across owner restarts. Delivery is at-least-once across a crash between message insertion and cursor persistence; use the lifecycle event `id` to deduplicate side effects.
 
-Exact Pi events are `pi.input`, `pi.agent_start`, `pi.agent_end`, `pi.turn_end`, `pi.agent_settled`, `pi.tool_error`, and `pi.session_compact`. Runner-neutral terminal events are `run.completed`, `run.failed`, `run.stopped`, and `run.timed_out`. Pi events are observed from Pi's host/RPC lifecycle; run events also cover Claude-backed children and actor activations. Envelopes contain bounded operational metadata, source identity, timestamps, and a run id when applicable, never a transcript snapshot.
+Exact Pi events are `pi.input`, `pi.agent_start`, `pi.agent_end`, `pi.turn_end`, `pi.agent_settled`, `pi.tool_error`, and `pi.session_compact`. Runner-neutral terminal events are `run.completed`, `run.failed`, `run.stopped`, and `run.timed_out`. Pi events are observed from Pi's host/RPC lifecycle; run events also cover Claude-backed children and persistent agent activations. Envelopes contain bounded operational metadata, source identity, timestamps, and a run id when applicable, never a transcript snapshot.
 
-`pi.agent_settled` means Pi has no automatic retry, compaction retry, or queued continuation left at that boundary. It does not mean a persistent root or actor can never receive future work. Use a `run.*` event when terminal process/run status is what matters.
+`pi.agent_settled` means Pi has no automatic retry, compaction retry, or queued continuation left at that boundary. It does not mean a persistent root or persistent agent can never receive future work. Use a `run.*` event when terminal process/run status is what matters.
 
 ```ts
 const peer = (await agents.peers())[0];
@@ -143,22 +144,22 @@ The default `prewalk.mode: "in-place"` switches Main to the executor model at th
 
 Set `prewalk.mode: "trajectory"` to fork the finalized call/result into a Pi child and wait. A hidden follow-up then has Main verify the child's work and summarize, so it never settles idle by design. The parent activity card shows the handoff call, child, progress/current tool, nested tools, metrics, and result. Trajectory mode requires enabled agents. Both modes let all nested calls settle before the boundary, disarm a triggerless completed task, defer to explicit `agents.handoff()`, and are disabled by Schema enforce mode. Use `/fabric prewalk --status`, `/fabric prewalk --retry`, or `/fabric prewalk --off`.
 
-Use `/fabric agents` to list children and `/fabric attach <id>` for the attach command. Abort signals propagate to the transport and selected child process. Claude runs use official `claude -p` stream JSON with `dontAsk`, `--tools`, and `--allowedTools`; `extensions: false` adds Claude safe mode. One-shot Claude sessions use `--no-session-persistence`. Claude cannot use `recursive: true`, `fabric_exec`, or direct mesh APIs.
+Use `/fabric agents` to list both live lifecycles and `/fabric attach <id>` for the attach command. Abort signals propagate to the transport and selected child process. Claude runs use official `claude -p` stream JSON with `dontAsk`, `--tools`, and `--allowedTools`; `extensions: false` adds Claude safe mode. One-shot Claude sessions use `--no-session-persistence`. Claude cannot use `recursive: true`, `fabric_exec`, or direct mesh APIs.
 
 ## Unified participants and steering
 
-Every live root, one-shot/recursive agent, and persistent actor is represented in one project participant directory. Participant kinds are intrinsic (`"root"`, `"agent"`, or `"actor"`); **Main** and **Peer** are UI/API views of root participants, not separate identity classes. **Peer is a reserved Fabric term for another root Pi session.** A request to inspect, wait for, or coordinate with a “peer” means call `agents.peers()` first; `agents.list()` lists child agents and cannot establish whether a peer root has settled. Execution remains local to an `ownerHostId` and authenticated `ownerIdentityId`, while `rootId` and optional `parentId` describe lineage. Host leases remove a crashed host and all participants it owns from live discovery together. Shared records deliberately omit agent prompts, results, and errors; full detail stays local.
+Every live root and Agent across both lifecycles is represented in one project participant directory. The public Agent inventory uses `lifecycle: "one-shot" | "persistent"`; **Main** and **Peer** are UI/API views of root participants, not separate identity classes. **Peer is a reserved Fabric term for another root Pi session.** A request to inspect, wait for, or coordinate with a “peer” means call `agents.peers()` first; `agents.list()` lists agents by lifecycle and cannot establish whether a peer root has settled. Execution remains local to an `ownerHostId` and authenticated `ownerIdentityId`, while `rootId` and optional `parentId` describe lineage. Host leases remove a crashed host and all participants it owns from live discovery together. Shared records deliberately omit agent prompts, results, and errors; full detail stays local.
 
 - `agents.self()` returns the caller's `FabricParticipantInfo`.
-- `agents.members({ scope?, kinds?, includeStale? })` returns the unified directory. `scope` is `"local"`, `"lineage"`, or `"project"` (default); `kinds` filters intrinsic kinds. Normal discovery excludes stale hosts.
+- `agents.members({ scope?, kinds?, includeStale? })` returns the unified directory. `scope` is `"local"`, `"lineage"`, or `"project"` (default); `kinds` filters public `"root" | "agent"` kinds; an Agent result carries `lifecycle: "one-shot" | "persistent"`. Normal discovery excludes stale hosts.
 - `agents.main()` remains the compatibility view of the caller's root as `{ id, name: "Main", kind: "main", ... }`; the stable alias `"main"` resolves to that exact root id.
 - `agents.peers()` remains the compatibility view of other live roots as `Peer <session-prefix>`. It is derived from `agents.members`, not maintained by a second registry.
-- `agents.status({ id })` accepts any known participant id. Local runs/actors return full local detail; remote participants return their bounded directory summary.
-- `agents.steer({ id, message, data? })` and `agents.followUp(...)` target Main, a live one-shot child, or an actor without discarding context.
-- `agents.stop({ id })` can stop a local or remotely owned agent/actor when its participant advertises `"stop"`. It returns the local agent result, local actor info, or an acknowledged remote control result according to the target.
+- `agents.status({ id })` accepts any known participant id. Local runs/persistent agents return full local detail; remote participants return their bounded directory summary.
+- `agents.steer({ id, message, data? })` and `agents.followUp(...)` target Main, a live one-shot child, or a persistent agent without discarding context.
+- `agents.stop({ id })` can stop a local or remotely owned agent from either lifecycle when its participant advertises `"stop"`. It returns the local agent result, local persistent agent info, or an acknowledged remote control result according to the target.
 - `agents.setSteeringMode({ id, mode })` / `agents.setFollowUpMode({ id, mode })` remain local one-shot controls.
 
-Local delivery returns `routed: "main" | "local"`. Cross-process delivery resolves the participant's exact owner host and identity, publishes an owner-addressed control command, and accepts only a version/target/identity-matched acknowledgement. Success returns `{ queued, messageId, routed: "mesh", acknowledged: true }`; an unknown id, stale owner, owner rejection, or acknowledgement timeout throws instead of reporting an unverified queue. This path requires `mesh.enabled`. Ordinary non-recursive Pi children and Claude children/actors can receive host-routed messages but cannot initiate `agents.*` calls because they do not run Fabric themselves.
+Local delivery returns `routed: "main" | "local"`. Cross-process delivery resolves the participant's exact owner host and identity, publishes an owner-addressed control command, and accepts only a version/target/identity-matched acknowledgement. Success returns `{ queued, messageId, routed: "mesh", acknowledged: true }`; an unknown id, stale owner, owner rejection, or acknowledgement timeout throws instead of reporting an unverified queue. This path requires `mesh.enabled`. Ordinary non-recursive Pi agents and Claude agents across both lifecycles can receive host-routed messages but cannot initiate `agents.*` calls because they do not run Fabric themselves.
 
 ```ts
 const main = await agents.main();
@@ -178,58 +179,57 @@ return await agents.wait({ id: handle.id });
 
 Prefer `agents.steer` over `agents.stop` + `agents.spawn` when the child has useful context you would otherwise discard. Use `agents.stop` only when the child is genuinely off-track and a fresh task is cheaper than a redirect. Steering a finished agent throws; check `agents.status` or the participant capabilities first. In the dashboard, `s`, `u`, and `x` use the same ownership-aware path for local and remote participants.
 
-## Persistent actors
+## Persistent agents
 
-`agents.create(args)` returns `FabricActorInfo`. An actor has a fixed `runner`, a serial mailbox, and optional subscriptions to parent events or durable mesh topics. It processes messages one at a time, coalesces repeated host events by default, and restores with the project actor registry. Pi actors resume their Fabric-owned Pi session file. Claude actors persist the session ID emitted by `claude -p` and launch later activations with `--resume <id>` while keeping a Fabric-owned stream transcript.
+`agents.roles({ lifecycle? })` returns `{ roles, diagnostics }` for profiles loaded from built-ins, `~/.pi/agent/agents/*.md`, and trusted project `.pi/agents/*.md` in increasing precedence. Check `diagnostics` after adding or overriding a profile; invalid files are excluded with an actionable reason. A profile defines lifecycle, behavior, goal, completion contract, tools, model/runtime defaults, event subscriptions, delivery policy, optional `freshness: latest | latest-main-revision`, and turn budget. Select it with `role`; explicit instance fields may narrow its concrete goal or budget without creating another runtime class.
 
-`args` is a `FabricActorRequest`. `delivery` defaults to `mailbox`; `steer`/`followUp` require an explicit `triggerTurn: true | false`, while `mailbox`/`nextTurn` reject `triggerTurn: true`.
+`agents.create(args)` returns `FabricPersistentAgentInfo`. A persistent agent has a fixed `runner`, a serial mailbox, and optional subscriptions to parent events or durable mesh topics. It processes messages one at a time, coalesces repeated host events by default, and restores from durable project state. Pi runners resume their Fabric-owned Pi session file. Claude runners persist the session ID emitted by `claude -p` and launch later activations with `--resume <id>` while keeping a Fabric-owned stream transcript.
 
-- `runner` is fixed at creation. Omitted uses `agents.runner`. Pi actors are recursively Fabric-equipped; Claude actors retain Claude context and use Claude Code tools, while mailbox/event delivery and coordination remain host-managed (no `fabric_exec` or direct `mesh.*` inside Claude).
-- `model` follows the selected runner's key format. Omitted uses that runner's configured/default model. `agents.setModel({ id, model? })` changes or clears the override for the next activation without replacing the actor session; `tell`/`ask` payloads do not change it.
-- `thinking` is the reasoning effort forwarded to the actor's runs (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Omitted inherits `agents.thinking` (default `medium`), clamped to the model's supported levels. Change it later with `agents.setThinking({ id, thinking? })` or `e` from the dashboard actor detail; omitting `thinking` clears the override.
-- `events` may contain any session-bound public Pi extension event: `resources_discover`; `session_start`, `session_info_changed`, `session_before_switch`, `session_before_fork`, `session_before_compact`, `session_compact`, `session_shutdown`, `session_before_tree`, `session_tree`; `input`, `before_agent_start`; `agent_start`, `agent_end`, `agent_settled`; `turn_start`, `turn_end`; `message_start`, `message_update`, `message_end`; `context`, `before_provider_headers`, `before_provider_request`, `after_provider_response`; `tool_execution_start`, `tool_call`, `tool_execution_update`, `tool_result`, `tool_execution_end`; `model_select`, `thinking_level_select`, and `user_bash`. Fabric also provides synthetic `tool_error`. `project_trust` is unavailable because it precedes trusted actor-registry initialization. These are asynchronous observations and cannot mutate or block the originating Pi hook.
-- Host events automatically forward every Pi `ImageContent` block to the actor's selected model. The JSON envelope and persisted mailbox contain only redacted indexed descriptors; raw base64 travels through the transient worker prompt and may then follow the selected runner's ordinary persistent-session semantics. No media flag is required. Credential-shaped fields and unrelated encoded blobs are redacted before persistence.
+`args` is a `FabricPersistentAgentRequest`. `delivery` defaults to `mailbox`; `steer`/`followUp` require an explicit `triggerTurn: true | false`, while `mailbox`/`nextTurn` reject `triggerTurn: true`.
+
+- `runner` is fixed at creation. Omitted uses `agents.runner`. Pi persistent agents are recursively Fabric-equipped; Claude persistent agents retain Claude context and use Claude Code tools, while mailbox/event delivery and coordination remain host-managed (no `fabric_exec` or direct `mesh.*` inside Claude).
+- `model` follows the selected runner's key format. Omitted uses that runner's configured/default model. `agents.setModel({ id, model? })` changes or clears the override for the next activation without replacing the persistent agent session; `tell`/`ask` payloads do not change it.
+- `thinking` is the reasoning effort forwarded to the persistent agent's runs (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Omitted inherits `agents.thinking` (default `medium`), clamped to the model's supported levels. Change it later with `agents.setThinking({ id, thinking? })` or `e` from the dashboard persistent agent detail; omitting `thinking` clears the override.
+- `events` may contain any session-bound public Pi extension event: `resources_discover`; `session_start`, `session_info_changed`, `session_before_switch`, `session_before_fork`, `session_before_compact`, `session_compact`, `session_shutdown`, `session_before_tree`, `session_tree`; `input`, `before_agent_start`; `agent_start`, `agent_end`, `agent_settled`; `turn_start`, `turn_end`; `message_start`, `message_update`, `message_end`; `context`, `before_provider_headers`, `before_provider_request`, `after_provider_response`; `tool_execution_start`, `tool_call`, `tool_execution_update`, `tool_result`, `tool_execution_end`; `model_select`, `thinking_level_select`, and `user_bash`. Fabric also provides synthetic `tool_error`. `project_trust` is unavailable because it precedes trusted persistent agent-registry initialization. These are asynchronous observations and cannot mutate or block the originating Pi hook.
+- Host events automatically forward every Pi `ImageContent` block to the persistent agent's selected model. The JSON envelope and persisted mailbox contain only redacted indexed descriptors; raw base64 travels through the transient worker prompt and may then follow the selected runner's ordinary persistent-session semantics. No media flag is required. Credential-shaped fields and unrelated encoded blobs are redacted before persistence.
 - `topics` lists durable mesh topics to subscribe to (see `mesh.md`).
-- `responseMode` is `text` (every non-empty response becomes an outbox message) or `directive` (validated `{ action, message?, data? }` where `action` is `silent`, `message`, or `stop`; the actor decides whether to intervene).
-- `delivery` is `mailbox`, `steer`, `followUp`, or `nextTurn`. An actor cannot escalate it in a response; the owner can replace it with `agents.setDeliveryPolicy({ id, delivery, triggerTurn, scope? })`.
+- `responseMode` is `text` (every non-empty response becomes an outbox message) or `directive` (validated `{ action, message?, data? }` where `action` is `silent`, `message`, or `stop`; the persistent agent decides whether to intervene).
+- `delivery` is `mailbox`, `steer`, `followUp`, or `nextTurn`. A persistent agent cannot escalate it in a response; the owner can replace it with `agents.setDeliveryPolicy({ id, delivery, triggerTurn, scope? })`.
 - `triggerTurn` is mandatory for `steer`/`followUp`: `true` starts Main when idle; `false` is passive and the delivered message visibly says it will not start Main. `mailbox`/`nextTurn` never start Main. `coalesce` is on by default.
-- `validWhile` is an optional pure synchronous predicate checked before an activation runs and again before its result is delivered. It receives immutable `{ activation, current }` facts. Return `false` or `{ valid: false, reason? }` to record the activation as stale and suppress delivery; an invalidated blocking `agents.ask()` rejects. The predicate source persists with project actors and global templates, so it cannot use closures, tools, promises, or host APIs.
+- `validWhile` is an optional pure synchronous predicate checked before an activation runs and again before its result is delivered. It receives immutable `{ activation, current }` facts. Return `false` or `{ valid: false, reason? }` to record the activation as stale and suppress delivery; an invalidated blocking `agents.ask()` rejects. The predicate source persists with project persistent agents and global templates, so it cannot use closures, tools, promises, or host APIs.
 - `timeoutMs` follows the same floor as one-shot agents: omit it normally and set it only above `agents.timeoutMs` when an activation needs longer.
-- `tools` is the actor's persisted allowlist and defaults to `agents.defaultTools`. Replace it for future activations with `agents.setTools({ id, tools })`; an empty list disables optional tools. Pi actors retain the host-required `fabric_exec` tool unless created with `extensions: false`. Use `scope: "global"` to update a reusable template instead.
-- `extensions` is `true` by default (a Pi actor is recursively Fabric-equipped with the host-required `fabric_exec` tool). Set `extensions: false` to disable Fabric for a Pi actor: the activation runs with `extensions: false` and `recursive: false`, so `fabric_exec` is not injected and the actor cannot call `agents.*` or `mesh.*`; the host still manages its mailbox and delivery (same coordination model as a Claude actor). This does not restrict ordinary tools: also use `tools: ["read", "grep", "find", "ls"]` for a read-only actor or `tools: []` for no tools. Fixed at creation.
+- `tools` is the persistent agent's persisted allowlist and defaults to `agents.defaultTools`. Replace it for future activations with `agents.setTools({ id, tools })`; an empty list disables optional tools. Pi persistent agents retain the host-required `fabric_exec` tool unless created with `extensions: false`. Use `scope: "global"` to update a reusable template instead.
+- `extensions` is `true` by default (a Pi persistent agent is recursively Fabric-equipped with the host-required `fabric_exec` tool). Set `extensions: false` to disable Fabric for a Pi persistent agent: the activation runs with `extensions: false` and `recursive: false`, so `fabric_exec` is not injected and the persistent agent cannot call `agents.*` or `mesh.*`; the host still manages its mailbox and delivery (same coordination model as a Claude persistent agent). This does not restrict ordinary tools: also use `tools: ["read", "grep", "find", "ls"]` for a read-only persistent agent or `tools: []` for no tools. Fixed at creation.
 
 ```ts
 return agents.create({
   name: "auth-supervisor",
-  instructions: "Watch the main session until the auth migration is complete and tested. Prefer silence; reply with a directive only for material drift, a blocker, or verified completion.",
-  events: ["agent_settled", "tool_error"],
+  role: "supervisor",
+  goal: "Complete and test the auth migration.",
+  instructions: "Supervise Main only for the auth migration goal.",
   validWhile: ({ activation, current }) => {
     if (activation.kind !== "hostEvent") return true;
     if (activation.sequence !== current.latestActivationSequence) return false;
     return activation.event !== "tool_error" || activation.mainRevision === current.mainRevision;
   },
-  responseMode: "directive",
-  delivery: "steer",
-  triggerTurn: true,
-  tools: ["read", "grep", "find", "ls"],
 });
 ```
 
-For a native asynchronous vision handoff, create one actor with an explicit multimodal `model`, `events: ["input"]`, `responseMode: "directive"`, passive `delivery: "steer"`, `triggerTurn: false`, `coalesce: false`, `validWhile: ({ activation }) => activation.kind !== "hostEvent" || (activation.signal?.media?.length ?? 0) > 0`, `tools: []`, and usually `extensions: false`. Instruct it to return `silent` when no image is attached and otherwise return only a compact visual description for Main. Fabric attaches prompt images automatically; do not add base64 to the task or mailbox data. The actor does not block Main's current inference.
+For a native asynchronous vision handoff, create one persistent agent with an explicit multimodal `model`, `events: ["input"]`, `responseMode: "directive"`, passive `delivery: "steer"`, `triggerTurn: false`, `coalesce: false`, `validWhile: ({ activation }) => activation.kind !== "hostEvent" || (activation.signal?.media?.length ?? 0) > 0`, `tools: []`, and usually `extensions: false`. Instruct it to return `silent` when no image is attached and otherwise return only a compact visual description for Main. Fabric attaches prompt images automatically; do not add base64 to the task or mailbox data. The persistent agent does not block Main's current inference.
 
 Mailbox:
 
-- `agents.create({ ..., budget?: { lifetimeActivations?, windowActivations?, windowMs? } })` installs durable host-owned activation quotas. `agents.actorTelemetry()` returns aggregate activation/token/rejection counters.
-- `agents.ask({ id, message, data?, maxTokens? })` returns a `FabricActorMessage` (blocking exchange). In a finite run budget, the host injects the reserved ceiling and propagates the run/trace/span parent into the actor child.
+- `agents.create({ ..., budget?: { lifetimeActivations?, windowActivations?, windowMs? } })` installs durable host-owned activation quotas. `agents.telemetry()` returns aggregate activation/token/rejection counters.
+- `agents.ask({ id, message, data?, maxTokens? })` returns a `FabricPersistentAgentMessage` (blocking exchange). In a finite run budget, the host injects the reserved ceiling and propagates the run/trace/span parent into the persistent agent child.
 - `agents.tell({ id, message, data?, maxTokens? })` returns `{ queued, messageId }` (fire and forget). Its detached child conservatively commits the full reservation.
-- `agents.actorStatus({ id })` and `agents.actors()` return full info only for locally owned actors. Discover remote actors through `agents.members({ kinds: ["actor"] })`.
-- `agents.setModel({ id, model? })` and `agents.setThinking({ id, thinking? })` migrate the next activation while preserving the actor's runner session.
-- `agents.setTools({ id, tools, scope? })` replaces the persisted tool allowlist for a project actor (default) or global template.
-- `agents.setDeliveryPolicy({ id, delivery, triggerTurn, scope? })` replaces the explicit project/global continuation policy without recreating the actor. In the dashboard, press `y` on an actor/template for the same control.
+- `agents.status({ id })` reads either live lifecycle. `agents.list({ lifecycle: "persistent", scope? })` lists persistent agents; `agents.templates()` lists non-live reusable definitions. Removed lifecycle aliases are not available.
+- `agents.setModel({ id, model? })` and `agents.setThinking({ id, thinking? })` migrate the next activation while preserving the persistent agent's runner session.
+- `agents.setTools({ id, tools, scope? })` replaces the persisted tool allowlist for a project persistent agent (default) or global template.
+- `agents.setDeliveryPolicy({ id, delivery, triggerTurn, scope? })` replaces the explicit project/global continuation policy without recreating the persistent agent. In the dashboard, press `y` on a persistent agent/template for the same control.
 - `agents.messages({ id, limit? })` returns owner-local durable inbox/outbox history, including per-channel `deliveryReceipt` state; passive shared-registry views cannot read another owner's mailbox.
-- `agents.retryDelivery({ id, messageId })` explicitly retries failed mesh/Main delivery under the stable outbox ID. Zero-effect actor startup failures may retry one-for-one under the configured bound and report `runAttempts`; any turn, tool call, or token use prevents replay. Automatic delivery attempts use bounded exponential backoff and jitter; exhaustion dead-letters the channel, and repeated terminal Main failures open a persisted cooldown circuit. Queue overload follows the configured reject, source-coalesce, drop-oldest, or dead-letter policy with explicit terminal records.
+- `agents.retryDelivery({ id, messageId })` explicitly retries failed mesh/Main delivery under the stable outbox ID. Zero-effect persistent agent startup failures may retry one-for-one under the configured bound and report `runAttempts`; any turn, tool call, or token use prevents replay. Automatic delivery attempts use bounded exponential backoff and jitter; exhaustion dead-letters the channel, and repeated terminal Main failures open a persisted cooldown circuit. Queue overload follows the configured reject, source-coalesce, drop-oldest, or dead-letter policy with explicit terminal records.
 - `agents.remove({ id })` returns `{ removed }`.
-- `agents.log({ id, type?, lines?, runId? })` reads the LLM/agent log for a locally owned actor or one-shot run. `type` is `session` (the actor's `session.jsonl` transcript — every user/assistant turn and tool call), `run` (the last retained run's `events.jsonl` event stream), or `all` (both; default `session` for actors). Actors retain their last `MAX_RETAINED_RUNS` runs so logs survive after success. Returns `{ actorId, actorName, sessionFile, logDir, session, run?, retainedRuns }` (actors) or `{ id, runDirectory, logFile, status?, events }` (one-shot runs). Use this to inspect what an "offending" actor actually sent to its model. From the TUI: `/fabric log <id>` previews, `/fabric export-log <id> [path]` writes the raw `session.jsonl` + retained `runs/` to disk.
+- `agents.log({ id, type?, lines?, runId? })` reads the LLM/agent log for a locally owned persistent agent or one-shot run. `type` is `session` (the persistent agent's `session.jsonl` transcript — every user/assistant turn and tool call), `run` (the last retained run's `events.jsonl` event stream), or `all` (both; default `session` for persistent agents). Persistent agents retain their last `MAX_RETAINED_RUNS` runs so logs survive after success. Returns `{ persistentAgentId, persistentAgentName, sessionFile, logDir, session, run?, retainedRuns }` (persistent agents) or `{ id, runDirectory, logFile, status?, events }` (one-shot runs). Use this to inspect what an "offending" persistent agent actually sent to its model. From the TUI: `/fabric log <id>` previews, `/fabric export-log <id> [path]` writes the raw `session.jsonl` + retained `runs/` to disk.
 
 ## Outcomes
 

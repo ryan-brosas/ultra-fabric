@@ -15,7 +15,7 @@ interface RunRootOwner {
 
 interface RunRecordSummary {
   status?: string;
-  actorId?: string;
+  persistentAgentId?: string;
   finishedAt?: number;
   updatedAt?: number;
 }
@@ -107,7 +107,7 @@ const pruneClosedRunRoot = (
     if (!record?.status || !TERMINAL_STATUSES.has(record.status)) continue;
     let fallback = now;
     try { fallback = fs.statSync(runDirectory).mtimeMs; } catch {}
-    const retentionMs = record.actorId
+    const retentionMs = record.persistentAgentId
       ? orphanedTempRunRetentionMs
       : oneShotRunRetentionMs;
     if (now - recordAgeReference(record, fallback) < retentionMs) continue;
@@ -184,7 +184,7 @@ export const sweepTempRunRoots = (options: {
   return result;
 };
 
-export const pruneActorRunArchives = (options: {
+export const prunePersistentAgentRunArchives = (options: {
   runsDirectory: string;
   latestRunId?: string;
   retentionMs: number;

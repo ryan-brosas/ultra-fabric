@@ -11,6 +11,7 @@ Create the advisor with Fabric primitives; do not install an advisor extension. 
 Hard pointer: read `<skill-dir>/../fabric-ambient/references/setup.md` completely before setup, then use its program with:
 
 - `strings.name`: `advisor`
+- `strings.role`: `advisor`
 - `strings.events`: `["agent_settled","tool_error"]`
 - `strings.triggerTurn`: `false`
 - `strings.model`: model key or substring, or an empty string when unset
@@ -26,4 +27,4 @@ Prefer silence. Return {"action":"silent"} when work is on track. Return {"actio
 
 ## Completion criterion
 
-Complete only when setup returns an `advisor` with both events, read-only native tools, `triggerTurn: false`, and no recreation warning. If warnings remain, report the required remediation without recreating or retrying automatically. Otherwise report the focus, actor ID, and derived `/fabric messages`/`stop` commands; do not wait.
+Complete only when setup returns an `advisor` with both events, read-only native tools, `triggerTurn: false`, and no recreation warning. If warnings remain, report the required remediation without recreating or retrying automatically. Otherwise report the focus, persistent agent ID, and derived `/fabric messages`/`stop` commands; do not wait.

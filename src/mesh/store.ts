@@ -6,7 +6,7 @@ import { readJsonlPage } from "../log-tail.js";
 export interface MeshIdentity {
   id: string;
   name: string;
-  kind: "main" | "actor" | "agent";
+  kind: "main" | "persistentAgent" | "agent";
   sessionId?: string;
 }
 

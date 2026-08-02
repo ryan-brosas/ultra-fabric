@@ -135,17 +135,17 @@ describe("FabricModelSelector", () => {
       theme,
       source,
       currentValue: INHERIT_VALUE,
-      headerText: 'Model for actor "reviewer". Pick Inherit to use the Fabric default.',
+      headerText: 'Model for persistentAgent "reviewer". Pick Inherit to use the Fabric default.',
       inheritName: "Use the Fabric default model (or host default)",
       onSelect: () => {},
       onCancel: () => {},
     });
     const text = render(component);
-    expect(text).toContain('Model for actor "reviewer". Pick Inherit to use the Fabric default.');
+    expect(text).toContain('Model for persistentAgent "reviewer". Pick Inherit to use the Fabric default.');
     // The Inherit row's footer name reflects the custom inherit description.
     expect(text).toContain("Use the Fabric default model (or host default)");
     // The default global wording is no longer present.
-    expect(text).not.toContain("Default model for Fabric agents and actors");
+    expect(text).not.toContain("Default model for Fabric agents and persistentAgents");
     expect(text).not.toContain("Use the host session's default model");
   });
 
@@ -177,7 +177,7 @@ describe("FabricModelSelector", () => {
       onCancel: () => {},
     });
     const text = render(component);
-    expect(text).toContain("Default model for Fabric agents and actors");
+    expect(text).toContain("Default model for Fabric agents across both lifecycles");
     expect(text).toContain("Use the host session's default model");
   });
 });

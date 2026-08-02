@@ -51,8 +51,8 @@ describe("MeshStore", () => {
   it("deduplicates retried publication by a caller-owned event id", async () => {
     const store = createStore();
     const input = {
-      id: "actor-message-1",
-      topic: "fabric.actor.output",
+      id: "persistentAgent-message-1",
+      topic: "fabric.persistentAgent.output",
       from: identity,
       text: "deliver once",
     } as Parameters<MeshStore["publish"]>[0] & { id: string };
@@ -61,7 +61,7 @@ describe("MeshStore", () => {
     const retried = await store.publish(input);
 
     expect(retried).toEqual(first);
-    expect(store.read({ topic: "fabric.actor.output" })).toEqual([first]);
+    expect(store.read({ topic: "fabric.persistentAgent.output" })).toEqual([first]);
   });
 
   it("repairs an interrupted append without reusing sequence numbers", async () => {

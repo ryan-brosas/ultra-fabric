@@ -958,7 +958,7 @@ return "run-objective-secret";
     expect(trace.counts.droppedValues).toBeGreaterThan(0);
   });
 
-  it("retains identifiers for every actor-targeting management action", () => {
+  it("retains identifiers for every persistentAgent-targeting management action", () => {
     const recorder = new FabricExecutionTraceRecorder();
     for (const ref of [
       "agents.compact",
@@ -970,12 +970,12 @@ return "run-objective-secret";
       "agents.import",
       "agents.export",
     ]) {
-      recorder.issueCall(ref, { id: "actor-reviewer", payload: "secret" }).succeed(undefined);
+      recorder.issueCall(ref, { id: "persistentAgent-reviewer", payload: "secret" }).succeed(undefined);
     }
 
     const trace = recorder.seal("succeeded", []);
     expect(trace.operations.map((operation) => operation.args)).toEqual(
-      Array(8).fill({ id: "actor-reviewer" }),
+      Array(8).fill({ id: "persistentAgent-reviewer" }),
     );
     expect(JSON.stringify(trace)).not.toContain("secret");
   });

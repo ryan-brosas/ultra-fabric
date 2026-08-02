@@ -9,7 +9,7 @@ Pi Fabric uses a core-first, user-opt-in skill hierarchy.
 - `/skill:fabric-guide` is the user-only router. It recommends an exact advanced command and stops; it never invokes the recommendation.
 - User-facing descriptions summarize commands. Only the `fabric-exec` description spends always-on model context.
 
-This keeps the parent agent behaving like regular Pi until the user explicitly opts into orchestration, recursion, Schema, ambient actors, or swarm coordination.
+This keeps the parent agent behaving like regular Pi until the user explicitly opts into orchestration, recursion, Schema, ambient persistent Agents, or swarm coordination.
 
 ## Information hierarchy
 
@@ -45,4 +45,4 @@ A mandatory pointer is disclosure for legibility and single-source maintenance, 
 - `/skill:fabric-supervisor` — persistent goal supervision.
 - `/skill:fabric-spec` — persistent spec-compliance supervision.
 - `/skill:fabric-ambient` — direct advisor/supervisor profile router.
-- `/skill:fabric-swarm` — durable actor coordination.
+- `/skill:fabric-swarm` — durable multi-Agent coordination.

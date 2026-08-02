@@ -93,7 +93,7 @@ return { recalled, current, mode: status.mode, hypothesis: hypothesis.hypothesis
     expect(result.errors).toEqual([]);
   });
 
-  it("accepts workflow, actor, and mesh primitives", () => {
+  it("accepts workflow, persistentAgent, and mesh primitives", () => {
     const result = typeCheckFabricCode(
       `
 const captured = await extensions.project_status({ verbose: true });
@@ -107,6 +107,12 @@ const watcher = await agents.create({
   responseMode: "directive",
 });
 await agents.setTools({ id: watcher.id, tools: ["read", "grep", "find", "ls"] });
+const persistent: FabricPersistentAgentInfo[] = await agents.list({ lifecycle: "persistent" });
+const templates = await agents.templates();
+const telemetry = await agents.telemetry();
+const selectedLifecycle: FabricAgentLifecycle = telemetry.persistent > 0 ? "all" : "one-shot";
+const selected = await agents.list({ lifecycle: selectedLifecycle });
+console.log(persistent[0]?.messages, templates[0]?.instructions, telemetry.persistent, selected.length);
 await mesh.publish({ topic: "team.review", to: watcher.id, text: "start" });
 await phase("Review");
 const findings = await parallel([

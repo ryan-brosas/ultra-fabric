@@ -14,7 +14,7 @@ import type {
 const PARTICIPANT_PREFIX = "topology/participants/";
 const HOST_PREFIX = "topology/hosts/";
 const LEGACY_SESSION_PREFIX = "sessions/";
-const LEGACY_ACTOR_PREFIX = "actors/";
+const LEGACY_PERSISTENT_AGENT_PREFIX = "persistentAgents/";
 const PARTICIPANT_HEARTBEAT_MS = 5_000;
 const PARTICIPANT_LEASE_MS = 15_000;
 const keyFor = (prefix: string, id: string): string =>
@@ -24,7 +24,7 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const participantKind = (value: unknown): FabricParticipantKind | undefined =>
-  value === "root" || value === "agent" || value === "actor" ? value : undefined;
+  value === "root" || value === "agent" || value === "persistentAgent" ? value : undefined;
 
 const transports = new Set([
   "host",
@@ -81,7 +81,7 @@ const hostFromEntry = (entry: MeshStateEntry): FabricHostRecord | undefined => {
     entry.updatedBy.id !== value.identity.id ||
     (value.identity.kind !== "main" &&
       value.identity.kind !== "agent" &&
-      value.identity.kind !== "actor") ||
+      value.identity.kind !== "persistentAgent") ||
     typeof value.startedAt !== "number" ||
     typeof value.updatedAt !== "number" ||
     typeof value.expiresAt !== "number"
@@ -162,7 +162,7 @@ const legacyRootFromEntry = (
   };
 };
 
-const legacyActorFromEntry = (
+const legacyPersistentAgentFromEntry = (
   entry: MeshStateEntry,
   roots: Map<string, FabricParticipantInfo>,
 ): FabricParticipantInfo | undefined => {
@@ -179,7 +179,7 @@ const legacyActorFromEntry = (
   const root = roots.get(entry.updatedBy.id);
   if (
     !root?.sessionId ||
-    entry.key !== `${LEGACY_ACTOR_PREFIX}${root.sessionId}/${value.id}`
+    entry.key !== `${LEGACY_PERSISTENT_AGENT_PREFIX}${root.sessionId}/${value.id}`
   ) {
     return undefined;
   }
@@ -187,7 +187,7 @@ const legacyActorFromEntry = (
   return {
     format: 1,
     id: value.id,
-    kind: "actor",
+    kind: "persistentAgent",
     rootId: root.id,
     ownerHostId: root.id,
     ownerIdentityId: entry.updatedBy.id,
@@ -358,10 +358,10 @@ export class ParticipantDirectory implements FabricParticipantSource {
           if (!byId.has(root.id)) byId.set(root.id, root);
         }
       }
-      if (!options.kinds || options.kinds.includes("actor")) {
-        for (const entry of this.mesh.listAll(LEGACY_ACTOR_PREFIX)) {
-          const actor = legacyActorFromEntry(entry, legacyRoots);
-          if (actor && !byId.has(actor.id)) byId.set(actor.id, actor);
+      if (!options.kinds || options.kinds.includes("persistentAgent")) {
+        for (const entry of this.mesh.listAll(LEGACY_PERSISTENT_AGENT_PREFIX)) {
+          const persistentAgent = legacyPersistentAgentFromEntry(entry, legacyRoots);
+          if (persistentAgent && !byId.has(persistentAgent.id)) byId.set(persistentAgent.id, persistentAgent);
         }
       }
     }
@@ -568,12 +568,12 @@ export class ParticipantDirectory implements FabricParticipantSource {
           return root ? [[root.id, root] as const] : [];
         }),
     );
-    const legacyActorOwners = new Map(
+    const legacyPersistentAgentOwners = new Map(
       this.mesh
-        .listAll(LEGACY_ACTOR_PREFIX)
+        .listAll(LEGACY_PERSISTENT_AGENT_PREFIX)
         .flatMap((entry) => {
-          const actor = legacyActorFromEntry(entry, legacyRoots);
-          return actor ? [[actor.id, actor.ownerIdentityId] as const] : [];
+          const persistentAgent = legacyPersistentAgentFromEntry(entry, legacyRoots);
+          return persistentAgent ? [[persistentAgent.id, persistentAgent.ownerIdentityId] as const] : [];
         }),
     );
     for (const record of desired.values()) {
@@ -582,7 +582,7 @@ export class ParticipantDirectory implements FabricParticipantSource {
       const key = keyFor(PARTICIPANT_PREFIX, record.id);
       const occupied = current?.entry ?? this.mesh.get(key);
       const occupiedParticipant = occupied && participantFromEntry(occupied);
-      const legacyOwner = record.kind === "actor" ? legacyActorOwners.get(record.id) : undefined;
+      const legacyOwner = record.kind === "persistentAgent" ? legacyPersistentAgentOwners.get(record.id) : undefined;
       if (!occupiedParticipant && legacyOwner && legacyOwner !== this.options.identity.id) {
         continue;
       }

@@ -3,14 +3,14 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import type { CodePreviewSettings } from "./code-preview.js";
 import type { FabricActivityRun } from "../activity/types.js";
-import type { FabricActorDelivery, FabricActorHostEvent } from "../actors/types.js";
+import type { FabricPersistentAgentDelivery, FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import type { FabricState } from "../fabric-state.js";
 import type { FabricThinking } from "../thinking.js";
 import type { MeshEvent } from "../mesh/store.js";
 import type { FabricDashboardMessageTarget } from "./dashboard.js";
 import type { ModelSource } from "./model-picker.js";
 import { createDashboardSnapshot } from "./snapshot.js";
-import { isActiveStatus, type FabricDashboardSnapshot, type FabricUiActor, type FabricUiAgent } from "./types.js";
+import { isActiveStatus, type FabricDashboardSnapshot, type FabricUiPersistentAgent, type FabricUiAgent } from "./types.js";
 import { FabricWidget, shouldShowFabricWidget } from "./widget.js";
 import { AgentTranscriptReader, type FabricTranscriptSource } from "./transcript.js";
 
@@ -37,8 +37,8 @@ const emptySnapshot = (): FabricDashboardSnapshot => {
     },
     peers: [],
     agents: [],
-    actors: [],
-    globalActors: [],
+    persistentAgents: [],
+    agentTemplates: [],
     state: [],
     events: [],
   };
@@ -51,7 +51,7 @@ export class FabricUiController {
   #meshOffset = 0;
   #timer: NodeJS.Timeout | undefined;
   #activityUnsubscribe: (() => void) | undefined;
-  #actorUnsubscribe: (() => void) | undefined;
+  #persistentAgentUnsubscribe: (() => void) | undefined;
   #agentUnsubscribe: (() => void) | undefined;
   #scheduledRefresh: NodeJS.Timeout | undefined;
   #widgetTui: TUI | undefined;
@@ -79,7 +79,7 @@ export class FabricUiController {
       this.#meshOffset = this.state.mesh.latestOffset();
     }
     this.#activityUnsubscribe = this.state.activity.subscribe(() => this.#scheduleRefresh());
-    this.#actorUnsubscribe = this.state.actors.subscribe(() => this.#scheduleRefresh());
+    this.#persistentAgentUnsubscribe = this.state.persistentAgents.subscribe(() => this.#scheduleRefresh());
     this.#agentUnsubscribe = this.state.agents.subscribeUi(() => this.#scheduleRefresh());
     this.#refresh();
     this.#schedulePoll();
@@ -93,8 +93,8 @@ export class FabricUiController {
     this.#widget = undefined;
     this.#activityUnsubscribe?.();
     this.#activityUnsubscribe = undefined;
-    this.#actorUnsubscribe?.();
-    this.#actorUnsubscribe = undefined;
+    this.#persistentAgentUnsubscribe?.();
+    this.#persistentAgentUnsubscribe = undefined;
     this.#agentUnsubscribe?.();
     this.#agentUnsubscribe = undefined;
     if (this.#context?.mode === "tui") {
@@ -130,7 +130,7 @@ export class FabricUiController {
       await Promise.all([import("./dashboard.js"), import("./model-picker.js")]);
     const modelSource = buildModelSource(context.modelRegistry);
     let claudeModelSource: ModelSource | undefined;
-    if (this.#snapshot.actors.some((actor) => actor.runner === "claude")) {
+    if (this.#snapshot.persistentAgents.some((persistentAgent) => persistentAgent.runner === "claude")) {
       try {
         claudeModelSource = buildClaudeModelSource(await this.state.agents.claudeModels());
       } catch (error) {
@@ -156,8 +156,10 @@ export class FabricUiController {
       delivery: "steer" | "followUp",
     ): void => {
       const action =
-        target.kind === "actor"
-          ? "Message queued for actor"
+        target.kind === "persistentAgent"
+          ? delivery === "steer"
+            ? `Message queued for ${target.name}`
+            : `Follow-up queued for ${target.name}`
           : delivery === "steer"
             ? `Steer queued for ${target.name}`
             : `Follow-up queued for ${target.name}`;
@@ -169,84 +171,84 @@ export class FabricUiController {
     const onAgentStop = (agentId: string): void => {
       reportUpdate("Agent stopped", this.state.stopParticipant(agentId));
     };
-    const onActorModel = (actorId: string, model: string | undefined): void => {
-      reportUpdate("Actor model updated", this.state.actors.setModel(actorId, model));
+    const onPersistentAgentModel = (persistentAgentId: string, model: string | undefined): void => {
+      reportUpdate("Persistent Agent model updated", this.state.persistentAgents.setModel(persistentAgentId, model));
     };
-    const onActorThinking = (actorId: string, thinking: FabricThinking | undefined): void => {
-      reportUpdate("Actor thinking level updated", this.state.actors.setThinking(actorId, thinking));
+    const onPersistentAgentThinking = (persistentAgentId: string, thinking: FabricThinking | undefined): void => {
+      reportUpdate("Persistent Agent thinking level updated", this.state.persistentAgents.setThinking(persistentAgentId, thinking));
     };
-    const onActorEvents = (actorId: string, events: FabricActorHostEvent[]): void => {
-      reportUpdate("Actor event subscriptions updated", this.state.actors.setEvents(actorId, events));
+    const onPersistentAgentEvents = (persistentAgentId: string, events: FabricPersistentAgentHostEvent[]): void => {
+      reportUpdate("Persistent Agent event subscriptions updated", this.state.persistentAgents.setEvents(persistentAgentId, events));
     };
-    const onActorDeliveryPolicy = (
-      actorId: string,
-      delivery: FabricActorDelivery,
+    const onPersistentAgentDeliveryPolicy = (
+      persistentAgentId: string,
+      delivery: FabricPersistentAgentDelivery,
       triggerTurn: boolean,
     ): void => {
       reportUpdate(
-        "Actor delivery policy updated",
-        this.state.actors.setDeliveryPolicy(actorId, delivery, triggerTurn),
+        "Persistent Agent delivery policy updated",
+        this.state.persistentAgents.setDeliveryPolicy(persistentAgentId, delivery, triggerTurn),
       );
     };
     const onGlobalDeliveryPolicy = (
-      actorId: string,
-      delivery: FabricActorDelivery,
+      persistentAgentId: string,
+      delivery: FabricPersistentAgentDelivery,
       triggerTurn: boolean,
     ): void => {
       try {
-        this.state.globalActors.update(actorId, { delivery, triggerTurn });
-        context.ui.notify("Global actor delivery policy updated", "info");
+        this.state.templates.update(persistentAgentId, { delivery, triggerTurn });
+        context.ui.notify("Global agent template delivery policy updated", "info");
         this.#refresh();
       } catch (error) {
         context.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }
     };
-    const onActorTools = (actorId: string, tools: string[]): void => {
-      reportUpdate("Actor tools updated", this.state.actors.setTools(actorId, tools));
+    const onPersistentAgentTools = (persistentAgentId: string, tools: string[]): void => {
+      reportUpdate("Persistent Agent tools updated", this.state.agents.setPersistentTools(persistentAgentId, tools));
     };
-    const onClearMessages = (actorId: string): void => {
-      reportUpdate("Actor mailbox cleared", this.state.actors.clearMessages(actorId));
+    const onClearMessages = (persistentAgentId: string): void => {
+      reportUpdate("Persistent Agent mailbox cleared", this.state.persistentAgents.clearMessages(persistentAgentId));
     };
-    const onActorInstructions = (actorId: string, instructions: string): void => {
-      reportUpdate("Actor instructions updated", this.state.actors.setInstructions(actorId, instructions));
+    const onPersistentAgentInstructions = (persistentAgentId: string, instructions: string): void => {
+      reportUpdate("Persistent Agent instructions updated", this.state.persistentAgents.setInstructions(persistentAgentId, instructions));
     };
-    const onGlobalInstructions = (globalActorId: string, instructions: string): void => {
+    const onGlobalInstructions = (agentTemplateId: string, instructions: string): void => {
       try {
-        this.state.globalActors.update(globalActorId, { instructions });
-        context.ui.notify("Global actor instructions updated", "info");
+        this.state.templates.update(agentTemplateId, { instructions });
+        context.ui.notify("Global agent template instructions updated", "info");
         this.#refresh();
       } catch (error) {
         context.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }
     };
-    const onImportActor = (globalActorId: string): void => {
-      const def = this.state.globalActors.resolve(globalActorId);
+    const onImportPersistentAgent = (agentTemplateId: string): void => {
+      const def = this.state.templates.resolve(agentTemplateId);
       if (!def) return;
-      this.state.actors
-        .create(this.state.globalActors.toRequest(def))
-        .then((actor) => {
-          context.ui.notify(`Imported global actor "${def.name}" as ${actor.name}`, "info");
+      this.state.agents
+        .importTemplate(def.id)
+        .then((persistentAgent) => {
+          context.ui.notify(`Imported Agent template "${def.name}" as ${persistentAgent.name}`, "info");
           this.#refresh();
         })
         .catch((error) =>
           context.ui.notify(error instanceof Error ? error.message : String(error), "error"),
         );
     };
-    const onExportActor = (actorId: string): void => {
+    const onExportPersistentAgent = (persistentAgentId: string): void => {
       try {
-        const def = this.state.actors.definition(actorId);
-        const template = this.state.globalActors.create(def);
-        context.ui.notify(`Exported "${template.name}" to global actors`, "info");
+        const def = this.state.persistentAgents.definition(persistentAgentId);
+        const template = this.state.templates.create(def);
+        context.ui.notify(`Exported "${template.name}" to global agent templates`, "info");
         this.#refresh();
       } catch (error) {
         context.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }
     };
-    const onRemoveGlobalActor = (globalActorId: string): void => {
+    const onRemoveAgentTemplate = (agentTemplateId: string): void => {
       try {
-        const result = this.state.globalActors.remove(globalActorId);
+        const result = this.state.templates.remove(agentTemplateId);
         context.ui.notify(
-          result.removed ? "Removed global actor template" : "Global actor not found",
+          result.removed ? "Removed Agent template template" : "Agent template not found",
           result.removed ? "info" : "warning",
         );
         this.#refresh();
@@ -271,27 +273,27 @@ export class FabricUiController {
             onAgentStop,
             agentTranscript: (agent, followLatest) =>
               this.#transcripts.read(this.#agentTranscriptSource(agent), followLatest),
-            actorTranscript: (actor, followLatest) =>
-              this.#transcripts.read(this.#actorTranscriptSource(actor), followLatest),
+            persistentAgentTranscript: (persistentAgent, followLatest) =>
+              this.#transcripts.read(this.#persistentAgentTranscriptSource(persistentAgent), followLatest),
             loadOlderTranscript: (target) =>
               this.#transcripts.loadOlder(this.#transcriptSource(target)),
             loadNewerTranscript: (target) =>
               this.#transcripts.loadNewer(this.#transcriptSource(target)),
             loadLatestTranscript: (target) =>
               this.#transcripts.loadLatest(this.#transcriptSource(target)),
-            onActorModel,
-            onActorThinking,
-            onActorEvents,
-            onActorDeliveryPolicy,
+            onPersistentAgentModel,
+            onPersistentAgentThinking,
+            onPersistentAgentEvents,
+            onPersistentAgentDeliveryPolicy,
             onGlobalDeliveryPolicy,
-            onActorTools,
-            actorDefaultTools: this.state.config.agents?.defaultTools ?? [],
+            onPersistentAgentTools,
+            persistentAgentDefaultTools: this.state.config.agents?.defaultTools ?? [],
             onClearMessages,
-            onActorInstructions,
+            onPersistentAgentInstructions,
             onGlobalInstructions,
-            onImportActor,
-            onExportActor,
-            onRemoveGlobalActor,
+            onImportPersistentAgent,
+            onExportPersistentAgent,
+            onRemoveAgentTemplate,
           });
         },
         {
@@ -326,10 +328,10 @@ export class FabricUiController {
       this.#snapshot.runs.some((run) => run.status === "running") ||
       this.#snapshot.peers.length > 0 ||
       this.#snapshot.agents.some((agent) => isActiveStatus(agent.status)) ||
-      this.#snapshot.actors.some(
-        (actor) =>
-          isActiveStatus(actor.status) ||
-          Boolean(actor.worker && isActiveStatus(actor.worker.status)),
+      this.#snapshot.persistentAgents.some(
+        (persistentAgent) =>
+          isActiveStatus(persistentAgent.status) ||
+          Boolean(persistentAgent.worker && isActiveStatus(persistentAgent.worker.status)),
       );
     if (!this.#dashboardOpen && !active) return;
     this.#timer = setTimeout(() => {
@@ -359,27 +361,27 @@ export class FabricUiController {
     return { id: agent.id, status: agent.status, ...(agent.logFile ? { logFile: agent.logFile } : {}) };
   }
 
-  #actorTranscriptSource(actor: FabricUiActor): FabricTranscriptSource {
-    if (actor.worker?.logFile && isActiveStatus(actor.worker.status)) {
+  #persistentAgentTranscriptSource(persistentAgent: FabricUiPersistentAgent): FabricTranscriptSource {
+    if (persistentAgent.worker?.logFile && isActiveStatus(persistentAgent.worker.status)) {
       return {
-        id: `${actor.id}:${actor.worker.id}`,
-        status: actor.worker.status,
-        logFile: actor.worker.logFile,
+        id: `${persistentAgent.id}:${persistentAgent.worker.id}`,
+        status: persistentAgent.worker.status,
+        logFile: persistentAgent.worker.logFile,
       };
     }
-    const retained = actor.lastRunId && actor.logDir
-      ? path.join(actor.logDir, actor.lastRunId, "events.jsonl")
+    const retained = persistentAgent.lastRunId && persistentAgent.logDir
+      ? path.join(persistentAgent.logDir, persistentAgent.lastRunId, "events.jsonl")
       : undefined;
-    if (retained) return { id: actor.id, status: actor.status, logFile: retained };
-    if (actor.sessionFile) {
-      return { id: actor.id, status: actor.status, logFile: actor.sessionFile };
+    if (retained) return { id: persistentAgent.id, status: persistentAgent.status, logFile: retained };
+    if (persistentAgent.sessionFile) {
+      return { id: persistentAgent.id, status: persistentAgent.status, logFile: persistentAgent.sessionFile };
     }
-    return { id: actor.id, status: actor.status };
+    return { id: persistentAgent.id, status: persistentAgent.status };
   }
 
-  #transcriptSource(target: FabricUiAgent | FabricUiActor): FabricTranscriptSource {
+  #transcriptSource(target: FabricUiAgent | FabricUiPersistentAgent): FabricTranscriptSource {
     return "recentMessages" in target
-      ? this.#actorTranscriptSource(target)
+      ? this.#persistentAgentTranscriptSource(target)
       : this.#agentTranscriptSource(target);
   }
 

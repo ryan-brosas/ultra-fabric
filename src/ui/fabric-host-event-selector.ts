@@ -1,23 +1,23 @@
 import { type Theme } from "@earendil-works/pi-coding-agent";
 import { Container, type Focusable, getKeybindings, Spacer, Text } from "@earendil-works/pi-tui";
-import { FABRIC_ACTOR_HOST_EVENTS } from "../actors/types.js";
-import type { FabricActorHostEvent } from "../actors/types.js";
+import { FABRIC_PERSISTENT_AGENT_HOST_EVENTS } from "../agents/persistent/types.js";
+import type { FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 
-const COMMON_HOST_EVENTS: readonly FabricActorHostEvent[] = [
+const COMMON_HOST_EVENTS: readonly FabricPersistentAgentHostEvent[] = [
   "input",
   "turn_end",
   "agent_settled",
   "tool_error",
   "session_compact",
 ];
-const commonHostEvents = new Set<FabricActorHostEvent>(COMMON_HOST_EVENTS);
+const commonHostEvents = new Set<FabricPersistentAgentHostEvent>(COMMON_HOST_EVENTS);
 const MAX_VISIBLE_HOST_EVENTS = 12;
-const HOST_EVENT_ORDER: readonly FabricActorHostEvent[] = [
+const HOST_EVENT_ORDER: readonly FabricPersistentAgentHostEvent[] = [
   ...COMMON_HOST_EVENTS,
-  ...FABRIC_ACTOR_HOST_EVENTS.filter((event) => !commonHostEvents.has(event)),
+  ...FABRIC_PERSISTENT_AGENT_HOST_EVENTS.filter((event) => !commonHostEvents.has(event)),
 ];
 
-const EVENT_LABELS: Record<FabricActorHostEvent, string> = {
+const EVENT_LABELS: Record<FabricPersistentAgentHostEvent, string> = {
   input: "raw user or extension input",
   turn_end: "each completed LLM turn",
   agent_settled: "host fully idle after a run",
@@ -55,24 +55,24 @@ const EVENT_LABELS: Record<FabricActorHostEvent, string> = {
 
 export interface FabricHostEventSelectorOptions {
   theme: Theme;
-  /** Currently enabled host events for the actor. */
-  currentValue: FabricActorHostEvent[];
-  onSelect: (events: FabricActorHostEvent[]) => void;
+  /** Currently enabled host events for the persistent agent. */
+  currentValue: FabricPersistentAgentHostEvent[];
+  onSelect: (events: FabricPersistentAgentHostEvent[]) => void;
   onCancel: () => void;
   headerText?: string;
 }
 
 /**
- * A compact multi-select picker for an actor's host-event subscriptions. The
+ * A compact multi-select picker for an persistentAgent's host-event subscriptions. The
  * supported host events are shown with a [x]/[ ] checkbox; space toggles the
  * row under the cursor, Enter applies the selection, and Esc cancels.
  */
 export class FabricHostEventSelector extends Container implements Focusable {
   private readonly theme: Theme;
-  private readonly onSelectCallback: (events: FabricActorHostEvent[]) => void;
+  private readonly onSelectCallback: (events: FabricPersistentAgentHostEvent[]) => void;
   private readonly onCancelCallback: () => void;
   private readonly listContainer = new Container();
-  private enabled: Set<FabricActorHostEvent>;
+  private enabled: Set<FabricPersistentAgentHostEvent>;
   private selectedIndex = 0;
   focused = false;
 
@@ -86,7 +86,7 @@ export class FabricHostEventSelector extends Container implements Focusable {
       new Text(
         this.theme.fg(
           "muted",
-          options.headerText ?? "Toggle the host events this actor subscribes to.",
+          options.headerText ?? "Toggle the host events this persistent agent subscribes to.",
         ),
         0,
         0,

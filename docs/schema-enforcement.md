@@ -40,9 +40,9 @@ Enforce mode allows discovery and workflow display operations plus these exact h
 - `compact.status`;
 - `schema.status`, `schema.hypothesize`, `schema.verify`, `schema.commit`, `schema.abort`.
 
-It blocks `pi.edit`, `pi.write`, `pi.bash`, all agent/actor actions, mesh and state writes or execution, `compact.request` and `compact.cancel`, MCP, captured extensions, and every external provider regardless of its declared risk. A provider claiming `risk: "read"` does not bypass this exact-reference policy. Guard failures are recorded in the existing typed execution trace with `failureStage: "guard"`.
+It blocks `pi.edit`, `pi.write`, `pi.bash`, all agent actions across both lifecycles, mesh and state writes or execution, `compact.request` and `compact.cancel`, MCP, captured extensions, and every external provider regardless of its declared risk. A provider claiming `risk: "read"` does not bypass this exact-reference policy. Guard failures are recorded in the existing typed execution trace with `failureStage: "guard"`.
 
-Persistent actors are not restored and host-event actor dispatch is disabled for an enforce session. Agent execution is disabled and agent actions are blocked. Capture `keepVisible`, descriptor risk, claimed source metadata, or tool visibility cannot authorize a second top-level path. A colliding external or SDK tool named `fabric_exec` is blocked unless Pi's canonical `sourceInfo.path` identifies this extension entry exactly.
+Persistent agents are not restored and host-event dispatch is disabled for an enforce session. Agent execution is disabled and agent actions are blocked. Capture `keepVisible`, descriptor risk, claimed source metadata, or tool visibility cannot authorize a second top-level path. A colliding external or SDK tool named `fabric_exec` is blocked unless Pi's canonical `sourceInfo.path` identifies this extension entry exactly.
 
 ## Transaction protocol
 

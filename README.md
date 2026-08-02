@@ -4,7 +4,7 @@
 
 **A resilient, adaptive orchestration runtime for [Pi](https://github.com/earendil-works/pi-coding-agent)**
 
-_One typed control plane for tools, models, agents, actors, workflows, recovery, verification, and learning._
+_One typed control plane for tools, models, agent lifecycles, workflows, recovery, verification, and learning._
 
 <p>
   <img src="https://raw.githubusercontent.com/monotykamary/pi-fabric/main/media/cover.jpg" alt="Pi Fabric composing tools and agents in the Pi TUI" width="1100">
@@ -18,9 +18,9 @@ _One typed control plane for tools, models, agents, actors, workflows, recovery,
 
 ---
 
-> **Development status:** Ultra Fabric is an experimental fork of [monotykamary/pi-fabric](https://github.com/monotykamary/pi-fabric), currently based on upstream 0.31.1. It preserves Fabric's programmable runtime while developing continuous Prewalk, supervised actors, durable workflows, adaptive routing, context QoS, and outcome-based learning. See the [Ultra Fabric architecture](docs/ultra-fabric.md) and [fork-boundary ADR](docs/adr/0001-fork-boundary.md).
+> **Development status:** Ultra Fabric is an experimental fork of [monotykamary/pi-fabric](https://github.com/monotykamary/pi-fabric), currently based on upstream 0.31.1. It preserves Fabric's programmable runtime while developing continuous Prewalk, supervised persistent agents, durable workflows, adaptive routing, context QoS, and outcome-based learning. See the [Ultra Fabric architecture](docs/ultra-fabric.md) and [fork-boundary ADR](docs/adr/0001-fork-boundary.md).
 
-You keep talking to Pi the way you always do. Fabric gives the model **one programmable tool** — `fabric_exec` — that it uses to compose Pi's core tools, MCP servers, captured extension tools, child agents, persistent actors, and durable coordination into a single type-checked TypeScript program. The program runs in a QuickJS sandbox by default; an explicit unsafe Node-process executor is available for trusted workloads that exceed WASM32 memory. Only the final result comes back to the conversation. Branching, loops, fan-out, and data flow become code the model writes and type-checks — not a stack of separate tool calls you have to orchestrate.
+You keep talking to Pi the way you always do. Fabric gives the model **one programmable tool** — `fabric_exec` — that it uses to compose Pi's core tools, MCP servers, captured extension tools, one-shot and persistent agents, plus durable coordination into a single type-checked TypeScript program. The program runs in a QuickJS sandbox by default; an explicit unsafe Node-process executor is available for trusted workloads that exceed WASM32 memory. Only the final result comes back to the conversation. Branching, loops, fan-out, and data flow become code the model writes and type-checks — not a stack of separate tool calls you have to orchestrate.
 
 ## Why Fabric?
 
@@ -28,7 +28,7 @@ You keep talking to Pi the way you always do. Fabric gives the model **one progr
 | :-: | ---------- | --------------- |
 | ⚡ | **Code mode** | One flat tool schema; branching, loops, fan-out, and data flow live in checked TypeScript. |
 | 🧰 | **Capability routing** | Call Pi core tools, MCP servers, captured extension tools, or Fabric providers through one runtime. |
-| 🧑‍🤝‍🧑 | **Agent runtime** | One-shot workers, persistent event-driven actors, councils, and bounded recursive queries. |
+| 🧑‍🤝‍🧑 | **Agent runtime** | One-shot and persistent agents, councils, and bounded recursive queries. |
 | 🧠 | **Ultra Consult** | Zero-agent-by-default context offload through host-scoped read-only fresh workers and byte-bounded validated evidence. |
 | 🕸️ | **Workflows + mesh** | Phased progress plus durable topics, shared tasks, and compare-and-swap state. |
 | 🛡️ | **Guardrails** | Approvals, isolation, timeouts, concurrency, recursion depth, and shared cost budgets. |
@@ -53,11 +53,19 @@ return {
 };
 ```
 
-Independent calls run in parallel; only the returned object enters the model context. Known providers use concise direct calls such as `mcp.fal_ai.get_model_schema(...)`, `memory.recall(...)`, `state.get()`, `schema.status()`, and `compact.status()`; `tools.call({ ref, args })` remains the fallback for refs discovered or computed at runtime.
+Independent calls run in parallel; only the returned object enters the model context.
+
+## One Agent runtime, configurable roles
+
+An Agent is either `one-shot` or `persistent`; scout, worker, advisor, supervisor, and other names are role profiles rather than separate runtimes. Discover them with `(await agents.roles()).roles` and inspect its `diagnostics`, select one with `role`, and override a concrete goal, completion contract, or narrower turn budget per instance. Add user profiles in `~/.pi/agent/agents/*.md` or trusted project profiles in `.pi/agents/*.md`.
+
+The built-in persistent `supervisor` is native runtime behavior: settled/error subscriptions, validated directives, active steering, coalescing, stale-directive suppression, read-only tools, completion precedence, and a four-turn activation bound come from `agents/supervisor.md`. `/skill:fabric-supervisor` only creates or reuses that role for a concrete goal; it is not a second supervisor implementation.
+
+Installed Pi model-provider extensions and `~/.pi/agent/models.json` entries are auto-detected for Pi-backed agents, settings, and `tools.models()`; Ultra Fabric keeps no provider allowlist. Known Fabric providers use concise direct calls such as `mcp.fal_ai.get_model_schema(...)`, `memory.recall(...)`, `state.get()`, `schema.status()`, and `compact.status()`; `tools.call({ ref, args })` remains the fallback for refs discovered or computed at runtime.
 
 ## Install
 
-Requires Node.js 24+ and Pi 0.80.6+. Fabric also checks a detectable Pi host version at startup and warns when an older host may ignore continuation APIs such as actor `triggerTurn`.
+Requires Node.js 24+ and Pi 0.80.6+. Fabric also checks a detectable Pi host version at startup and warns when an older host may ignore continuation APIs such as persistent-agent `triggerTurn`.
 
 ```bash
 pi install git:github.com/ryan-brosas/ultra-fabric
@@ -106,8 +114,8 @@ The foundation is the `fabric-exec` reference skill: the model loads it before i
 
 Fabric adds a live activity surface to Pi, no extra extension required:
 
-- A compact widget above the chat (like `pi-supervisor`) whose header follows the current phase while its rows show active/completed agents, active actors, and their recent nested tool or code-change activity.
-- `/fabric` (or `/fabric dashboard`) — **Activity** and **Topology** views where the user-facing Pi session is always present as **Main**. Queue/steer Main, active children, actors, and observed mesh agents; navigate a spring-followed unified topology of runs and project mesh, with paged transcripts, topics, state, and routes.
+- A compact widget above the chat (like `pi-supervisor`) whose header follows the current phase while its rows show active/completed agents across both lifecycles and their recent nested tool or code-change activity.
+- `/fabric` (or `/fabric dashboard`) — **Activity** and **Topology** views where the user-facing Pi session is always present as **Main**. Queue/steer Main, one-shot and persistent agents, and observed mesh participants; navigate a spring-followed unified topology of runs and project mesh, with paged transcripts, topics, state, and routes.
 - `/fabric settings` — mirrors Pi's `/settings` and writes changes to `fabric.json`.
 
 See the [interface & commands reference](docs/interface.md) for every view, keybinding, and slash command.
@@ -118,7 +126,7 @@ See the [interface & commands reference](docs/interface.md) for every view, keyb
 - [Fork boundary](docs/adr/0001-fork-boundary.md) — what stays upstream-shaped and what becomes Ultra-native.
 - [Configuration](docs/configuration.md) — `fabric.json`, code modes, tool capture, approvals, and budgets.
 - [Interface & commands](docs/interface.md) — dashboard, settings, keybindings, slash commands, and headless runs.
-- [Agents, actors & mesh](docs/agents.md) — Ultra Consult, agents, trajectory-preserving model handoff and `/fabric prewalk`, the Claude runner, transports, steering, persistent actors, global templates, councils, recursive queries, and durable coordination.
+- [Agents & mesh](docs/agents.md) — Ultra Consult, agents, trajectory-preserving model handoff and `/fabric prewalk`, the Claude runner, transports, steering, persistent agents, global templates, councils, recursive queries, and durable coordination.
 - [External providers](docs/providers.md) — the versioned provider protocol for extensions.
 - [Architecture & security](docs/architecture.md) — the host bridge, sandboxing, tool-call robustness, and limitations.
 - [Skills](docs/skills.md) — the core-first invocation policy and user-invoked advanced patterns.
@@ -132,7 +140,7 @@ pnpm test
 pnpm build
 ```
 
-The test suite covers configuration, schema validation, provider dispatch, registered-tool interception and execution, QuickJS isolation, Pi built-in invocation, Ultra Consult admission/evidence/reduction, agents, fake Claude stream-JSON and model discovery, workflows, durable mesh state, actor mailboxes and subscriptions, and Pi/Claude actor restoration. Claude fixtures never make a billable request.
+The test suite covers configuration, schema validation, provider dispatch, registered-tool interception and execution, QuickJS isolation, Pi built-in invocation, Ultra Consult admission/evidence/reduction, agents, fake Claude stream-JSON and model discovery, workflows, durable mesh state, persistent-agent mailboxes and subscriptions, and Pi/Claude runner restoration. Claude fixtures never make a billable request.
 
 ## License
 

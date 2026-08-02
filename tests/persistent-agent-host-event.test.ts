@@ -1,15 +1,15 @@
 import type { ExtensionAPI, ExtensionContext, ExtensionEvent } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
-import { prepareFabricActorHostPayload } from "../src/actors/host-event-payload.js";
-import { registerFabricActorHostEventObservers } from "../src/actors/host-event-observer.js";
+import { prepareFabricPersistentAgentHostPayload } from "../src/agents/persistent/host-event-payload.js";
+import { registerFabricPersistentAgentHostEventObservers } from "../src/agents/persistent/host-event-observer.js";
 import {
-  FABRIC_ACTOR_HOST_EVENTS,
-  FABRIC_ACTOR_PI_HOST_EVENTS,
-} from "../src/actors/types.js";
+  FABRIC_PERSISTENT_AGENT_HOST_EVENTS,
+  FABRIC_PERSISTENT_AGENT_PI_HOST_EVENTS,
+} from "../src/agents/persistent/types.js";
 
-describe("Fabric actor host events", () => {
+describe("Fabric persistent Agent host events", () => {
   it("covers every session-bound public Pi extension event plus tool_error", () => {
-    expect(FABRIC_ACTOR_PI_HOST_EVENTS).toEqual([
+    expect(FABRIC_PERSISTENT_AGENT_PI_HOST_EVENTS).toEqual([
       "resources_discover",
       "session_start",
       "session_info_changed",
@@ -43,11 +43,11 @@ describe("Fabric actor host events", () => {
       "thinking_level_select",
       "user_bash",
     ]);
-    expect(FABRIC_ACTOR_HOST_EVENTS).toEqual([
-      ...FABRIC_ACTOR_PI_HOST_EVENTS,
+    expect(FABRIC_PERSISTENT_AGENT_HOST_EVENTS).toEqual([
+      ...FABRIC_PERSISTENT_AGENT_PI_HOST_EVENTS,
       "tool_error",
     ]);
-    expect(FABRIC_ACTOR_HOST_EVENTS).not.toContain("project_trust");
+    expect(FABRIC_PERSISTENT_AGENT_HOST_EVENTS).not.toContain("project_trust");
   });
 
   it("registers one asynchronous observer for every supported Pi event", () => {
@@ -58,9 +58,9 @@ describe("Fabric actor host events", () => {
       }),
     } as unknown as ExtensionAPI;
     const observer = vi.fn();
-    registerFabricActorHostEventObservers(pi, observer);
+    registerFabricPersistentAgentHostEventObservers(pi, observer);
 
-    expect([...handlers.keys()]).toEqual(FABRIC_ACTOR_PI_HOST_EVENTS);
+    expect([...handlers.keys()]).toEqual(FABRIC_PERSISTENT_AGENT_PI_HOST_EVENTS);
     const event = { type: "input", text: "inspect", source: "interactive" } as ExtensionEvent;
     const context = {} as ExtensionContext;
     handlers.get("input")?.(event, context);
@@ -71,7 +71,7 @@ describe("Fabric actor host events", () => {
     const image = { type: "image" as const, data: "aGVsbG8=", mimeType: "image/png" };
     const circular: Record<string, unknown> = { label: "loop" };
     circular.self = circular;
-    const prepared = prepareFabricActorHostPayload(
+    const prepared = prepareFabricPersistentAgentHostPayload(
       {
         type: "input",
         text: "Bearer secret-token-value",

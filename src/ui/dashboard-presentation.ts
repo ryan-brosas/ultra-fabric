@@ -59,22 +59,22 @@ export const entityTail = (entity: Entity, now: number): string => {
     ];
     return parts.filter((value): value is string => Boolean(value)).join(" · ");
   }
-  if (entity.kind === "actor") {
-    const actor = entity.value;
+  if (entity.kind === "persistentAgent") {
+    const persistentAgent = entity.value;
     return [
-      actor.runner,
-      actor.model ?? actor.worker?.model,
-      actor.worker?.currentTool,
-      actor.worker?.usage
-        ? `${formatTokens(actor.worker.usage.input + actor.worker.usage.output)} tok`
+      persistentAgent.runner,
+      persistentAgent.model ?? persistentAgent.worker?.model,
+      persistentAgent.worker?.currentTool,
+      persistentAgent.worker?.usage
+        ? `${formatTokens(persistentAgent.worker.usage.input + persistentAgent.worker.usage.output)} tok`
         : undefined,
-      `${actor.messages} msg`,
-      actor.queued > 0 ? `q:${actor.queued}` : undefined,
+      `${persistentAgent.messages} msg`,
+      persistentAgent.queued > 0 ? `q:${persistentAgent.queued}` : undefined,
     ]
       .filter((value): value is string => Boolean(value))
       .join(" · ");
   }
-  if (entity.kind === "globalActor") {
+  if (entity.kind === "agentTemplate") {
     const def = entity.value;
     return [
       "global template",

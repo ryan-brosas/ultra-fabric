@@ -59,12 +59,18 @@ describe("model-picker buildModelSource", () => {
   const models: ModelLike[] = [
     { provider: "openai", id: "gpt-5.5", name: "GPT 5.5" },
     { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
+    { provider: "makora", id: "deepseek-ai/DeepSeek-V4-Pro", name: "DeepSeek V4 Pro" },
   ];
 
   it("returns the available models and a lastUsed record", () => {
     const source = buildModelSource({ getAvailable: () => models });
-    expect(source.models).toHaveLength(2);
-    expect(source.models.map((m) => modelKey(m.provider, m.id))).toContain("anthropic/claude-sonnet-4-5");
+    expect(source.models).toHaveLength(3);
+    expect(source.models.map((m) => modelKey(m.provider, m.id))).toEqual(
+      expect.arrayContaining([
+        "anthropic/claude-sonnet-4-5",
+        "makora/deepseek-ai/DeepSeek-V4-Pro",
+      ]),
+    );
     expect(typeof source.lastUsed).toBe("object");
   });
 

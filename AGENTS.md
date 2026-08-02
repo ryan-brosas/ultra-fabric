@@ -11,6 +11,23 @@ Ultra Fabric is a resilient, adaptive orchestration runtime for Pi, forked from 
 - Package manager: pnpm with a committed lockfile
 - Git remotes: `origin` is Ultra Fabric; `upstream` is pi-fabric
 
+## Working contract
+
+- Follow Rule 0. The latest explicit user request controls intent and scope while higher authority remains.
+- Frame meaningful work in one or two sentences with concrete acceptance criteria. Ask only when a consequential boundary remains unclear.
+- Do not narrate routine tool calls or echo file contents. Keep explanations proportional to the work and avoid box-drawing characters.
+- Read scoped `AGENTS.md` or `CLAUDE.md`, configuration, and relevant context before asking intent questions. Check `sources/` early when present. Put needed upstream or mod clones there instead of fetching isolated files.
+- Prefer semantic or graph navigation before text search. Find all references before renames or signature changes. Use grep and find for strings, comments, configuration, or graph fallback.
+- For non-trivial work, use a compact plan that names files, order, tests, and live checks. Ask before an unrequested multi-file refactor or architecture decision.
+- Build the smallest working slice, run focused diagnostics after edits, then run the repository gate. Separate local proof from checks still needed on named servers or feature flags.
+- Use plain `fabric_exec` and zero agents for ordinary work. Get one-line user confirmation before an agent, actor, or advanced Fabric workflow unless the request already names it.
+- Never place secrets in prompts, agent messages, actor instructions, mesh payloads, logs, or committed files. Read them from runtime environment or config and never echo values.
+- Preserve user-supplied commit and PR wording unless asked to edit it. Use the current allowed branch and never invent one.
+- Confirm the working directory before shell commands and honor the detected shell. Mention fish only when verified. A disabled backup must replace the real extension, such as `mymod.bak`, so loaders cannot still match it.
+- Use one name per thing, active voice, short paragraphs, and direct verbs. Avoid hedging, hype, semicolons, and em dashes in new prose.
+- Verify factual claims or label them unconfirmed. For debugging, list the symptoms every valid theory must explain before choosing a root cause.
+- Treat graph and memory results as hints until source-verified. Keep durable work status in source, issues, the current receipt, or project-scoped Hindsight. Update existing memory instead of duplicating it.
+
 ## Mission
 
 Close Fabric's control loop without discarding its proven runtime. The user states an outcome once; Ultra Fabric may route, delegate, supervise, retry, compact, and verify only within host-owned limits. The default remains zero agents.
@@ -18,7 +35,7 @@ Close Fabric's control loop without discarding its proven runtime. The user stat
 Implement the roadmap continuously in the order recorded in `docs/ultra-fabric.md`:
 
 1. Prewalk v2 continuity and stale-result ownership
-2. Reliable actors with durable inbox/outbox and explicit delivery outcomes
+2. Reliable persistent Agents with durable inbox/outbox and explicit delivery outcomes
 3. Run context, evidence gates, and atomic reservations
 4. Durable workflows over mesh CAS
 5. Context QoS
@@ -46,7 +63,7 @@ Do not mix an upstream refresh with behavior changes. Preserve the upstream MIT 
 - Failure states remain distinct: blocked, failed, stale, rejected, timed out, dead-lettered, and budget-exhausted.
 - Do not add dependencies without explicit user approval.
 - Do not hand-edit `dist/`; build it from `src/`.
-- Keep shared-workspace writers serialized or isolated in worktrees.
+- Keep shared-workspace writers serialized. Installed Pi policy blocks branch and worktree creation in this checkout.
 
 ## Verification
 
@@ -67,4 +84,4 @@ Tests run against `src/`, while Pi loads `dist/`, so a fresh build is mandatory 
 
 ## Commits and publication
 
-Use conventional commits such as `feat(prewalk): ...`, `fix(actors): ...`, and `chore(release): ...`. Keep unrelated work out of commits. Do not push, publish, release, or change repository visibility unless the user requests it.
+Use conventional commits such as `feat(prewalk): ...`, `fix(agents): ...`, and `chore(release): ...`. Keep unrelated work out of commits. Do not push, publish, release, or change repository visibility unless the user requests it.

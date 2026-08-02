@@ -5,7 +5,7 @@
 
 ## Context
 
-Ultra Fabric begins as a fork of pi-fabric 0.31.1. Upstream is moving quickly, particularly in Prewalk, actors, compaction, and the TUI. Those are also the areas Ultra intends to strengthen. A broad rewrite would make every upstream release expensive to absorb and would hide generally useful correctness fixes inside fork-only architecture.
+Ultra Fabric begins as a fork of pi-fabric 0.31.1. Upstream is moving quickly, particularly in Prewalk, persistent Agents, compaction, and the TUI. Those are also the areas Ultra intends to strengthen. A broad rewrite would make every upstream release expensive to absorb and would hide generally useful correctness fixes inside fork-only architecture.
 
 The fork needs two different kinds of change:
 

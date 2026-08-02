@@ -20,7 +20,7 @@ const identity: MeshIdentity = {
 const participant = (id: string): FabricParticipantInfo => ({
   format: 1,
   id,
-  kind: "actor",
+  kind: "persistentAgent",
   rootId: identity.id,
   ownerHostId: identity.id,
   ownerIdentityId: identity.id,
@@ -48,7 +48,7 @@ describe("MeshProvider membership", () => {
     const source: FabricParticipantSource = {
       list: () => [],
       get: () => undefined,
-      self: () => participant("actor:self"),
+      self: () => participant("persistentAgent:self"),
       peers: () => [],
       async refresh() {},
       scheduleRefresh() {},
@@ -79,11 +79,11 @@ describe("MeshProvider membership", () => {
   it("uses the unified participant source with scope and kind filters", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-mesh-provider-"));
     roots.push(root);
-    const list = vi.fn(() => [participant("actor:a"), participant("actor:b")]);
+    const list = vi.fn(() => [participant("persistentAgent:a"), participant("persistentAgent:b")]);
     const source: FabricParticipantSource = {
       list,
       get: () => undefined,
-      self: () => participant("actor:self"),
+      self: () => participant("persistentAgent:self"),
       peers: () => [],
       async refresh() {},
       scheduleRefresh() {},
@@ -97,13 +97,17 @@ describe("MeshProvider membership", () => {
     await expect(
       provider.invoke(
         "members",
-        { scope: "lineage", kinds: ["actor"], includeStale: true, limit: 1 },
+        { scope: "lineage", kinds: ["agent"], includeStale: true, limit: 1 },
         context,
       ),
-    ).resolves.toMatchObject([{ id: "actor:a", kind: "actor" }]);
+    ).resolves.toMatchObject([{
+      id: "persistentAgent:a",
+      kind: "agent",
+      lifecycle: "persistent",
+    }]);
     expect(list).toHaveBeenCalledWith({
       scope: "lineage",
-      kinds: ["actor"],
+      kinds: ["agent", "persistentAgent"],
       includeStale: true,
     });
     await expect(provider.invoke("self", {}, context)).resolves.toEqual(identity);

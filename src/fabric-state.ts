@@ -2,12 +2,12 @@ import { getAgentDir, type ExtensionContext } from "@earendil-works/pi-coding-ag
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 import { FabricActivityStore } from "./activity/store.js";
-import { ActorManager } from "./actors/manager.js";
-import { GlobalActorRegistry } from "./actors/global-registry.js";
-import { buildActorContext } from "./actors/context.js";
-import { actorDeliveryNotice } from "./actors/delivery-policy.js";
-import { prepareFabricActorHostPayload } from "./actors/host-event-payload.js";
-import type { FabricActorHostEvent, FabricActorInfo } from "./actors/types.js";
+import { PersistentAgentRuntime } from "./agents/persistent/manager.js";
+import { AgentTemplateRegistry } from "./agents/persistent/template-registry.js";
+import { buildPersistentAgentContext } from "./agents/persistent/context.js";
+import { persistentAgentDeliveryNotice } from "./agents/persistent/delivery-policy.js";
+import { prepareFabricPersistentAgentHostPayload } from "./agents/persistent/host-event-payload.js";
+import type { FabricPersistentAgentHostEvent, FabricPersistentAgentInfo } from "./agents/persistent/types.js";
 import { CapturedToolCatalog } from "./capture/catalog.js";
 import type { ContextQosReport } from "./context/qos.js";
 import {
@@ -78,7 +78,7 @@ const BACKGROUND_COMPLETION_MAX_CHARS = 8_000;
 const escapeXmlText = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-const hasActorDelivery = (entries: unknown[], messageId: string): boolean =>
+const hasPersistentAgentDelivery = (entries: unknown[], messageId: string): boolean =>
   entries.some((entry) => {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
     const candidate = entry as {
@@ -88,7 +88,7 @@ const hasActorDelivery = (entries: unknown[], messageId: string): boolean =>
     };
     if (
       candidate.type !== "custom_message" ||
-      candidate.customType !== "pi-fabric-actor" ||
+      candidate.customType !== "pi-fabric-persistentAgent" ||
       typeof candidate.details !== "object" ||
       candidate.details === null ||
       Array.isArray(candidate.details)
@@ -124,8 +124,8 @@ const agentParticipantRecords = (
     const observedAt = firstSeen.get(record.id) ?? Date.now();
     firstSeen.set(record.id, observedAt);
     const run = isAgentRunRecord(record) ? record : undefined;
-    const parent = record.actorId ?? semanticParentId;
-    if (!record.actorId) {
+    const parent = record.persistentAgentId ?? semanticParentId;
+    if (!record.persistentAgentId) {
       const active = record.status === "queued" || record.status === "running";
       participants.push({
         format: 1,
@@ -161,34 +161,34 @@ const agentParticipantRecords = (
   return participants;
 };
 
-const actorParticipantRecord = (
-  actor: FabricActorInfo,
+const persistentAgentParticipantRecord = (
+  persistentAgent: FabricPersistentAgentInfo,
   rootId: string,
   ownerHostId: string,
   ownerIdentityId: string,
   parentId: string,
 ): FabricParticipantRecord => ({
   format: 1,
-  id: actor.id,
-  kind: "actor",
+  id: persistentAgent.id,
+  kind: "persistentAgent",
   rootId,
   ownerHostId,
   ownerIdentityId,
   parentId,
-  name: actor.name,
-  status: actor.status,
-  runner: actor.runner,
+  name: persistentAgent.name,
+  status: persistentAgent.status,
+  runner: persistentAgent.runner,
   transport: "host",
   capabilities: [
-    ...(actor.status === "stopped" ? [] : (["steer", "followUp", "stop"] as const)),
-    ...(actor.runner === "pi" && actor.extensions !== false ? (["fabric"] as const) : []),
+    ...(persistentAgent.status === "stopped" ? [] : (["steer", "followUp", "stop"] as const)),
+    ...(persistentAgent.runner === "pi" && persistentAgent.extensions !== false ? (["fabric"] as const) : []),
   ],
-  ...(actor.model ? { model: actor.model } : {}),
-  ...(actor.thinking ? { thinking: actor.thinking } : {}),
-  startedAt: actor.createdAt,
-  updatedAt: actor.updatedAt,
-  actorQueued: actor.queued,
-  actorMessages: actor.messages,
+  ...(persistentAgent.model ? { model: persistentAgent.model } : {}),
+  ...(persistentAgent.thinking ? { thinking: persistentAgent.thinking } : {}),
+  startedAt: persistentAgent.createdAt,
+  updatedAt: persistentAgent.updatedAt,
+  persistentAgentQueued: persistentAgent.queued,
+  persistentAgentMessages: persistentAgent.messages,
   controlProtocol: "v1",
 });
 
@@ -197,8 +197,6 @@ export class FabricState {
   #config: FabricConfig | undefined;
   #execution: FabricExecutionService | undefined;
   #agents: AgentManager | undefined;
-  #actors: ActorManager | undefined;
-  #globalActors: GlobalActorRegistry | undefined;
   #mesh: MeshStore | undefined;
   #workflows: DurableWorkflowStore | undefined;
   #outcomes: FabricOutcomeStore | undefined;
@@ -276,14 +274,12 @@ export class FabricState {
     return this.#agents;
   }
 
-  get actors(): ActorManager {
-    if (!this.#actors) throw new Error("Pi Fabric has not initialized");
-    return this.#actors;
+  get persistentAgents(): PersistentAgentRuntime {
+    return this.agents.persistent;
   }
 
-  get globalActors(): GlobalActorRegistry {
-    if (!this.#globalActors) throw new Error("Pi Fabric has not initialized");
-    return this.#globalActors;
+  get templates(): AgentTemplateRegistry {
+    return this.agents.templates;
   }
 
   get mesh(): MeshStore {
@@ -388,7 +384,7 @@ export class FabricState {
     if (capturedToolsProvider) this.#registry.register(capturedToolsProvider);
     const sessionId = context.sessionManager.getSessionId();
     const { identity, mainAgentId } = resolveFabricIdentity(sessionId);
-    const ownsPersistentActorRegistry =
+    const ownsPersistentAgentRegistry =
       identity.kind === "main" &&
       !enforceSchema &&
       projectTrusted &&
@@ -429,7 +425,7 @@ export class FabricState {
     this.#control = new FabricControlPlane(this.#mesh, identity, {
       enabled: this.#config.mesh.enabled,
       hostId,
-      pollMs: this.#config.mesh.actorPollMs,
+      pollMs: this.#config.mesh.persistentAgentPollMs,
     });
     if (this.#config.mesh.enabled) {
       this.#registry.register(new MeshProvider(this.#mesh, identity, this.#participants));
@@ -476,6 +472,7 @@ export class FabricState {
       mainAgentId,
       meshRoot,
       projectRoot,
+      projectTrusted,
       hostId,
       identityId: identity.id,
       retention: this.#config.retention,
@@ -516,33 +513,33 @@ export class FabricState {
         );
       },
     });
-    const canManageActor = (actorId: string): boolean | undefined => {
-      const participant = this.#participants?.get(actorId);
+    const canManagePersistentAgent = (persistentAgentId: string): boolean | undefined => {
+      const participant = this.#participants?.get(persistentAgentId);
       return participant ? participant.ownerHostId === hostId : undefined;
     };
-    this.#actors = new ActorManager(
+    const persistentAgents = new PersistentAgentRuntime(
       sessionId,
       identity,
       this.#mesh,
       enforceSchema ? { ...this.#config.mesh, enabled: false } : this.#config.mesh,
       this.#agents,
-      ({ actor, message, delivery, triggerTurn }) => {
+      ({ persistentAgent, message, delivery, triggerTurn }) => {
         const text = message.text ?? "";
         if (!text) return;
-        if (hasActorDelivery(context.sessionManager.getBranch(), message.id)) return;
-        const deliveryNotice = actorDeliveryNotice(delivery, triggerTurn);
+        if (hasPersistentAgentDelivery(context.sessionManager.getBranch(), message.id)) return;
+        const deliveryNotice = persistentAgentDeliveryNotice(delivery, triggerTurn);
         this.pi.sendMessage(
           {
-            customType: "pi-fabric-actor",
+            customType: "pi-fabric-persistentAgent",
             content: [
-              `<fabric-actor name=${JSON.stringify(actor.name)} id=${JSON.stringify(actor.id)}>\n${escapeXmlText(text)}\n</fabric-actor>`,
+              `<fabric-persistentAgent name=${JSON.stringify(persistentAgent.name)} id=${JSON.stringify(persistentAgent.id)}>\n${escapeXmlText(text)}\n</fabric-persistentAgent>`,
               deliveryNotice,
             ]
               .filter((line): line is string => Boolean(line))
               .join("\n"),
             display: true,
             details: {
-              actor,
+              persistentAgent,
               message,
               delivery: { mode: delivery, triggerTurn, passive: Boolean(deliveryNotice) },
             },
@@ -550,22 +547,22 @@ export class FabricState {
           { deliverAs: delivery, triggerTurn },
         );
       },
-      ownsPersistentActorRegistry
+      ownsPersistentAgentRegistry
         ? {
-            actorRoot:
-              this.#config.mesh.actorScope === "session"
-                ? path.join(meshRoot, "actors", sessionId)
-                : path.join(meshRoot, "actors"),
+            persistentAgentRoot:
+              this.#config.mesh.persistentAgentScope === "session"
+                ? path.join(meshRoot, "persistentAgents", sessionId)
+                : path.join(meshRoot, "persistentAgents"),
             persistent: true,
             mainAgent,
-            canManageActor,
+            canManagePersistentAgent,
             retention: this.#config.retention,
             ...(this.#outcomes ? { outcomeSink: this.#outcomes } : {}),
           }
         : {
             persistent: false,
             mainAgent,
-            canManageActor,
+            canManagePersistentAgent,
             retention: this.#config.retention,
             ...(this.#outcomes ? { outcomeSink: this.#outcomes } : {}),
           },
@@ -576,7 +573,7 @@ export class FabricState {
       this.#participants,
       {
         enabled: this.#config.mesh.enabled && !enforceSchema,
-        pollMs: this.#config.mesh.actorPollMs,
+        pollMs: this.#config.mesh.persistentAgentPollMs,
         maxReadEvents: this.#config.mesh.maxReadEvents,
       },
       async (subscription, event) => {
@@ -584,7 +581,8 @@ export class FabricState {
         await this.#agentsProvider.deliverLifecycle(subscription, event);
       },
     );
-    this.#globalActors = new GlobalActorRegistry(getAgentDir(), this.#config.mesh.maxEventBytes);
+    const agentTemplates = new AgentTemplateRegistry(getAgentDir(), this.#config.mesh.maxEventBytes);
+    this.#agents.attachPersistentLifecycle(persistentAgents, agentTemplates);
     const firstSeenAgents = new Map<string, number>();
     if (mainAgent.local) {
       this.#participants.registerSource(() => [
@@ -602,16 +600,14 @@ export class FabricState {
       ),
     );
     this.#participants.registerSource(() =>
-      this.#actors!.list().map((actor) =>
-        actorParticipantRecord(actor, mainAgentId, hostId, identity.id, identity.id),
+      this.#agents!.persistent.list().map((persistentAgent) =>
+        persistentAgentParticipantRecord(persistentAgent, mainAgentId, hostId, identity.id, identity.id),
       ),
     );
     this.#agents.subscribeUi(() => this.#participants?.scheduleRefresh());
-    this.#actors.subscribe(() => this.#participants?.scheduleRefresh());
+    this.#agents.persistent.subscribe(() => this.#participants?.scheduleRefresh());
     this.#agentsProvider = new AgentsProvider(
       this.#agents,
-      this.#actors,
-      this.#globalActors,
       mainAgent,
       this.#participants,
       this.#control,
@@ -732,40 +728,40 @@ export class FabricState {
   }
 
   noteMainActivity(context: ExtensionContext): void {
-    this.#actors?.noteMainActivity(context.isIdle());
+    this.#agents?.persistent.noteMainActivity(context.isIdle());
     this.#participants?.scheduleRefresh();
   }
 
   dispatchHostEvent(
-    event: FabricActorHostEvent,
+    event: FabricPersistentAgentHostEvent,
     payload: unknown,
     context: ExtensionContext,
   ): number {
     if (
-      !this.#actors ||
+      !this.#agents ||
       !this.#config?.mesh.enabled ||
       this.#config.schema.mode === "enforce"
     ) return 0;
     const idle = context.isIdle();
-    if (!this.#actors.observeHostEvent(event, idle)) return 0;
+    if (!this.#agents.persistent.observeHostEvent(event, idle)) return 0;
     const branch = context.sessionManager.getBranch();
-    const { digest, transcript } = buildActorContext(
+    const { digest, transcript } = buildPersistentAgentContext(
       branch as unknown[],
-      this.#config.mesh.actorContextEntries,
+      this.#config.mesh.persistentAgentContextEntries,
       this.#config.mesh.eventContextChars,
     );
-    const prepared = prepareFabricActorHostPayload(
+    const prepared = prepareFabricPersistentAgentHostPayload(
       payload,
       this.#config.mesh.eventContextChars,
     );
-    const preparedContext = prepareFabricActorHostPayload(
+    const preparedContext = prepareFabricPersistentAgentHostPayload(
       { digest, transcript },
       this.#config.mesh.eventContextChars,
     ).payload;
     const safeContext = isPlainObject(preparedContext)
       ? preparedContext
       : { digest: {}, transcript: [String(preparedContext)] };
-    return this.#actors.dispatchObservedHostEvent(
+    return this.#agents.persistent.dispatchObservedHostEvent(
       event,
       {
         event,
@@ -851,8 +847,6 @@ export class FabricState {
     this.#config = undefined;
     this.#execution = undefined;
     this.#agents = undefined;
-    this.#actors = undefined;
-    this.#globalActors = undefined;
     this.#mesh = undefined;
     this.#workflows = undefined;
     this.#outcomes = undefined;
@@ -873,7 +867,7 @@ export class FabricState {
   }
 
   // Publish a best-effort mesh event to the durable `fabric.compact` topic so
-  // other roots, agents, and actors can observe compaction transitions.
+  // other roots, agents, and persistentAgents can observe compaction transitions.
   // Activity-only sessions (mesh disabled) silently skip this.
   #publishCompactEvent(kind: string, data: CompactPendingIntent | CompactLastCommit): void {
     if (!this.#mesh || !this.#identity || !this.#config?.mesh.enabled) return;
@@ -904,7 +898,6 @@ export class FabricState {
     this.#registry = undefined;
     this.#execution = undefined;
     this.#agents = undefined;
-    this.#actors = undefined;
     this.#mesh = undefined;
     this.#workflows = undefined;
     this.#outcomes = undefined;

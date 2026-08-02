@@ -510,27 +510,27 @@ describe("expensive skill program behavior", () => {
     ]);
   });
 
-  it("preserves an ambient actor's extension policy on reuse", async () => {
+  it("preserves an ambient persistent agent's extension policy on reuse", async () => {
     const calls: string[] = [];
     const existing = {
-      id: "actor-1", name: "advisor", status: "idle", runner: "pi",
+      id: "persistentAgent-1", name: "advisor", role: "advisor", status: "idle", runner: "pi",
       events: ["turn_end"], topics: [], delivery: "steer",
       responseMode: "directive", triggerTurn: false, coalesce: true,
       tools: [], extensions: false,
     };
     const result = await runProgram("skills/fabric-ambient/references/setup.md", {
       π: {
-        name: "advisor", instructions: "observe", events: JSON.stringify(["turn_end"]),
+        name: "advisor", role: "advisor", instructions: "observe", events: JSON.stringify(["turn_end"]),
         triggerTurn: "false", model: "",
       },
       tools: { models: async () => [] },
       agents: {
-        actors: async () => [existing],
+        list: async () => [existing],
         setInstructions: async () => { calls.push("instructions"); },
         setTools: async () => { calls.push("tools"); },
         setEvents: async () => { calls.push("events"); },
         setDeliveryPolicy: async () => { calls.push("delivery"); },
-        actorStatus: async () => ({ ...existing, tools: ["read", "grep", "find", "ls"] }),
+        status: async () => ({ ...existing, tools: ["read", "grep", "find", "ls"] }),
       },
     });
 
@@ -538,50 +538,50 @@ describe("expensive skill program behavior", () => {
     expect(calls).toContain("tools");
   });
 
-  it("omits an extension override when creating an ambient actor", async () => {
+  it("omits an extension override when creating an ambient persistent agent", async () => {
     let request: Record<string, unknown> | undefined;
-    const actor = { id: "actor-2", name: "advisor", status: "idle" };
+    const persistentAgent = { id: "persistentAgent-2", name: "advisor", role: "advisor", status: "idle" };
     const result = await runProgram("skills/fabric-ambient/references/setup.md", {
       π: {
-        name: "advisor", instructions: "observe", events: JSON.stringify(["turn_end"]),
+        name: "advisor", role: "advisor", instructions: "observe", events: JSON.stringify(["turn_end"]),
         triggerTurn: "false", model: "",
       },
       tools: { models: async () => [] },
       agents: {
-        actors: async () => [],
-        create: async (args: Record<string, unknown>) => { request = args; return actor; },
-        actorStatus: async () => actor,
+        list: async () => [],
+        create: async (args: Record<string, unknown>) => { request = args; return persistentAgent; },
+        status: async () => persistentAgent,
       },
     });
 
-    expect(result).toMatchObject({ started: true, actor });
-    expect(request).toBeDefined();
+    expect(result).toMatchObject({ started: true, agent: persistentAgent });
+    expect(request).toMatchObject({ role: "advisor" });
     expect(request).not.toHaveProperty("extensions");
   });
 
 
-  it("does not mutate a running ambient actor", async () => {
+  it("does not mutate a running ambient persistent agent", async () => {
     let setterCalls = 0;
     const existing = {
-      id: "actor-running", name: "advisor", status: "running", runner: "pi",
+      id: "persistentAgent-running", name: "advisor", role: "advisor", status: "running", runner: "pi",
       events: ["turn_end"], topics: [], delivery: "steer", responseMode: "directive",
       triggerTurn: false, coalesce: true, tools: ["read", "grep", "find", "ls"],
     };
     const result = await runProgram("skills/fabric-ambient/references/setup.md", {
       π: {
-        name: "advisor", instructions: "observe", events: JSON.stringify(["turn_end"]),
+        name: "advisor", role: "advisor", instructions: "observe", events: JSON.stringify(["turn_end"]),
         triggerTurn: "false", model: "",
       },
       tools: { models: async () => [] },
       agents: {
-        actors: async () => [existing],
+        list: async () => [existing],
         setInstructions: async () => { setterCalls += 1; },
         setTools: async () => { setterCalls += 1; },
         setEvents: async () => { setterCalls += 1; },
         setDeliveryPolicy: async () => { setterCalls += 1; },
       },
     });
-    expect(result).toMatchObject({ reused: false, actor: existing });
+    expect(result).toMatchObject({ reused: false, agent: existing });
     expect((result.warnings as string[])[0]).toContain("wait until idle");
     expect(setterCalls).toBe(0);
   });

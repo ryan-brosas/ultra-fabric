@@ -6,7 +6,7 @@ import {
   FABRIC_RUN_ROOT_PREFIX,
   markRunRootActive,
   markRunRootClosed,
-  pruneActorRunArchives,
+  prunePersistentAgentRunArchives,
   sweepTempRunRoots,
 } from "../src/storage/retention.js";
 
@@ -84,10 +84,10 @@ describe("temporal retention", () => {
     markRunRootActive(runRoot, 1);
     const expired = path.join(runRoot, "expired");
     const fresh = path.join(runRoot, "fresh");
-    const actorTemp = path.join(runRoot, "actor-temp");
+    const persistentAgentTemp = path.join(runRoot, "persistentAgent-temp");
     writeStatus(expired, { status: "completed", finishedAt: DAY });
     writeStatus(fresh, { status: "completed", finishedAt: 2 * DAY });
-    writeStatus(actorTemp, { status: "failed", actorId: "actor-1", finishedAt: DAY });
+    writeStatus(persistentAgentTemp, { status: "failed", persistentAgentId: "persistentAgent-1", finishedAt: DAY });
     markRunRootClosed(runRoot, 2 * DAY);
 
     const result = sweepTempRunRoots({
@@ -97,13 +97,13 @@ describe("temporal retention", () => {
       now: 2 * DAY + 1,
     });
 
-    expect(result.removedRuns.sort()).toEqual([actorTemp, expired].sort());
+    expect(result.removedRuns.sort()).toEqual([persistentAgentTemp, expired].sort());
     expect(fs.existsSync(expired)).toBe(false);
-    expect(fs.existsSync(actorTemp)).toBe(false);
+    expect(fs.existsSync(persistentAgentTemp)).toBe(false);
     expect(fs.existsSync(fresh)).toBe(true);
   });
 
-  it("expires actor archives after seven days while preserving the latest run", () => {
+  it("expires persistentAgent archives after seven days while preserving the latest run", () => {
     const root = temporaryDirectory();
     const runsDirectory = path.join(root, "runs");
     const expired = path.join(runsDirectory, "expired");
@@ -113,7 +113,7 @@ describe("temporal retention", () => {
     writeStatus(latest, { status: "completed", finishedAt: DAY });
     writeStatus(fresh, { status: "completed", finishedAt: 8 * DAY });
 
-    const removed = pruneActorRunArchives({
+    const removed = prunePersistentAgentRunArchives({
       runsDirectory,
       latestRunId: "latest",
       retentionMs: 7 * DAY,

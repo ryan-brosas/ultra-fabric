@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import type { CapturedToolCatalog } from "../capture/catalog.js";
-import type { FabricActorHostEvent } from "../actors/types.js";
+import type { FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import type { FabricState } from "../fabric-state.js";
 import {
   PREWALK_ARMED_MESSAGE_TYPE,
@@ -106,7 +106,7 @@ const resolvePrewalkModel = async (
 export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps): void {
   const { state, fabricUi, capturedTools, applyFabricMode, suspendToolCapture } = deps;
   pi.registerCommand("fabric", {
-    description: "Open Fabric, arm prewalk, reload, or manage agents and actors",
+    description: "Open Fabric, arm prewalk, reload, or manage agents across both lifecycles",
     getArgumentCompletions: (argumentPrefix: string): AutocompleteItem[] | null => {
       const subcommands = [
         "status",
@@ -120,7 +120,6 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         "leases",
         "outcomes",
         "agents",
-        "actors",
         "messages",
         "clear-messages",
         "events",
@@ -156,7 +155,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       if (subcommand === "import") {
         const items: AutocompleteItem[] = [];
         try {
-          for (const template of state.globalActors.list()) {
+          for (const template of state.templates.list()) {
             items.push({
               value: template.name,
               label: template.name,
@@ -173,15 +172,15 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         if (subcommand === "export") {
           const items: AutocompleteItem[] = [];
           try {
-            for (const actor of state.actors.list()) {
+            for (const persistentAgent of state.persistentAgents.list()) {
               items.push({
-                value: actor.name,
-                label: actor.name,
-                description: `${actor.status} ${actor.runner} actor · ${actor.id.slice(0, 8)}`,
+                value: persistentAgent.name,
+                label: persistentAgent.name,
+                description: `${persistentAgent.status} ${persistentAgent.runner} persistent Agent · ${persistentAgent.id.slice(0, 8)}`,
               });
             }
           } catch {
-            /* actors not initialized */
+            /* persistentAgents not initialized */
           }
           const filtered = items.filter((item) => item.value.startsWith(idPrefix));
           return filtered.length > 0 ? filtered : null;
@@ -190,15 +189,15 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       }
       const items: AutocompleteItem[] = [];
       try {
-        for (const actor of state.actors.list()) {
+        for (const persistentAgent of state.persistentAgents.list()) {
           items.push({
-            value: actor.name,
-            label: actor.name,
-            description: `${actor.status} ${actor.runner} actor · ${actor.id.slice(0, 8)}`,
+            value: persistentAgent.name,
+            label: persistentAgent.name,
+            description: `${persistentAgent.status} ${persistentAgent.runner} persistent Agent · ${persistentAgent.id.slice(0, 8)}`,
           });
         }
       } catch {
-        /* actors not initialized */
+        /* persistentAgents not initialized */
       }
       try {
         for (const agent of state.agents.list()) {
@@ -478,13 +477,13 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         const qos = state.contextQosTelemetry;
         const lines: string[] = [];
         try {
-          const budgets = state.actors.telemetry();
+          const budgets = state.persistentAgents.telemetry();
           lines.push(
-            `actors: ${budgets.actors} tracked · ${budgets.open} open · ${budgets.rejectedActivations} rejected · ${budgets.queueRejected} queue-rejected`,
+            `persistent agents: ${budgets.persistentAgents} tracked · ${budgets.open} open · ${budgets.rejectedActivations} rejected · ${budgets.queueRejected} queue-rejected`,
             `dead letters: ${budgets.activationDeadLetters} activation · ${budgets.deliveryDeadLetters} delivery`,
           );
         } catch {
-          lines.push("actors: unavailable");
+          lines.push("persistent agents: unavailable");
         }
         lines.push(
           qos
@@ -519,45 +518,31 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         return;
       }
       if (command === "agents") {
-        const agents = state.agents.list();
-        context.ui.notify(
-          agents.length > 0
-            ? agents
-                .map(
-                  (agent) =>
-                    `${agent.id.slice(0, 8)} ${agent.status} ${agent.runner}/${agent.transport} — ${agent.name}`,
-                )
-                .join("\n")
-            : "No Fabric agents",
-          "info",
-        );
-        return;
-      }
-      if (command === "actors") {
-        const actors = state.actors.list();
-        context.ui.notify(
-          actors.length > 0
-            ? actors
-                .map(
-                  (actor) =>
-                    `${actor.id.slice(0, 8)} ${actor.status} ${actor.runner} q:${actor.queued} — ${actor.name}`,
-                )
-                .join("\n")
-            : "No Fabric actors",
-          "info",
-        );
+        const oneShot = state.agents.list();
+        const persistent = state.persistentAgents.list();
+        const rows = [
+          ...oneShot.map(
+            (agent) =>
+              `one-shot   ${agent.id.slice(0, 8)} ${agent.status} ${agent.runner}/${agent.transport} — ${agent.name}`,
+          ),
+          ...persistent.map(
+            (agent) =>
+              `persistent ${agent.id.slice(0, 8)} ${agent.status} ${agent.runner} q:${agent.queued} — ${agent.name}`,
+          ),
+        ];
+        context.ui.notify(rows.length > 0 ? rows.join("\n") : "No Fabric agents", "info");
         return;
       }
       if (command === "messages") {
         const id = argumentsList[0];
         if (!id) {
-          context.ui.notify("Usage: /fabric messages <actor-id>", "warning");
+          context.ui.notify("Usage: /fabric messages <persistent-agent-id>", "warning");
           return;
         }
         try {
-          const actor = state.actors.status(id);
-          const messages = state.actors.messages(actor.id, 20);
-          const shortId = actor.id.slice(0, 8);
+          const persistentAgent = state.persistentAgents.status(id);
+          const messages = state.persistentAgents.messages(persistentAgent.id, 20);
+          const shortId = persistentAgent.id.slice(0, 8);
           const body =
             messages.length > 0
               ? messages
@@ -571,8 +556,8 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
                     return `${message.direction === "in" ? "→" : "←"} ${message.source}${runTag}: ${summary}${usageTag}`;
                   })
                   .join("\n")
-              : `No messages for ${actor.name}`;
-          const footer = `\nInspect LLM I/O: /fabric log ${shortId} · Export: /fabric export-log ${actor.name}`;
+              : `No messages for ${persistentAgent.name}`;
+          const footer = `\nInspect LLM I/O: /fabric log ${shortId} · Export: /fabric export-log ${persistentAgent.name}`;
           context.ui.notify(`${body}${footer}`, "info");
         } catch (error) {
           context.ui.notify(error instanceof Error ? error.message : String(error), "error");
@@ -602,9 +587,9 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           }
         }
         try {
-          const actor = state.actors.status(id);
-          const log = state.actors.readLog(actor.id, { type, lines, ...(runId ? { runId } : {}) });
-          const parts: string[] = [`Actor ${actor.name} · ${log.sessionFile}`];
+          const persistentAgent = state.persistentAgents.status(id);
+          const log = state.persistentAgents.readLog(persistentAgent.id, { type, lines, ...(runId ? { runId } : {}) });
+          const parts: string[] = [`Persistent agent ${persistentAgent.name} · ${log.sessionFile}`];
           if (log.session.length > 0) {
             parts.push(`── session (last ${log.session.length} lines) ──`);
             for (const line of log.session) parts.push(summarizeLogLine(line.parsed ?? line.raw));
@@ -621,7 +606,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
             );
           }
           context.ui.notify(
-            parts.length > 1 ? truncateMiddle(parts.join("\n"), 8000) : `No log found for ${actor.name}`,
+            parts.length > 1 ? truncateMiddle(parts.join("\n"), 8000) : `No log found for ${persistentAgent.name}`,
             "info",
           );
         } catch (error) {
@@ -641,14 +626,14 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
             destArg || path.join("fabric-logs", `export-${Date.now()}`),
           );
           fs.mkdirSync(dest, { recursive: true });
-          const actor = state.actors
+          const persistentAgent = state.persistentAgents
             .list()
             .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
           let label: string;
           let copied: string[] = [];
-          if (actor) {
-            const full = state.actors.status(actor.id);
-            label = actor.name;
+          if (persistentAgent) {
+            const full = state.persistentAgents.status(persistentAgent.id);
+            label = persistentAgent.name;
             if (full.sessionFile && fs.existsSync(full.sessionFile)) {
               fs.copyFileSync(full.sessionFile, path.join(dest, "session.jsonl"));
               copied.push("session.jsonl");
@@ -679,13 +664,13 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       if (command === "clear-messages") {
         const id = argumentsList[0];
         if (!id) {
-          context.ui.notify("Usage: /fabric clear-messages <actor-id>", "warning");
+          context.ui.notify("Usage: /fabric clear-messages <persistent-agent-id>", "warning");
           return;
         }
         try {
-          const actor = state.actors.status(id);
-          await state.actors.clearMessages(actor.id);
-          context.ui.notify(`Cleared message history for ${actor.name}`, "info");
+          const persistentAgent = state.persistentAgents.status(id);
+          await state.persistentAgents.clearMessages(persistentAgent.id);
+          context.ui.notify(`Cleared message history for ${persistentAgent.name}`, "info");
         } catch (error) {
           context.ui.notify(error instanceof Error ? error.message : String(error), "error");
         }
@@ -694,15 +679,15 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       if (command === "events") {
         const id = argumentsList[0];
         if (!id) {
-          context.ui.notify("Usage: /fabric events <actor-id> [event...]", "warning");
+          context.ui.notify("Usage: /fabric events <persistent-agent-id> [event...]", "warning");
           return;
         }
         try {
-          const actor = state.actors.status(id);
-          const events = argumentsList.slice(1) as FabricActorHostEvent[];
-          await state.actors.setEvents(actor.id, events);
+          const persistentAgent = state.persistentAgents.status(id);
+          const events = argumentsList.slice(1) as FabricPersistentAgentHostEvent[];
+          await state.persistentAgents.setEvents(persistentAgent.id, events);
           context.ui.notify(
-            `Set ${actor.name} events: ${events.join(", ") || "(none)"}`,
+            `Set ${persistentAgent.name} events: ${events.join(", ") || "(none)"}`,
             "info",
           );
         } catch (error) {
@@ -716,17 +701,17 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           context.ui.notify("Usage: /fabric stop <id>", "warning");
           return;
         }
-        const actor = state.actors
+        const persistentAgent = state.persistentAgents
           .list()
           .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
-        if (actor) {
-          await state.actors.stop(actor.id);
-          context.ui.notify(`Stopped Fabric actor ${actor.id.slice(0, 8)}`, "info");
+        if (persistentAgent) {
+          await state.persistentAgents.stop(persistentAgent.id);
+          context.ui.notify(`Stopped persistent Fabric agent ${persistentAgent.id.slice(0, 8)}`, "info");
           return;
         }
         const agent = state.agents.list().find((candidate) => candidate.id.startsWith(id));
         if (!agent) {
-          context.ui.notify(`Unknown Fabric actor or agent: ${id}`, "error");
+          context.ui.notify(`Unknown Fabric agent: ${id}`, "error");
           return;
         }
         await state.agents.stop(agent.id);
@@ -739,17 +724,17 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           context.ui.notify("Usage: /fabric remove <id>", "warning");
           return;
         }
-        const actor = state.actors
+        const persistentAgent = state.persistentAgents
           .list()
           .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
-        if (actor) {
-          await state.actors.remove(actor.id);
-          context.ui.notify(`Removed Fabric actor ${actor.id.slice(0, 8)} (${actor.name})`, "info");
+        if (persistentAgent) {
+          await state.persistentAgents.remove(persistentAgent.id);
+          context.ui.notify(`Removed persistent Fabric agent ${persistentAgent.id.slice(0, 8)} (${persistentAgent.name})`, "info");
           return;
         }
         const agent = state.agents.list().find((candidate) => candidate.id.startsWith(id));
         if (!agent) {
-          context.ui.notify(`Unknown Fabric actor or agent: ${id}`, "error");
+          context.ui.notify(`Unknown Fabric agent: ${id}`, "error");
           return;
         }
         await state.agents.stop(agent.id);
@@ -770,13 +755,13 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         return;
       }
       if (command === "global") {
-        const templates = state.globalActors.list();
+        const templates = state.templates.list();
         context.ui.notify(
           templates.length > 0
             ? templates
                 .map((template) => `${template.id.slice(0, 8)} global ${template.runner} — ${template.name}`)
                 .join("\n")
-            : "No global Fabric actor templates",
+            : "No global Fabric agent templates",
           "info",
         );
         return;
@@ -784,20 +769,20 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       if (command === "import") {
         const key = argumentsList[0];
         if (!key) {
-          context.ui.notify("Usage: /fabric import <global-actor-name-or-id> [as <new-name>]", "warning");
+          context.ui.notify("Usage: /fabric import <agent-template-name-or-id> [as <new-name>]", "warning");
           return;
         }
         try {
-          const def = state.globalActors.resolve(key);
+          const def = state.templates.resolve(key);
           if (!def) {
-            context.ui.notify(`Unknown global actor: ${key}`, "error");
+            context.ui.notify(`Unknown Agent template: ${key}`, "error");
             return;
           }
           const asIndex = argumentsList.indexOf("as");
           const as =
             asIndex >= 0 && argumentsList[asIndex + 1] ? argumentsList[asIndex + 1] : undefined;
-          const actor = await state.actors.create(state.globalActors.toRequest(def, as));
-          context.ui.notify(`Imported global actor "${def.name}" as ${actor.name}`, "info");
+          const persistentAgent = await state.agents.importTemplate(def.id, as);
+          context.ui.notify(`Imported Agent template "${def.name}" as ${persistentAgent.name}`, "info");
         } catch (error) {
           context.ui.notify(error instanceof Error ? error.message : String(error), "error");
         }
@@ -807,20 +792,20 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         const id = argumentsList[0];
         const overwrite = argumentsList.includes("--overwrite") || argumentsList.includes("-f");
         if (!id) {
-          context.ui.notify("Usage: /fabric export <actor-id> [--overwrite]", "warning");
+          context.ui.notify("Usage: /fabric export <persistent-agent-id> [--overwrite]", "warning");
           return;
         }
         try {
-          const actor = state.actors
+          const persistentAgent = state.persistentAgents
             .list()
             .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
-          if (!actor) {
-            context.ui.notify(`Unknown Fabric actor: ${id}`, "error");
+          if (!persistentAgent) {
+            context.ui.notify(`Unknown persistent Fabric agent: ${id}`, "error");
             return;
           }
-          const def = state.actors.definition(actor.id);
-          const template = state.globalActors.create(def, overwrite);
-          context.ui.notify(`Exported "${template.name}" to global actors`, "info");
+          const def = state.persistentAgents.definition(persistentAgent.id);
+          const template = state.templates.create(def, overwrite);
+          context.ui.notify(`Exported "${template.name}" to global agent templates`, "info");
         } catch (error) {
           context.ui.notify(error instanceof Error ? error.message : String(error), "error");
         }
@@ -828,7 +813,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       }
       if (command !== "status") {
         context.ui.notify(
-          "Usage: /fabric [status|health|dashboard|settings|prewalk [task]|prewalk --retry|prewalk --off|reload|providers|captured [query]|leases [--release <id...>|--release-all]|outcomes|agents|actors|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>]",
+          "Usage: /fabric [status|health|dashboard|settings|prewalk [task]|prewalk --retry|prewalk --off|reload|providers|captured [query]|leases [--release <id...>|--release-all]|outcomes|agents|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>]",
           "warning",
         );
         return;
@@ -857,7 +842,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           config.fullCodeMode && config.capture.enabled
             ? `captured tools: ${capturedTools.size} · model visibility: ${config.capture.hideFromModel ? "hidden" : "visible"}`
             : "captured tools: disabled (native registry preserved)",
-          `actors: ${state.actors.list().length} · mesh: ${config.mesh.enabled ? state.mesh.root : "disabled"}`,
+          `persistent agents: ${state.persistentAgents.list().length} · mesh: ${config.mesh.enabled ? state.mesh.root : "disabled"}`,
           `admission: ${config.agents.requireAdmissionIntent ? "required" : "optional"} · profiles: ${
             Object.keys(config.agents.capabilityProfiles).length > 0
               ? Object.keys(config.agents.capabilityProfiles).join(", ")

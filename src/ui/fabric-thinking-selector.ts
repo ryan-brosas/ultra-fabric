@@ -27,7 +27,7 @@ const selectListTheme = (theme: Theme): SelectListTheme => ({
 
 export interface FabricThinkingSelectorOptions {
   theme: Theme;
-  /** The actor's current thinking level, or INHERIT_VALUE for "use the Fabric default". */
+  /** The persistent agent's current thinking level, or INHERIT_VALUE for "use the Fabric default". */
   currentValue: string;
   onSelect: (value: string) => void;
   onCancel: () => void;
@@ -36,7 +36,7 @@ export interface FabricThinkingSelectorOptions {
 }
 
 /**
- * A compact picker for an actor's thinking (reasoning effort) level. Pins an
+ * A compact picker for an persistentAgent's thinking (reasoning effort) level. Pins an
  * "Inherit" row on top (use the Fabric default) followed by the seven pi
  * thinking levels in order. The current value is marked with a trailing check.
  * Mirrors the look of FabricModelSelector but uses pi-tui's SelectList since
@@ -51,7 +51,7 @@ export class FabricThinkingSelector extends Container implements Focusable {
     super();
     this.onSelectCallback = options.onSelect;
     const headerText =
-      options.headerText ?? "Thinking level for this actor. Pick Inherit to use the Fabric default.";
+      options.headerText ?? "Thinking level for this persistent agent. Pick Inherit to use the Fabric default.";
     const inheritName = options.inheritName ?? "Use the Fabric default thinking level";
     const items: SelectItem[] = [
       {

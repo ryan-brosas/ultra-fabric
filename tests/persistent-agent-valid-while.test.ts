@@ -1,23 +1,23 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { ActorManager } from "../src/actors/manager.js";
-import { evaluateActorValidWhile } from "../src/actors/predicate.js";
-import type { FabricActorValidityFacts } from "../src/actors/types.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { PersistentAgentRuntime } from "../src/agents/persistent/manager.js";
+import { evaluatePersistentAgentValidWhile } from "../src/agents/persistent/predicate.js";
+import type { FabricPersistentAgentValidityFacts } from "../src/agents/persistent/types.js";
 import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
 import { MeshStore, type MeshIdentity } from "../src/mesh/store.js";
 import { QuickJsRuntime } from "../src/runtime/quickjs-runtime.js";
 import { AgentManager } from "../src/agents/manager.js";
 
 const roots: string[] = [];
-const managers: ActorManager[] = [];
+const managers: PersistentAgentRuntime[] = [];
 const agents: AgentManager[] = [];
 
 const waitFor = async (predicate: () => boolean): Promise<void> => {
   const deadline = Date.now() + 3_000;
   while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for actor");
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for persistentAgent");
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 };
@@ -33,17 +33,17 @@ const setup = () => {
   agents.push(worker);
   const identity: MeshIdentity = { id: "session:test", name: "main", kind: "main", sessionId: "test" };
   const deliveries: string[] = [];
-  const actors = new ActorManager(
+  const persistentAgents = new PersistentAgentRuntime(
     "test",
     identity,
     mesh,
-    { ...DEFAULT_FABRIC_CONFIG.mesh, actorPollMs: 20 },
+    { ...DEFAULT_FABRIC_CONFIG.mesh, persistentAgentPollMs: 20 },
     worker,
     ({ message }) => { if (message.text) deliveries.push(message.text); },
-    { actorRoot: path.join(root, "actors") },
+    { persistentAgentRoot: path.join(root, "persistentAgents") },
   );
-  managers.push(actors);
-  return { actors, deliveries };
+  managers.push(persistentAgents);
+  return { persistentAgents, deliveries, mesh };
 };
 
 afterEach(async () => {
@@ -52,7 +52,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-const hostFacts = (): FabricActorValidityFacts => ({
+const hostFacts = (): FabricPersistentAgentValidityFacts => ({
   activation: {
     kind: "hostEvent",
     id: "activation",
@@ -73,9 +73,9 @@ const hostFacts = (): FabricActorValidityFacts => ({
   },
 });
 
-describe("persistent actor validWhile", () => {
+describe("persistent persistentAgent validWhile", () => {
   it("evaluates synchronous regex predicates with a diagnostic verdict", async () => {
-    const result = await evaluateActorValidWhile(
+    const result = await evaluatePersistentAgentValidWhile(
       {
         version: 1,
         source: `({ activation, current }) => {
@@ -102,7 +102,7 @@ describe("persistent actor validWhile", () => {
       async (ref, args) => {
         expect(ref).toBe("agents.create");
         received = args;
-        return { id: "actor" };
+        return { id: "persistentAgent" };
       },
       { timeoutMs: 2_000, memoryLimitBytes: 64 * 1024 * 1024 },
     );
@@ -112,8 +112,8 @@ describe("persistent actor validWhile", () => {
   });
 
   it("invalidates a tool-error activation when Main advances before it runs", async () => {
-    const { actors, deliveries } = setup();
-    const actor = await actors.create({
+    const { persistentAgents, deliveries } = setup();
+    const persistentAgent = await persistentAgents.create({
       name: "advisor",
       instructions: "Advise.",
       events: ["tool_error"],
@@ -125,16 +125,46 @@ describe("persistent actor validWhile", () => {
         source: "({ activation, current }) => activation.kind !== 'hostEvent' || activation.mainRevision === current.mainRevision",
       },
     });
-    actors.dispatchHostEvent("tool_error", { signal: { idle: false } });
-    actors.noteMainActivity(false);
-    await waitFor(() => actors.status(actor.id).status === "idle");
+    persistentAgents.dispatchHostEvent("tool_error", { signal: { idle: false } });
+    persistentAgents.noteMainActivity(false);
+    await waitFor(() => persistentAgents.status(persistentAgent.id).status === "idle");
     expect(deliveries).toEqual([]);
-    expect(actors.messages(actor.id).at(-1)).toMatchObject({ action: "silent", stale: true });
+    expect(persistentAgents.messages(persistentAgent.id).at(-1)).toMatchObject({ action: "silent", stale: true });
   });
 
-  it("skips image-free input before a multimodal actor run", async () => {
-    const { actors, deliveries } = setup();
-    const actor = await actors.create({
+  it("rechecks freshness after mesh publication before steering Main", async () => {
+    const { persistentAgents, deliveries, mesh } = setup();
+    const persistentAgent = await persistentAgents.create({
+      name: "supervisor",
+      instructions: "Supervise the current goal.",
+      events: ["tool_error"],
+      responseMode: "directive",
+      delivery: "steer",
+      triggerTurn: false,
+      validWhile: {
+        version: 1,
+        source: "({ activation, current }) => activation.kind !== 'hostEvent' || activation.mainRevision === current.mainRevision",
+      },
+    });
+    const originalPublish = mesh.publish.bind(mesh);
+    vi.spyOn(mesh, "publish").mockImplementationOnce(async (request) => {
+      persistentAgents.noteMainActivity(false);
+      return originalPublish(request);
+    });
+
+    persistentAgents.dispatchHostEvent("tool_error", { signal: { idle: false } });
+    await waitFor(() => persistentAgents.status(persistentAgent.id).status === "idle");
+
+    expect(deliveries).toEqual([]);
+    expect(persistentAgents.messages(persistentAgent.id).at(-1)).toMatchObject({
+      action: "silent",
+      stale: true,
+    });
+  });
+
+  it("skips image-free input before a multimodal persistentAgent run", async () => {
+    const { persistentAgents, deliveries } = setup();
+    const persistentAgent = await persistentAgents.create({
       name: "vision-handoff",
       instructions: "Describe attached images.",
       events: ["input"],
@@ -147,12 +177,12 @@ describe("persistent actor validWhile", () => {
       },
     });
 
-    actors.dispatchHostEvent("input", { signal: { payload: { text: "text only" }, idle: false } });
-    await waitFor(() => actors.status(actor.id).status === "idle");
+    persistentAgents.dispatchHostEvent("input", { signal: { payload: { text: "text only" }, idle: false } });
+    await waitFor(() => persistentAgents.status(persistentAgent.id).status === "idle");
     expect(deliveries).toEqual([]);
-    expect(actors.messages(actor.id).at(-1)).toMatchObject({ action: "silent", stale: true });
+    expect(persistentAgents.messages(persistentAgent.id).at(-1)).toMatchObject({ action: "silent", stale: true });
 
-    actors.dispatchHostEvent(
+    persistentAgents.dispatchHostEvent(
       "input",
       {
         signal: {
@@ -164,12 +194,12 @@ describe("persistent actor validWhile", () => {
       [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }],
     );
     await waitFor(() => deliveries.length === 1);
-    expect(deliveries).toEqual(["fake actor advice"]);
+    expect(deliveries).toEqual(["fake persistentAgent advice"]);
   });
 
   it("rejects a blocking ask when its direct activation is invalid", async () => {
-    const { actors } = setup();
-    const actor = await actors.create({
+    const { persistentAgents } = setup();
+    const persistentAgent = await persistentAgents.create({
       name: "guarded-mailbox",
       instructions: "Reply.",
       validWhile: {
@@ -177,16 +207,16 @@ describe("persistent actor validWhile", () => {
         source: "({ activation }) => activation.kind !== 'direct'",
       },
     });
-    await expect(actors.ask(actor.id, "obsolete request")).rejects.toThrow(
+    await expect(persistentAgents.ask(persistentAgent.id, "obsolete request")).rejects.toThrow(
       /activation invalidated/,
     );
-    await waitFor(() => actors.status(actor.id).status === "idle");
-    expect(actors.messages(actor.id).at(-1)).toMatchObject({ stale: true, action: "silent" });
+    await waitFor(() => persistentAgents.status(persistentAgent.id).status === "idle");
+    expect(persistentAgents.messages(persistentAgent.id).at(-1)).toMatchObject({ stale: true, action: "silent" });
   });
 
   it("implements latest-activation-wins across different host event types", async () => {
-    const { actors, deliveries } = setup();
-    const actor = await actors.create({
+    const { persistentAgents, deliveries } = setup();
+    const persistentAgent = await persistentAgents.create({
       name: "reviewer",
       instructions: "Review.",
       events: ["tool_error", "agent_settled"],
@@ -198,10 +228,10 @@ describe("persistent actor validWhile", () => {
         source: "({ activation, current }) => activation.sequence === current.latestActivationSequence",
       },
     });
-    actors.dispatchHostEvent("tool_error", { signal: { idle: false } });
-    actors.dispatchHostEvent("agent_settled", { signal: { idle: true } });
-    await waitFor(() => actors.status(actor.id).status === "idle");
-    expect(deliveries).toEqual(["fake actor advice"]);
-    expect(actors.messages(actor.id).some((message) => message.stale)).toBe(true);
+    persistentAgents.dispatchHostEvent("tool_error", { signal: { idle: false } });
+    persistentAgents.dispatchHostEvent("agent_settled", { signal: { idle: true } });
+    await waitFor(() => persistentAgents.status(persistentAgent.id).status === "idle");
+    expect(deliveries).toEqual(["fake persistentAgent advice"]);
+    expect(persistentAgents.messages(persistentAgent.id).some((message) => message.stale)).toBe(true);
   });
 });

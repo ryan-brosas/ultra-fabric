@@ -1,9 +1,9 @@
 import { type Theme } from "@earendil-works/pi-coding-agent";
 import { Container, type Focusable, getKeybindings, Spacer, Text } from "@earendil-works/pi-tui";
 
-const ACTOR_TOOL_ORDER = ["read", "grep", "find", "ls", "bash", "edit", "write"] as const;
+const PERSISTENT_AGENT_TOOL_ORDER = ["read", "grep", "find", "ls", "bash", "edit", "write"] as const;
 
-const TOOL_LABELS: Record<(typeof ACTOR_TOOL_ORDER)[number], string> = {
+const TOOL_LABELS: Record<(typeof PERSISTENT_AGENT_TOOL_ORDER)[number], string> = {
   read: "read files",
   grep: "search file contents",
   find: "find files by name",
@@ -13,7 +13,7 @@ const TOOL_LABELS: Record<(typeof ACTOR_TOOL_ORDER)[number], string> = {
   write: "write files",
 };
 
-export interface FabricActorToolSelectorOptions {
+export interface FabricPersistentAgentToolSelectorOptions {
   theme: Theme;
   currentValue: string[];
   onSelect: (tools: string[]) => void;
@@ -21,7 +21,7 @@ export interface FabricActorToolSelectorOptions {
   headerText?: string;
 }
 
-export class FabricActorToolSelector extends Container implements Focusable {
+export class FabricPersistentAgentToolSelector extends Container implements Focusable {
   private readonly theme: Theme;
   private readonly onSelectCallback: (tools: string[]) => void;
   private readonly onCancelCallback: () => void;
@@ -30,7 +30,7 @@ export class FabricActorToolSelector extends Container implements Focusable {
   private selectedIndex = 0;
   focused = false;
 
-  constructor(options: FabricActorToolSelectorOptions) {
+  constructor(options: FabricPersistentAgentToolSelectorOptions) {
     super();
     this.theme = options.theme;
     this.onSelectCallback = options.onSelect;
@@ -38,7 +38,7 @@ export class FabricActorToolSelector extends Container implements Focusable {
     this.enabled = new Set(options.currentValue);
     this.addChild(
       new Text(
-        this.theme.fg("muted", options.headerText ?? "Select the optional tools available to this actor."),
+        this.theme.fg("muted", options.headerText ?? "Select the optional tools available to this persistent Agent."),
         0,
         0,
       ),
@@ -53,23 +53,23 @@ export class FabricActorToolSelector extends Container implements Focusable {
     const kb = getKeybindings();
     if (kb.matches(keyData, "tui.select.up")) {
       this.selectedIndex =
-        this.selectedIndex === 0 ? ACTOR_TOOL_ORDER.length - 1 : this.selectedIndex - 1;
+        this.selectedIndex === 0 ? PERSISTENT_AGENT_TOOL_ORDER.length - 1 : this.selectedIndex - 1;
       this.updateList();
     } else if (kb.matches(keyData, "tui.select.down")) {
       this.selectedIndex =
-        this.selectedIndex === ACTOR_TOOL_ORDER.length - 1 ? 0 : this.selectedIndex + 1;
+        this.selectedIndex === PERSISTENT_AGENT_TOOL_ORDER.length - 1 ? 0 : this.selectedIndex + 1;
       this.updateList();
     } else if (keyData === " ") {
-      const tool = ACTOR_TOOL_ORDER[this.selectedIndex];
+      const tool = PERSISTENT_AGENT_TOOL_ORDER[this.selectedIndex];
       if (tool) {
         if (this.enabled.has(tool)) this.enabled.delete(tool);
         else this.enabled.add(tool);
         this.updateList();
       }
     } else if (kb.matches(keyData, "tui.select.confirm")) {
-      const selected = ACTOR_TOOL_ORDER.filter((tool) => this.enabled.has(tool));
+      const selected = PERSISTENT_AGENT_TOOL_ORDER.filter((tool) => this.enabled.has(tool));
       const custom = [...this.enabled].filter(
-        (tool) => !ACTOR_TOOL_ORDER.includes(tool as (typeof ACTOR_TOOL_ORDER)[number]),
+        (tool) => !PERSISTENT_AGENT_TOOL_ORDER.includes(tool as (typeof PERSISTENT_AGENT_TOOL_ORDER)[number]),
       );
       this.onSelectCallback([...selected, ...custom]);
     } else if (kb.matches(keyData, "tui.select.cancel")) {
@@ -79,8 +79,8 @@ export class FabricActorToolSelector extends Container implements Focusable {
 
   private updateList(): void {
     this.listContainer.clear();
-    for (let index = 0; index < ACTOR_TOOL_ORDER.length; index++) {
-      const tool = ACTOR_TOOL_ORDER[index]!;
+    for (let index = 0; index < PERSISTENT_AGENT_TOOL_ORDER.length; index++) {
+      const tool = PERSISTENT_AGENT_TOOL_ORDER[index]!;
       const selected = index === this.selectedIndex;
       const checked = this.enabled.has(tool);
       const box = checked ? this.theme.fg("success", "[x]") : this.theme.fg("dim", "[ ]");

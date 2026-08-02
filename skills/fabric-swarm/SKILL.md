@@ -1,6 +1,6 @@
 ---
 name: fabric-swarm
-description: Creates a self-organizing team of persistent Pi Fabric actors with durable topics, mailboxes, and compare-and-swap tasks. Use for messenger-like collaboration and long-lived delegated work.
+description: Creates a self-organizing team of persistent Pi Fabric agents with durable topics, mailboxes, and compare-and-swap tasks. Use for messenger-like collaboration and long-lived delegated work.
 disable-model-invocation: true
 ---
 
@@ -14,7 +14,7 @@ Build from Fabric primitives; do not install a messenger or swarm extension.
 
 Choose a short run key and topic such as `team.auth-migration`. Store tasks under `runs/<run>/tasks/<id>` with `ifVersion: 0`; include `title`, `status`, `owner`, `dependencies`, `progress`, and `result`.
 
-Actor instructions must require workers to verify every dependency task is complete, claim only `ready` work with `ifVersion` equal to the observed version, stop after a failed claim, publish progress, update blocked/completed state with the version returned by the preceding successful read/write, CAS-unblock dependents only after all their dependencies complete, direct questions with `mesh.publish({ topic, to, ... })`, respect path ownership, and emit directives only for blockers or final results.
+Persistent agent instructions must require workers to verify every dependency task is complete, claim only `ready` work with `ifVersion` equal to the observed version, stop after a failed claim, publish progress, update blocked/completed state with the version returned by the preceding successful read/write, CAS-unblock dependents only after all their dependencies complete, direct questions with `mesh.publish({ topic, to, ... })`, respect path ownership, and emit directives only for blockers or final results.
 
 ```ts
 const run = π.run;
@@ -29,7 +29,7 @@ const roles = JSON.parse(π.roles) as Array<{ name: string; instructions: string
 
 await workflow.configure({
   name: `Swarm · ${run}`,
-  description: "Persistent actors coordinating through durable shared tasks",
+  description: "Persistent agents coordinating through durable shared tasks",
 });
 await phase("Seed tasks", { total: tasks.length });
 for (const task of tasks) {
@@ -47,11 +47,12 @@ for (const task of tasks) {
   });
 }
 
-await phase("Create actors", { total: roles.length });
-const actors = await Promise.all(
+await phase("Create persistent agents", { total: roles.length });
+const persistentAgents = await Promise.all(
   roles.map((role) =>
     agents.create({
       name: role.name,
+      role: "specialist",
       runner: "pi",
       instructions: role.instructions,
       topics: [topic],
@@ -62,19 +63,19 @@ const actors = await Promise.all(
   ),
 );
 
-await phase("Dispatch", { total: actors.length });
-for (const actor of actors) {
+await phase("Dispatch", { total: persistentAgents.length });
+for (const agent of persistentAgents) {
   await agents.tell({
-    id: actor.id,
+    id: agent.id,
     message: `Join ${topic}. Inspect ready tasks under runs/${run}/tasks/ and atomically claim one matching your role.`,
   });
 }
 await mesh.publish({
   topic,
   kind: "run.started",
-  data: { run, actors: actors.map(({ id, name }) => ({ id, name })) },
+  data: { run, agents: persistentAgents.map(({ id, name, role }) => ({ id, name, role })) },
 });
-return { run, topic, actors, taskPrefix: `runs/${run}/tasks/` };
+return { run, topic, agents: persistentAgents, taskPrefix: `runs/${run}/tasks/` };
 ```
 
-Pass the run key as `strings.run`, tasks as JSON `strings.tasks`, and role instructions as JSON `strings.roles`. Keep coordination pull-based: inspect topic history, task state, and mailboxes at decision points rather than polling continuously inside one execution. Partition file ownership. Use `agents.steer` only for a running one-shot worker; persistent actors receive `tell`/`ask` mail.
+Pass the run key as `strings.run`, tasks as JSON `strings.tasks`, and role instructions as JSON `strings.roles`. Keep coordination pull-based: inspect topic history, task state, and mailboxes at decision points rather than polling continuously inside one execution. Partition file ownership. Use `agents.steer` only for a running one-shot worker; persistent agents receive `tell`/`ask` mail.

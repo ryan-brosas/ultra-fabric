@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ActorManager } from "../src/actors/manager.js";
-import type { FabricActorRequest } from "../src/actors/types.js";
-import { GlobalActorRegistry } from "../src/actors/global-registry.js";
+import { PersistentAgentRuntime } from "../src/agents/persistent/manager.js";
+import type { FabricPersistentAgentRequest } from "../src/agents/persistent/types.js";
+import { AgentTemplateRegistry } from "../src/agents/persistent/template-registry.js";
 import { LifecycleBroker } from "../src/lifecycle/broker.js";
 import type {
   FabricLifecycleEvent,
@@ -25,7 +25,7 @@ import { snapshotHandoffSession } from "../src/agents/handoff.js";
 import { AgentManager } from "../src/agents/manager.js";
 
 const roots: string[] = [];
-const actorManagers: ActorManager[] = [];
+const persistentAgentManagers: PersistentAgentRuntime[] = [];
 const agentManagers: AgentManager[] = [];
 
 const usage = {
@@ -66,7 +66,7 @@ const setup = (
     kind: "main",
     sessionId: "test",
   };
-  const meshConfig = { ...DEFAULT_FABRIC_CONFIG.mesh, actorPollMs: 20 };
+  const meshConfig = { ...DEFAULT_FABRIC_CONFIG.mesh, persistentAgentPollMs: 20 };
   const mainDeliveries: FabricMainAgentDeliveryRequest[] = [];
   const mainAgent = {
     id: identity.id,
@@ -76,7 +76,7 @@ const setup = (
       id: identity.id,
       name: "Main" as const,
       kind: "main" as const,
-      status: "idle" as const,
+      status: mainAgent.local ? "idle" as const : "remote" as const,
       runner: "pi" as const,
       transport: "host" as const,
       cwd: process.cwd(),
@@ -84,7 +84,7 @@ const setup = (
       startedAt: 1,
       updatedAt: 1,
       pendingMessages: false,
-      local: true,
+      local: mainAgent.local,
     }),
     deliverAgent: (request: FabricMainAgentDeliveryRequest) => {
       mainDeliveries.push(request);
@@ -95,13 +95,13 @@ const setup = (
       };
     },
   };
-  const actors = new ActorManager("test", identity, mesh, meshConfig, agents, () => {}, {
-    actorRoot: path.join(root, "actors"),
+  const persistentAgents = new PersistentAgentRuntime("test", identity, mesh, meshConfig, agents, () => {}, {
+    persistentAgentRoot: path.join(root, "persistentAgents"),
     persistent: true,
     mainAgent,
   });
-  actorManagers.push(actors);
-  const globalActors = new GlobalActorRegistry(root, 64 * 1024);
+  persistentAgentManagers.push(persistentAgents);
+  const agentTemplates = new AgentTemplateRegistry(root, 64 * 1024);
   const participants: FabricParticipantSource = {
     list: (options = {}) =>
       members.filter(
@@ -144,20 +144,19 @@ const setup = (
     { enabled: true, pollMs: 20, maxReadEvents: 100 },
     async (subscription, event) => provider.deliverLifecycle(subscription, event),
   );
+  agents.attachPersistentLifecycle(persistentAgents, agentTemplates);
   provider = new AgentsProvider(
     agents,
-    actors,
-    globalActors,
     mainAgent,
     participants,
     undefined,
     lifecycle,
   );
-  return { root, actors, agents, globalActors, provider, mainDeliveries };
+  return { root, persistentAgents, agents, agentTemplates, provider, mainDeliveries };
 };
 
 afterEach(async () => {
-  await Promise.all(actorManagers.splice(0).map((manager) => manager.close()));
+  await Promise.all(persistentAgentManagers.splice(0).map((manager) => manager.close()));
   await Promise.all(agentManagers.splice(0).map((manager) => manager.close()));
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
@@ -165,7 +164,7 @@ afterEach(async () => {
 const waitFor = async (predicate: () => boolean, timeoutMs = 2_000): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for actor state");
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for persistentAgent state");
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 };
@@ -330,9 +329,12 @@ describe("AgentsProvider runner support", () => {
     const { provider } = setup([], [remoteRoot]);
     (provider.mainAgent as { local: boolean }).local = false;
 
-    await expect(provider.invoke("status", { id: "main" }, context)).resolves.toEqual(
-      remoteRoot,
-    );
+    await expect(provider.invoke("status", { id: "main" }, context)).resolves.toMatchObject({
+      id: remoteRoot.id,
+      kind: "main",
+      status: "remote",
+      local: false,
+    });
     await expect(
       provider.routeMessage("main", "too late", undefined, "steer"),
     ).rejects.toThrow(
@@ -365,16 +367,137 @@ describe("AgentsProvider runner support", () => {
 
     await expect(
       provider.invoke("members", { scope: "project" }, context),
-    ).resolves.toEqual([remote]);
+    ).resolves.toEqual([expect.objectContaining({ id: remote.id, kind: "agent", lifecycle: "one-shot" })]);
     await expect(
       provider.invoke("list", { scope: "project" }, context),
-    ).resolves.toEqual([remote]);
+    ).resolves.toEqual([expect.objectContaining({ id: remote.id, kind: "agent", lifecycle: "one-shot" })]);
     await expect(
       provider.invoke("status", { id: remote.id }, context),
-    ).resolves.toEqual(remote);
+    ).resolves.toEqual(expect.objectContaining({ id: remote.id, kind: "agent", lifecycle: "one-shot" }));
     await expect(
       provider.invoke("list", { scope: "lineage" }, context),
     ).resolves.toEqual([]);
+  });
+
+  it("projects remote persistent agents through lifecycle-aware scope", async () => {
+    const remote: FabricParticipantInfo = {
+      format: 1,
+      id: "persistent:remote",
+      kind: "persistentAgent",
+      rootId: "session:peer",
+      ownerHostId: "session:peer",
+      ownerIdentityId: "session:peer",
+      parentId: "session:peer",
+      name: "remote advisor",
+      status: "idle",
+      runner: "pi",
+      transport: "host",
+      capabilities: ["steer", "followUp"],
+      startedAt: 1,
+      updatedAt: 2,
+      controlProtocol: "v1",
+      local: false,
+      stale: false,
+    };
+    const { provider } = setup([], [remote]);
+
+    await expect(
+      provider.invoke("list", { scope: "project", lifecycle: "persistent" }, context),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: remote.id, kind: "agent", lifecycle: "persistent" }),
+    ]);
+    await expect(
+      provider.invoke("members", { scope: "project", kinds: ["agent"] }, context),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: remote.id, kind: "agent", lifecycle: "persistent" }),
+    ]);
+    await expect(
+      provider.invoke("list", { scope: "lineage", lifecycle: "persistent" }, context),
+    ).resolves.toEqual([]);
+  });
+
+  it("exposes one Agent contract across lifecycles and roles", async () => {
+    const { provider } = setup();
+    const persistent = await provider.invoke(
+      "create",
+      { ...createRequest, role: "supervisor" },
+      context,
+    ) as { id: string; name: string };
+
+    await expect(provider.invoke("list", {}, context)).resolves.toEqual([]);
+    await expect(provider.invoke("list", { lifecycle: "persistent" }, context)).resolves.toEqual([
+      expect.objectContaining({
+        id: persistent.id,
+        kind: "agent",
+        lifecycle: "persistent",
+        role: "supervisor",
+        name: "reviewer",
+      }),
+    ]);
+    await expect(provider.invoke("list", { lifecycle: "all" }, context)).resolves.toEqual([
+      expect.objectContaining({ id: persistent.id, lifecycle: "persistent", role: "supervisor" }),
+    ]);
+    await expect(
+      provider.invoke("list", { scope: "project", lifecycle: "persistent" }, context),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: persistent.id, lifecycle: "persistent", role: "supervisor" }),
+    ]);
+    await expect(provider.invoke("status", { id: persistent.id }, context)).resolves.toMatchObject({
+      id: persistent.id,
+      kind: "agent",
+      lifecycle: "persistent",
+      role: "supervisor",
+      validWhile: {
+        version: 1,
+        source: expect.stringContaining("activation.mainRevision === current.mainRevision"),
+      },
+      name: "reviewer",
+    });
+
+    await provider.invoke(
+      "create",
+      { ...createRequest, name: "global-reviewer", role: "advisor", scope: "global" },
+      context,
+    );
+    await expect(provider.invoke("templates", {}, context)).resolves.toEqual([
+      expect.objectContaining({ name: "global-reviewer", role: "advisor" }),
+    ]);
+
+    const catalog = await provider.invoke("roles", { lifecycle: "persistent" }, context) as {
+      roles: Array<Record<string, unknown>>;
+      diagnostics: string[];
+    };
+    expect(catalog.roles).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "supervisor",
+        lifecycle: "persistent",
+        delivery: "steer",
+        responseMode: "directive",
+        triggerTurn: true,
+        freshness: "latest-main-revision",
+        turnBudget: { maxTurns: 4, graceTurns: 1 },
+      }),
+    ]));
+    expect(catalog.roles.every((role) => !("behavior" in role))).toBe(true);
+    expect(catalog.diagnostics).toEqual([]);
+
+    const discovered = await provider.list({}, context);
+    expect(discovered.map((descriptor) => descriptor.name)).toContain("roles");
+    expect(discovered.map((descriptor) => descriptor.name)).toContain("templates");
+    expect(discovered.map((descriptor) => descriptor.name)).toContain("telemetry");
+    expect(JSON.stringify(discovered)).not.toMatch(/persistentAgent/i);
+    await expect(provider.invoke("telemetry", {}, context)).resolves.toMatchObject({ persistent: 1 });
+    for (const removed of ["persistentAgentStatus", "persistentAgents", "persistentAgentTelemetry"]) {
+      await expect(provider.describe(removed, context)).resolves.toBeUndefined();
+      await expect(provider.invoke(removed, {}, context)).rejects.toThrow("Unknown agents action");
+    }
+    await expect(
+      provider.invoke(
+        "create",
+        { ...createRequest, name: "invalid-role", role: "not a role!" },
+        context,
+      ),
+    ).rejects.toThrow("Invalid Fabric agent role");
   });
 
   it("defers explicit handoff until the finalized outer Fabric result", async () => {
@@ -639,9 +762,9 @@ describe("AgentsProvider runner support", () => {
     });
   });
 
-  it("propagates direct actor activation lineage into the child run", async () => {
+  it("propagates direct persistentAgent activation lineage into the child run", async () => {
     const { provider, agents } = setup();
-    const actor = await provider.invoke("create", createRequest, context) as { id: string };
+    const persistentAgent = await provider.invoke("create", createRequest, context) as { id: string };
     const runSpy = vi.spyOn(agents, "run");
     const tracedContext: FabricInvocationContext = {
       ...context,
@@ -659,7 +782,7 @@ describe("AgentsProvider runner support", () => {
 
     const message = await provider.invoke(
       "ask",
-      { id: actor.id, message: "inspect", maxTokens: 20 },
+      { id: persistentAgent.id, message: "inspect", maxTokens: 20 },
       tracedContext,
     ) as { runId: string };
 
@@ -678,9 +801,9 @@ describe("AgentsProvider runner support", () => {
     });
   });
 
-  it("preserves actor quotas and reports aggregate admission telemetry", async () => {
+  it("preserves persistentAgent quotas and reports aggregate admission telemetry", async () => {
     const { provider } = setup();
-    const actor = await provider.invoke(
+    const persistentAgent = await provider.invoke(
       "create",
       {
         ...createRequest,
@@ -689,13 +812,13 @@ describe("AgentsProvider runner support", () => {
       },
       context,
     ) as { id: string };
-    await provider.invoke("ask", { id: actor.id, message: "first" }, context);
+    await provider.invoke("ask", { id: persistentAgent.id, message: "first" }, context);
     await expect(
-      provider.invoke("ask", { id: actor.id, message: "second" }, context),
-    ).rejects.toThrow("Actor admission lifetime budget exhausted");
+      provider.invoke("ask", { id: persistentAgent.id, message: "second" }, context),
+    ).rejects.toThrow("Persistent Agent admission lifetime budget exhausted");
 
-    await expect(provider.invoke("actorTelemetry", {}, context)).resolves.toMatchObject({
-      actors: 1,
+    await expect(provider.invoke("telemetry", {}, context)).resolves.toMatchObject({
+      persistent: 1,
       open: 0,
       lifetimeExhausted: 1,
       windowExhausted: 0,
@@ -853,9 +976,9 @@ describe("AgentsProvider runner support", () => {
     }
   });
 
-  it("attaches the final preview for actors that settle before the first poll", async () => {
+  it("attaches the final preview for persistentAgents that settle before the first poll", async () => {
     const { provider } = setup();
-    const actor = (await provider.invoke("create", createRequest, context)) as { id: string };
+    const persistentAgent = (await provider.invoke("create", createRequest, context)) as { id: string };
     const previews: Array<Record<string, unknown>> = [];
     const previewContext: FabricInvocationContext = {
       ...context,
@@ -864,18 +987,18 @@ describe("AgentsProvider runner support", () => {
       },
     };
 
-    await provider.invoke("ask", { id: actor.id, message: "inspect quickly" }, previewContext);
+    await provider.invoke("ask", { id: persistentAgent.id, message: "inspect quickly" }, previewContext);
 
     expect(previews.at(-1)).toMatchObject({
       kind: "fabric-agent-tools",
       status: "completed",
-      owner: "actor",
+      owner: "persistentAgent",
       tools: expect.any(Array),
     });
   });
 
-  it("ignores actor timeout overrides below the configured default", async () => {
-    const { provider, actors } = setup();
+  it("ignores persistentAgent timeout overrides below the configured default", async () => {
+    const { provider, persistentAgents } = setup();
     const inherited = (await provider.invoke(
       "create",
       { ...createRequest, name: "inherited-timeout", timeoutMs: 240_000 },
@@ -887,11 +1010,42 @@ describe("AgentsProvider runner support", () => {
       context,
     )) as { id: string };
 
-    expect(actors.definition(inherited.id)).not.toHaveProperty("timeoutMs");
-    expect(actors.definition(longer.id).timeoutMs).toBe(7_200_000);
+    expect(persistentAgents.definition(inherited.id)).not.toHaveProperty("timeoutMs");
+    expect(persistentAgents.definition(longer.id).timeoutMs).toBe(7_200_000);
   });
 
-  it("enumerates Claude models and preserves runner on actors", async () => {
+  it("enumerates models from any registered provider extension and fails closed", async () => {
+    const { provider } = setup();
+    const makora = {
+      provider: "makora",
+      id: "deepseek-ai/DeepSeek-V4-Pro",
+      name: "DeepSeek V4 Pro",
+    };
+    const pluginContext = {
+      ...context,
+      extensionContext: {
+        modelRegistry: { getAvailable: () => [makora] },
+      } as unknown as ExtensionContext,
+    };
+
+    await expect(provider.invoke("models", { runner: "pi" }, pluginContext)).resolves.toEqual([
+      {
+        runner: "pi",
+        ...makora,
+        key: "makora/deepseek-ai/DeepSeek-V4-Pro",
+      },
+    ]);
+
+    const unavailableContext = {
+      ...context,
+      extensionContext: {
+        modelRegistry: { getAvailable: () => { throw new Error("registry unavailable"); } },
+      } as unknown as ExtensionContext,
+    };
+    await expect(provider.invoke("models", { runner: "pi" }, unavailableContext)).resolves.toEqual([]);
+  });
+
+  it("enumerates Claude models and preserves runner on persistentAgents", async () => {
     const { provider } = setup();
     const models = (await provider.invoke("models", { runner: "claude" }, context)) as Array<{
       runner: string;
@@ -908,7 +1062,7 @@ describe("AgentsProvider runner support", () => {
       ]),
     );
 
-    const actor = (await provider.invoke(
+    const persistentAgent = (await provider.invoke(
       "create",
       {
         name: "claude-reviewer",
@@ -917,97 +1071,120 @@ describe("AgentsProvider runner support", () => {
       },
       context,
     )) as { runner: string };
-    expect(actor.runner).toBe("claude");
+    expect(persistentAgent.runner).toBe("claude");
   });
 });
 
-describe("AgentsProvider actor ownership privacy", () => {
-  it("does not expose passive actor mailboxes, definitions, or logs", async () => {
+describe("AgentsProvider persistentAgent ownership privacy", () => {
+  it("does not expose passive persistentAgent mailboxes, definitions, or logs", async () => {
     const members: FabricParticipantInfo[] = [];
-    const { provider, actors } = setup([], members);
-    const actor = await actors.create(createRequest as FabricActorRequest);
+    const { provider, persistentAgents } = setup([], members);
+    const persistentAgent = await persistentAgents.create(createRequest as FabricPersistentAgentRequest);
     members.push({
       format: 1,
-      id: actor.id,
-      kind: "actor",
+      id: persistentAgent.id,
+      kind: "persistentAgent",
       rootId: "session:peer",
       ownerHostId: "session:peer",
       ownerIdentityId: "session:peer",
       parentId: "session:peer",
-      name: actor.name,
+      name: persistentAgent.name,
       status: "idle",
       runner: "pi",
       transport: "host",
       capabilities: ["steer", "followUp", "stop", "fabric"],
-      startedAt: actor.createdAt,
-      updatedAt: actor.updatedAt,
+      startedAt: persistentAgent.createdAt,
+      updatedAt: persistentAgent.updatedAt,
       controlProtocol: "v1",
       local: false,
       stale: false,
     });
 
-    await expect(provider.invoke("actors", {}, context)).resolves.toEqual([]);
-    for (const action of ["actorStatus", "messages", "retryDelivery", "export", "log"] as const) {
-      await expect(provider.invoke(action, { id: actor.id }, context)).rejects.toThrow(
+    await expect(provider.invoke("list", { lifecycle: "persistent" }, context)).resolves.toEqual([]);
+    await expect(provider.invoke("status", { id: persistentAgent.id }, context)).resolves.toMatchObject({
+      kind: "agent",
+      lifecycle: "persistent",
+    });
+    for (const action of ["messages", "retryDelivery", "export", "log"] as const) {
+      await expect(provider.invoke(action, { id: persistentAgent.id }, context)).rejects.toThrow(
         "private data is available only from its owner",
       );
     }
   });
 });
 
-describe("AgentsProvider global actors", () => {
-  it("creates a global template and lists it separately from project actors", async () => {
-    const { provider, actors, globalActors } = setup();
+describe("AgentsProvider Agent templates", () => {
+  it("creates a global template and lists it separately from project persistentAgents", async () => {
+    const { provider, persistentAgents, agentTemplates } = setup();
     const template = await provider.invoke("create", { ...createRequest, scope: "global" }, context);
     expect((template as { name: string }).name).toBe("reviewer");
-    expect(globalActors.list()).toHaveLength(1);
-    // project scope (default) lists live actors, not templates
-    expect(await provider.invoke("actors", {}, context)).toEqual([]);
-    expect(await provider.invoke("actors", { scope: "global" }, context)).toHaveLength(1);
-    expect(actors.list()).toEqual([]);
+    expect(agentTemplates.list()).toHaveLength(1);
+    // project scope (default) lists live persistentAgents, not templates
+    expect(await provider.invoke("list", { lifecycle: "persistent" }, context)).toEqual([]);
+    expect(await provider.invoke("templates", {}, context)).toHaveLength(1);
+    expect(persistentAgents.list()).toEqual([]);
   });
 
-  it("imports a global template as a fresh live actor without history", async () => {
-    const { provider, actors } = setup();
+  it("imports a global template as a fresh live persistentAgent without history", async () => {
+    const { provider, persistentAgents } = setup();
     await provider.invoke("create", { ...createRequest, scope: "global" }, context);
-    const actor = (await provider.invoke("import", { name: "reviewer" }, context)) as {
+    const persistentAgent = (await provider.invoke("import", { name: "reviewer" }, context)) as {
       id: string;
       name: string;
       messages: number;
     };
-    expect(actor.name).toBe("reviewer");
-    expect(actors.list()).toHaveLength(1);
-    // fresh actor starts with no mailbox history
-    expect(actor.messages).toBe(0);
-    expect(actors.instructions(actor.id)).toBe(createRequest.instructions);
+    expect(persistentAgent.name).toBe("reviewer");
+    expect(persistentAgents.list()).toHaveLength(1);
+    // fresh persistentAgent starts with no mailbox history
+    expect(persistentAgent.messages).toBe(0);
+    expect(persistentAgents.instructions(persistentAgent.id)).toBe(createRequest.instructions);
   });
 
-  it("exports a project actor to a global template without its history", async () => {
-    const { provider, actors, globalActors } = setup();
-    const actor = (await provider.invoke(
+  it("reapplies the current role contract when importing an older template", async () => {
+    const { provider, agentTemplates } = setup();
+    agentTemplates.create({
+      name: "legacy-supervisor",
+      role: "supervisor",
+      instructions: "Watch the release.",
+    });
+
+    const imported = await provider.invoke("import", { name: "legacy-supervisor" }, context);
+    expect(imported).toMatchObject({
+      role: "supervisor",
+      validWhile: {
+        version: 1,
+        source: expect.stringContaining("activation.mainRevision === current.mainRevision"),
+      },
+      turnBudget: { maxTurns: 4, graceTurns: 1 },
+    });
+  });
+
+  it("exports a project persistentAgent to a global template without its history", async () => {
+    const { provider, persistentAgents, agentTemplates } = setup();
+    const persistentAgent = (await provider.invoke(
       "create",
       { ...createRequest, extensions: false, tools: ["read"] },
       context,
     )) as { id: string };
     // build some mailbox history so we can prove it is not exported
-    await provider.invoke("ask", { id: actor.id, message: "inspect auth" }, context);
-    await waitFor(() => actors.status(actor.id).status === "idle");
-    expect(actors.status(actor.id).messages).toBeGreaterThan(0);
+    await provider.invoke("ask", { id: persistentAgent.id, message: "inspect auth" }, context);
+    await waitFor(() => persistentAgents.status(persistentAgent.id).status === "idle");
+    expect(persistentAgents.status(persistentAgent.id).messages).toBeGreaterThan(0);
 
-    const template = (await provider.invoke("export", { id: actor.id }, context)) as {
+    const template = (await provider.invoke("export", { id: persistentAgent.id }, context)) as {
       name: string;
       instructions: string;
     };
     expect(template.name).toBe("reviewer");
     expect(template.instructions).toBe(createRequest.instructions);
-    expect(globalActors.list()).toHaveLength(1);
+    expect(agentTemplates.list()).toHaveLength(1);
     // a template carries no history at all
-    const stored = globalActors.resolve("reviewer")!;
+    const stored = agentTemplates.resolve("reviewer")!;
     expect(stored).not.toHaveProperty("messages");
     expect(stored).not.toHaveProperty("sessionFile");
     expect(stored.extensions).toBe(false);
 
-    // re-importing yields a fresh actor with no inherited history
+    // re-importing yields a fresh persistentAgent with no inherited history
     const fresh = (await provider.invoke("import", { name: "reviewer", as: "reviewer-2" }, context)) as {
       messages: number;
       extensions?: boolean;
@@ -1019,61 +1196,81 @@ describe("AgentsProvider global actors", () => {
   it("export collides without overwrite and replaces with it", async () => {
     const { provider } = setup();
     await provider.invoke("create", { ...createRequest, scope: "global" }, context);
-    const actor = (await provider.invoke("create", createRequest, context)) as { id: string };
-    await expect(provider.invoke("export", { id: actor.id }, context)).rejects.toThrow(/already exists/);
-    const replaced = (await provider.invoke("export", { id: actor.id, overwrite: true }, context)) as {
+    const persistentAgent = (await provider.invoke("create", createRequest, context)) as { id: string };
+    await expect(provider.invoke("export", { id: persistentAgent.id }, context)).rejects.toThrow(/already exists/);
+    const replaced = (await provider.invoke("export", { id: persistentAgent.id, overwrite: true }, context)) as {
       name: string;
     };
     expect(replaced.name).toBe("reviewer");
   });
 
-  it("migrates a persistent actor model and thinking without replacing its session", async () => {
-    const { provider, actors } = setup();
-    const actor = (await provider.invoke("create", createRequest, context)) as {
+  it("migrates a persistent persistentAgent model and thinking without replacing its session", async () => {
+    const { provider, persistentAgents } = setup();
+    const persistentAgent = (await provider.invoke("create", createRequest, context)) as {
       id: string;
       sessionFile?: string;
     };
-    const sessionFile = actors.status(actor.id).sessionFile;
+    const sessionFile = persistentAgents.status(persistentAgent.id).sessionFile;
 
     await provider.invoke(
       "setModel",
-      { id: actor.id, model: "anthropic/executor" },
+      { id: persistentAgent.id, model: "anthropic/executor" },
       context,
     );
-    await provider.invoke("setThinking", { id: actor.id, thinking: "low" }, context);
-    expect(actors.status(actor.id)).toMatchObject({
+    await provider.invoke("setThinking", { id: persistentAgent.id, thinking: "low" }, context);
+    expect(persistentAgents.status(persistentAgent.id)).toMatchObject({
       model: "anthropic/executor",
       thinking: "low",
       sessionFile,
     });
 
-    await provider.invoke("setModel", { id: actor.id }, context);
-    await provider.invoke("setThinking", { id: actor.id }, context);
-    expect(actors.status(actor.id)).not.toHaveProperty("model");
-    expect(actors.status(actor.id)).not.toHaveProperty("thinking");
-    expect(actors.status(actor.id).sessionFile).toBe(sessionFile);
+    await provider.invoke("setModel", { id: persistentAgent.id }, context);
+    await provider.invoke("setThinking", { id: persistentAgent.id }, context);
+    expect(persistentAgents.status(persistentAgent.id)).not.toHaveProperty("model");
+    expect(persistentAgents.status(persistentAgent.id)).not.toHaveProperty("thinking");
+    expect(persistentAgents.status(persistentAgent.id).sessionFile).toBe(sessionFile);
   });
 
-  it("updates tool allowlists for project actors and global templates", async () => {
-    const { provider, actors, globalActors } = setup();
-    const actor = (await provider.invoke("create", createRequest, context)) as { id: string };
-    await provider.invoke("setTools", { id: actor.id, tools: ["read", "grep"] }, context);
-    expect(actors.status(actor.id).tools).toEqual(["read", "grep"]);
+  it("updates tool allowlists for project persistentAgents and global templates", async () => {
+    const { provider, persistentAgents, agentTemplates } = setup();
+    const persistentAgent = (await provider.invoke("create", createRequest, context)) as { id: string };
+    await provider.invoke("setTools", { id: persistentAgent.id, tools: ["read", "grep"] }, context);
+    expect(persistentAgents.status(persistentAgent.id).tools).toEqual(["read", "grep"]);
 
     await provider.invoke("create", { ...createRequest, name: "templar", scope: "global" }, context);
-    const templateId = globalActors.resolve("templar")!.id;
+    const templateId = agentTemplates.resolve("templar")!.id;
     await provider.invoke(
       "setTools",
       { id: templateId, tools: [], scope: "global" },
       context,
     );
-    expect(globalActors.resolve("templar")!.tools).toEqual([]);
+    expect(agentTemplates.resolve("templar")!.tools).toEqual([]);
+
+    const supervisor = await provider.invoke(
+      "create",
+      { ...createRequest, name: "supervisor-live", role: "supervisor" },
+      context,
+    ) as { id: string };
+    await expect(
+      provider.invoke("setTools", { id: supervisor.id, tools: ["bash"] }, context),
+    ).rejects.toThrow("Agent role supervisor does not allow tools: bash");
+
+    await provider.invoke(
+      "create",
+      { ...createRequest, name: "supervisor-template", role: "supervisor", scope: "global" },
+      context,
+    );
+    await expect(provider.invoke(
+      "setTools",
+      { id: "supervisor-template", tools: ["bash"], scope: "global" },
+      context,
+    )).rejects.toThrow("Agent role supervisor does not allow tools: bash");
   });
 
 
   it("accepts the complete host-event catalog through create and setEvents", async () => {
-    const { provider, actors } = setup();
-    const actor = (await provider.invoke(
+    const { provider, persistentAgents } = setup();
+    const persistentAgent = (await provider.invoke(
       "create",
       {
         ...createRequest,
@@ -1081,7 +1278,7 @@ describe("AgentsProvider global actors", () => {
       },
       context,
     )) as { id: string };
-    expect(actors.status(actor.id).events).toEqual([
+    expect(persistentAgents.status(persistentAgent.id).events).toEqual([
       "before_agent_start",
       "tool_call",
       "tool_result",
@@ -1090,23 +1287,23 @@ describe("AgentsProvider global actors", () => {
 
     await provider.invoke(
       "setEvents",
-      { id: actor.id, events: ["context", "before_provider_request", "session_tree"] },
+      { id: persistentAgent.id, events: ["context", "before_provider_request", "session_tree"] },
       context,
     );
-    expect(actors.status(actor.id).events).toEqual([
+    expect(persistentAgents.status(persistentAgent.id).events).toEqual([
       "context",
       "before_provider_request",
       "session_tree",
     ]);
   });
 
-  it("routes explicit outbox redelivery through the local actor owner", async () => {
-    const { provider, actors } = setup();
-    const actor = (await provider.invoke("create", createRequest, context)) as { id: string };
-    const retry = vi.spyOn(actors, "retryDelivery").mockResolvedValue({
+  it("routes explicit outbox redelivery through the local persistentAgent owner", async () => {
+    const { provider, persistentAgents } = setup();
+    const persistentAgent = (await provider.invoke("create", createRequest, context)) as { id: string };
+    const retry = vi.spyOn(persistentAgents, "retryDelivery").mockResolvedValue({
       id: "message-1",
-      actorId: actor.id,
-      actorName: "reviewer",
+      persistentAgentId: persistentAgent.id,
+      persistentAgentName: "reviewer",
       direction: "out",
       source: "direct",
       createdAt: 1,
@@ -1114,66 +1311,66 @@ describe("AgentsProvider global actors", () => {
 
     await provider.invoke(
       "retryDelivery",
-      { id: actor.id, messageId: "message-1" },
+      { id: persistentAgent.id, messageId: "message-1" },
       context,
     );
 
-    expect(retry).toHaveBeenCalledWith(actor.id, "message-1");
+    expect(retry).toHaveBeenCalledWith(persistentAgent.id, "message-1");
   });
 
-  it("validates and updates delivery policies for project actors and global templates", async () => {
-    const { provider, actors, globalActors } = setup();
+  it("validates and updates delivery policies for project persistentAgents and global templates", async () => {
+    const { provider, persistentAgents, agentTemplates } = setup();
     const { triggerTurn: _triggerTurn, ...ambiguous } = createRequest;
     await expect(provider.invoke("create", ambiguous, context)).rejects.toThrow(
       /requires explicit triggerTurn/,
     );
 
-    const actor = (await provider.invoke("create", createRequest, context)) as { id: string };
+    const persistentAgent = (await provider.invoke("create", createRequest, context)) as { id: string };
     await provider.invoke(
       "setDeliveryPolicy",
-      { id: actor.id, delivery: "steer", triggerTurn: true },
+      { id: persistentAgent.id, delivery: "steer", triggerTurn: true },
       context,
     );
-    expect(actors.status(actor.id)).toMatchObject({ delivery: "steer", triggerTurn: true });
+    expect(persistentAgents.status(persistentAgent.id)).toMatchObject({ delivery: "steer", triggerTurn: true });
 
     await provider.invoke(
       "create",
       { ...createRequest, name: "templar", scope: "global" },
       context,
     );
-    const templateId = globalActors.resolve("templar")!.id;
+    const templateId = agentTemplates.resolve("templar")!.id;
     await provider.invoke(
       "setDeliveryPolicy",
       { id: templateId, delivery: "followUp", triggerTurn: true, scope: "global" },
       context,
     );
-    expect(globalActors.resolve(templateId)).toMatchObject({
+    expect(agentTemplates.resolve(templateId)).toMatchObject({
       delivery: "followUp",
       triggerTurn: true,
     });
   });
 
   it("edits instructions for project and global scopes", async () => {
-    const { provider, actors, globalActors } = setup();
-    const actor = (await provider.invoke("create", createRequest, context)) as { id: string };
-    await provider.invoke("setInstructions", { id: actor.id, instructions: "Be brief." }, context);
-    expect(actors.instructions(actor.id)).toBe("Be brief.");
+    const { provider, persistentAgents, agentTemplates } = setup();
+    const persistentAgent = (await provider.invoke("create", createRequest, context)) as { id: string };
+    await provider.invoke("setInstructions", { id: persistentAgent.id, instructions: "Be brief." }, context);
+    expect(persistentAgents.instructions(persistentAgent.id)).toBe("Be brief.");
 
     await provider.invoke("create", { ...createRequest, name: "templar", scope: "global" }, context);
-    const globalId = globalActors.resolve("templar")!.id;
+    const globalId = agentTemplates.resolve("templar")!.id;
     await provider.invoke("setInstructions", { id: globalId, instructions: "Template brief.", scope: "global" }, context);
-    expect(globalActors.resolve("templar")!.instructions).toBe("Template brief.");
+    expect(agentTemplates.resolve("templar")!.instructions).toBe("Template brief.");
   });
 
   it("removes a global template via scoped remove", async () => {
-    const { provider, globalActors } = setup();
+    const { provider, agentTemplates } = setup();
     const template = (await provider.invoke(
       "create",
       { ...createRequest, scope: "global" },
       context,
     )) as { id: string };
     await provider.invoke("remove", { id: template.id, scope: "global" }, context);
-    expect(globalActors.list()).toEqual([]);
+    expect(agentTemplates.list()).toEqual([]);
   });
 });
 
@@ -1282,20 +1479,20 @@ describe("AgentsProvider steering", () => {
     await provider.invoke("stop", { id: handle.id }, context);
   });
 
-  it("steer routes to a local actor as a mailbox message", async () => {
+  it("steer routes to a local persistentAgent as a mailbox message", async () => {
     const { provider } = setup();
-    const actor = (await provider.invoke(
+    const persistentAgent = (await provider.invoke(
       "create",
       { name: "steered", instructions: "reply", responseMode: "text" },
       context,
     )) as { id: string };
     const result = (await provider.invoke(
       "steer",
-      { id: actor.id, message: "check session expiry" },
+      { id: persistentAgent.id, message: "check session expiry" },
       context,
     )) as { routed: string };
     expect(result.routed).toBe("local");
-    const messages = (await provider.invoke("messages", { id: actor.id }, context)) as Array<{
+    const messages = (await provider.invoke("messages", { id: persistentAgent.id }, context)) as Array<{
       direction: string;
       data?: { message?: string };
     }>;

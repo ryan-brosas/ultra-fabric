@@ -43,9 +43,46 @@ interface FabricModelRouteDecision {
     reasons: string[];
   }>;
 }
+type FabricAgentLifecycle = "one-shot" | "persistent" | "all";
+interface FabricAgentTurnBudget {
+  maxTurns: number;
+  graceTurns: number;
+  outcome?: "within-budget" | "wrap-up-requested" | "exceeded";
+}
+interface FabricAgentRoleProfile {
+  name: string;
+  description: string;
+  lifecycle: Exclude<FabricAgentLifecycle, "all">;
+  goal: string;
+  completion: string;
+  turnBudget: FabricAgentTurnBudget;
+  tools?: string[];
+  runner?: FabricAgentRunner;
+  model?: string;
+  thinking?: FabricThinking;
+  timeoutMs?: number;
+  extensions?: boolean;
+  events?: FabricPersistentAgentHostEvent[];
+  topics?: string[];
+  delivery?: FabricPersistentAgentDelivery;
+  responseMode?: "text" | "directive";
+  triggerTurn?: boolean;
+  coalesce?: boolean;
+  freshness?: "latest" | "latest-main-revision";
+  source: "builtin" | "user" | "project";
+  filePath: string;
+}
+interface FabricAgentRoleCatalog {
+  roles: FabricAgentRoleProfile[];
+  diagnostics: string[];
+}
 interface FabricAgentRequest {
   task: string;
   name?: string;
+  role?: string;
+  goal?: string;
+  completion?: string;
+  turnBudget?: FabricAgentTurnBudget;
   runner?: FabricAgentRunner;
   transport?: FabricTransport;
   model?: string;
@@ -127,13 +164,15 @@ interface FabricPeerInfo {
   pendingMessages: boolean;
   local: false;
 }
-type FabricParticipantKind = "root" | "agent" | "actor";
+type FabricParticipantKind = "root" | "agent";
+type FabricWireParticipantKind = FabricParticipantKind | "persistentAgent";
 type FabricParticipantScope = "local" | "lineage" | "project";
 type FabricParticipantCapability = "steer" | "followUp" | "stop" | "attach" | "fabric";
 interface FabricParticipantInfo {
   format: 1;
   id: string;
   kind: FabricParticipantKind;
+  lifecycle?: "one-shot" | "persistent";
   rootId: string;
   ownerHostId: string;
   ownerIdentityId: string;
@@ -155,8 +194,8 @@ interface FabricParticipantInfo {
   turns?: number;
   toolCalls?: number;
   usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
-  actorQueued?: number;
-  actorMessages?: number;
+  persistentAgentQueued?: number;
+  persistentAgentMessages?: number;
   controlProtocol: "v1" | "legacy";
   local: boolean;
   stale: boolean;
@@ -177,7 +216,7 @@ type FabricLifecycleDelivery = "steer" | "followUp";
 interface FabricLifecycleSource {
   id: string;
   name: string;
-  kind: FabricParticipantKind;
+  kind: FabricWireParticipantKind;
   rootId: string;
   runner: FabricAgentRunner;
   ownerHostId?: string;
@@ -207,14 +246,20 @@ interface FabricLifecycleSubscription {
   afterSequence: number;
   createdAt: number;
   updatedAt: number;
-  createdBy: { id: string; name: string; kind: "main" | "agent" | "actor"; sessionId?: string };
+  createdBy: { id: string; name: string; kind: "main" | "agent" | "persistentAgent"; sessionId?: string };
   lastDeliveredAt?: number;
   lastEventId?: string;
   lastError?: string;
 }
 interface FabricAgentHandle {
   id: string;
+  kind: "agent";
+  lifecycle: "one-shot";
+  role: string;
   name: string;
+  goal?: string;
+  completion?: string;
+  turnBudget?: FabricAgentTurnBudget;
   status: string;
   runner: FabricAgentRunner;
   transport: FabricTransport;
@@ -224,8 +269,8 @@ interface FabricAgentHandle {
   profile?: string;
   admission?: FabricAgentAdmissionIntent;
   thinking?: FabricThinking;
-  actorId?: string;
-  actorName?: string;
+  persistentAgentId?: string;
+  persistentAgentName?: string;
   traceId?: string;
   spanId?: string;
   parentRunId?: string;
@@ -289,9 +334,9 @@ interface FabricAgentLog {
   hasMore: boolean;
   before?: number;
 }
-interface FabricActorLog {
-  actorId: string;
-  actorName: string;
+interface FabricPersistentAgentLog {
+  persistentAgentId: string;
+  persistentAgentName: string;
   sessionFile: string;
   logDir: string;
   session: FabricLogLine[];
@@ -387,7 +432,7 @@ interface PiToolsApi {
   find(pattern: string, path?: string, limit?: number): Promise<string>;
   ls(args?: string | { path?: string; limit?: number; max?: number } | { dir?: string; limit?: number; max?: number } | { file?: string; limit?: number; max?: number }): Promise<string>;
 }
-type FabricActorHostEvent =
+type FabricPersistentAgentHostEvent =
   | "resources_discover"
   | "session_start"
   | "session_info_changed"
@@ -421,32 +466,36 @@ type FabricActorHostEvent =
   | "thinking_level_select"
   | "user_bash"
   | "tool_error";
-type FabricActorDelivery = "mailbox" | "steer" | "followUp" | "nextTurn";
-interface FabricActorHostMediaDescriptor {
+type FabricPersistentAgentDelivery = "mailbox" | "steer" | "followUp" | "nextTurn";
+interface FabricPersistentAgentHostMediaDescriptor {
   readonly type: "image";
   readonly mediaIndex: number;
   readonly mimeType: string;
 }
-interface FabricActorHostSignal {
+interface FabricPersistentAgentHostSignal {
   readonly payload: unknown;
-  readonly media?: readonly FabricActorHostMediaDescriptor[];
+  readonly media?: readonly FabricPersistentAgentHostMediaDescriptor[];
   readonly idle: boolean;
   readonly observedAt: number;
 }
-type FabricActorActivation =
-  | { readonly kind: "hostEvent"; readonly id: string; readonly source: string; readonly sequence: number; readonly createdAt: number; readonly event: FabricActorHostEvent; readonly mainRevision: number; readonly taskRevision: number; readonly signal?: FabricActorHostSignal }
+type FabricPersistentAgentActivation =
+  | { readonly kind: "hostEvent"; readonly id: string; readonly source: string; readonly sequence: number; readonly createdAt: number; readonly event: FabricPersistentAgentHostEvent; readonly mainRevision: number; readonly taskRevision: number; readonly signal?: FabricPersistentAgentHostSignal }
   | { readonly kind: "direct"; readonly id: string; readonly source: string; readonly sequence: number; readonly createdAt: number }
   | { readonly kind: "mesh"; readonly id: string; readonly source: string; readonly sequence: number; readonly createdAt: number; readonly topic: string };
-interface FabricActorValidityFacts {
-  readonly activation: Readonly<FabricActorActivation>;
+interface FabricPersistentAgentValidityFacts {
+  readonly activation: Readonly<FabricPersistentAgentActivation>;
   readonly current: Readonly<{ latestActivationSequence: number; mainRevision: number; taskRevision: number; idle: boolean; now: number }>;
 }
-type FabricActorValidityDecision = boolean | { valid: boolean; reason?: string };
-type FabricActorValidWhile = (facts: Readonly<FabricActorValidityFacts>) => FabricActorValidityDecision;
-interface FabricActorRequestBase {
+type FabricPersistentAgentValidityDecision = boolean | { valid: boolean; reason?: string };
+type FabricPersistentAgentValidWhile = (facts: Readonly<FabricPersistentAgentValidityFacts>) => FabricPersistentAgentValidityDecision;
+interface FabricPersistentAgentRequestBase {
   name: string;
+  role?: string;
   instructions: string;
-  events?: FabricActorHostEvent[];
+  goal?: string;
+  completion?: string;
+  turnBudget?: FabricAgentTurnBudget;
+  events?: FabricPersistentAgentHostEvent[];
   topics?: string[];
   responseMode?: "text" | "directive";
   coalesce?: boolean;
@@ -457,26 +506,32 @@ interface FabricActorRequestBase {
   transport?: FabricTransport;
   timeoutMs?: number;
   extensions?: boolean;
-  validWhile?: FabricActorValidWhile;
+  validWhile?: FabricPersistentAgentValidWhile;
   budget?: {
     lifetimeActivations?: number;
     windowActivations?: number;
     windowMs?: number;
   };
 }
-type FabricActorRequest = FabricActorRequestBase & (
+type FabricPersistentAgentRequest = FabricPersistentAgentRequestBase & (
   | { delivery?: "mailbox"; triggerTurn?: false }
   | { delivery: "nextTurn"; triggerTurn?: false }
   | { delivery: "steer" | "followUp"; triggerTurn: boolean }
 );
-interface FabricActorInfo {
+interface FabricPersistentAgentInfo {
   id: string;
+  kind: "agent";
+  lifecycle: "persistent";
+  role: string;
   name: string;
+  goal: string;
+  completion: string;
+  turnBudget: FabricAgentTurnBudget;
   status: "idle" | "queued" | "running" | "stopped";
   runner: FabricAgentRunner;
-  events: FabricActorHostEvent[];
+  events: FabricPersistentAgentHostEvent[];
   topics: string[];
-  delivery: FabricActorDelivery;
+  delivery: FabricPersistentAgentDelivery;
   responseMode: "text" | "directive";
   triggerTurn: boolean;
   coalesce: boolean;
@@ -514,10 +569,16 @@ interface FabricActorInfo {
   sessionFile?: string;
   logDir?: string;
 }
-interface FabricActorMessage {
+type FabricAgentTemplate = FabricPersistentAgentRequest & {
   id: string;
-  actorId: string;
-  actorName: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+interface FabricPersistentAgentMessage {
+  id: string;
+  persistentAgentId: string;
+  persistentAgentName: string;
   direction: "in" | "out";
   source: string;
   createdAt: number;
@@ -540,7 +601,7 @@ interface FabricActorMessage {
     };
     main: {
       status: "mailbox" | "not_requested" | "delivered" | "failed" | "dead_lettered" | "circuit_open";
-      mode: FabricActorDelivery;
+      mode: FabricPersistentAgentDelivery;
       attempts: number;
       at: number;
       error?: string;
@@ -549,11 +610,17 @@ interface FabricActorMessage {
 }
 interface FabricAgentsApi {
   run(args: FabricAgentRequest): Promise<FabricAgentResult>;
+  roles(args?: { lifecycle?: Exclude<FabricAgentLifecycle, "all"> }): Promise<FabricAgentRoleCatalog>;
   handoff(args: FabricHandoffRequest): Promise<FabricHandoffResult>;
   spawn(args: FabricAgentRequest): Promise<FabricAgentHandle>;
   wait(args: { id: string }): Promise<FabricAgentResult>;
-  status(args: { id: string }): Promise<FabricAgentResult | FabricAgentHandle | FabricMainAgentInfo | FabricActorInfo | FabricParticipantInfo>;
-  list(args?: { scope?: FabricParticipantScope }): Promise<Array<FabricAgentResult | FabricAgentHandle | FabricParticipantInfo>>;
+  status(args: { id: string }): Promise<FabricAgentResult | FabricAgentHandle | FabricMainAgentInfo | FabricPersistentAgentInfo | FabricParticipantInfo>;
+  list(args: { scope?: "local"; lifecycle: "persistent" }): Promise<FabricPersistentAgentInfo[]>;
+  list(args: { scope: "lineage" | "project"; lifecycle: "persistent" }): Promise<Array<FabricPersistentAgentInfo | FabricParticipantInfo>>;
+  list(args: { scope?: "local"; lifecycle: "all" }): Promise<Array<FabricAgentResult | FabricAgentHandle | FabricPersistentAgentInfo>>;
+  list(args: { scope: "lineage" | "project"; lifecycle: "all" }): Promise<Array<FabricAgentResult | FabricAgentHandle | FabricPersistentAgentInfo | FabricParticipantInfo>>;
+  list(args?: { scope?: FabricParticipantScope; lifecycle?: "one-shot" }): Promise<Array<FabricAgentResult | FabricAgentHandle | FabricParticipantInfo>>;
+  list(args: { scope?: FabricParticipantScope; lifecycle: FabricAgentLifecycle }): Promise<Array<FabricAgentResult | FabricAgentHandle | FabricPersistentAgentInfo | FabricParticipantInfo>>;
   members(args?: { scope?: FabricParticipantScope; kinds?: FabricParticipantKind[]; includeStale?: boolean }): Promise<FabricParticipantInfo[]>;
   self(): Promise<FabricParticipantInfo>;
   main(): Promise<FabricMainAgentInfo>;
@@ -569,34 +636,33 @@ interface FabricAgentsApi {
   subscriptions(args?: { from?: string; to?: string }): Promise<FabricLifecycleSubscription[]>;
   unsubscribe(args: { id: string }): Promise<{ removed: boolean }>;
   models(args?: { runner?: FabricAgentRunner; refresh?: boolean }): Promise<FabricModelInfo[]>;
-  stop(args: { id: string }): Promise<FabricAgentResult | FabricActorInfo | FabricRemoteControlResult>;
+  stop(args: { id: string }): Promise<FabricAgentResult | FabricPersistentAgentInfo | FabricRemoteControlResult>;
   cleanup(args: { id: string; deleteBranch?: boolean }): Promise<{ cleaned: boolean }>;
-  create(args: FabricActorRequest): Promise<FabricActorInfo>;
-  setModel(args: { id: string; model?: string }): Promise<FabricActorInfo>;
-  setThinking(args: { id: string; thinking?: FabricThinking }): Promise<FabricActorInfo>;
-  setTools(args: { id: string; tools: string[]; scope?: "project" | "global" }): Promise<FabricActorInfo>;
-  setEvents(args: { id: string; events: FabricActorHostEvent[] }): Promise<FabricActorInfo>;
+  create(args: FabricPersistentAgentRequest): Promise<FabricPersistentAgentInfo>;
+  templates(): Promise<FabricAgentTemplate[]>;
+  setModel(args: { id: string; model?: string }): Promise<FabricPersistentAgentInfo>;
+  setThinking(args: { id: string; thinking?: FabricThinking }): Promise<FabricPersistentAgentInfo>;
+  setTools(args: { id: string; tools: string[]; scope?: "project" | "global" }): Promise<FabricPersistentAgentInfo>;
+  setEvents(args: { id: string; events: FabricPersistentAgentHostEvent[] }): Promise<FabricPersistentAgentInfo>;
   setDeliveryPolicy(args: {
     id: string;
-    delivery: FabricActorDelivery;
+    delivery: FabricPersistentAgentDelivery;
     triggerTurn: boolean;
     scope?: "project" | "global";
-  }): Promise<FabricActorInfo>;
+  }): Promise<FabricPersistentAgentInfo>;
   setInstructions(args: {
     id: string;
     instructions: string;
     scope?: "project" | "global";
-  }): Promise<FabricActorInfo>;
-  ask(args: { id: string; message: string; data?: unknown; maxTokens?: number }): Promise<FabricActorMessage>;
+  }): Promise<FabricPersistentAgentInfo>;
+  ask(args: { id: string; message: string; data?: unknown; maxTokens?: number }): Promise<FabricPersistentAgentMessage>;
   tell(args: { id: string; message: string; data?: unknown; maxTokens?: number }): Promise<{ queued: true; messageId: string }>;
   steer(args: { id: string; message: string; data?: unknown }): Promise<{ queued: true; messageId: string; routed?: "local" | "main" | "mesh"; acknowledged?: boolean }>;
   followUp(args: { id: string; message: string; data?: unknown }): Promise<{ queued: true; messageId: string; routed?: "local" | "main" | "mesh"; acknowledged?: boolean }>;
   setSteeringMode(args: { id: string; mode: "all" | "one-at-a-time" }): Promise<{ queued: true; messageId: string }>;
   setFollowUpMode(args: { id: string; mode: "all" | "one-at-a-time" }): Promise<{ queued: true; messageId: string }>;
-  actorStatus(args: { id: string }): Promise<FabricActorInfo>;
-  actors(): Promise<FabricActorInfo[]>;
-  actorTelemetry(): Promise<{
-    actors: number;
+  telemetry(): Promise<{
+    persistent: number;
     open: number;
     lifetimeExhausted: number;
     windowExhausted: number;
@@ -607,8 +673,8 @@ interface FabricAgentsApi {
     activationDeadLetters: number;
     deliveryDeadLetters: number;
   }>;
-  messages(args: { id: string; limit?: number }): Promise<FabricActorMessage[]>;
-  retryDelivery(args: { id: string; messageId: string }): Promise<FabricActorMessage>;
+  messages(args: { id: string; limit?: number }): Promise<FabricPersistentAgentMessage[]>;
+  retryDelivery(args: { id: string; messageId: string }): Promise<FabricPersistentAgentMessage>;
   remove(args: { id: string }): Promise<{ removed: boolean }>;
   log(args: {
     id: string;
@@ -616,7 +682,7 @@ interface FabricAgentsApi {
     lines?: number;
     before?: number;
     runId?: string;
-  }): Promise<FabricActorLog | FabricAgentLog>;
+  }): Promise<FabricPersistentAgentLog | FabricAgentLog>;
 }
 interface FabricMcpResult {
   text: string;
@@ -747,7 +813,7 @@ interface FabricConsultApi {
 interface FabricMeshIdentity {
   id: string;
   name: string;
-  kind: "main" | "actor" | "agent";
+  kind: "main" | "persistentAgent" | "agent";
   sessionId?: string;
 }
 interface FabricMeshEvent {
@@ -1120,7 +1186,7 @@ interface FabricWorkflowAgentOptions extends Omit<FabricAgentRequest, "task"> {
   label?: string;
 }
 type FabricActivityStatus = "pending" | "running" | "completed" | "failed" | "blocked" | "stopped";
-type FabricActivityKind = "agent" | "actor" | "tool" | "extension" | "mcp" | "mesh" | "task" | "custom";
+type FabricActivityKind = "agent" | "persistentAgent" | "tool" | "extension" | "mcp" | "mesh" | "task" | "custom";
 interface FabricWorkflowDisplay {
   name?: string;
   description?: string;

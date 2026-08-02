@@ -1,6 +1,6 @@
 ---
 name: fabric-guide
-description: Recommends the right user-invoked Pi Fabric workflow without running it. Use when you want help choosing among workflow, council, fusion, RLM, Schema, ambient actors, or swarm.
+description: Recommends the right user-invoked Pi Fabric workflow without running it. Use when you want help choosing among workflow, council, fusion, RLM, Schema, ambient persistent agents, or swarm.
 disable-model-invocation: true
 ---
 
@@ -19,9 +19,9 @@ Recommend the smallest sufficient path; do not invoke it. Core coding needs no a
 | Persistent progress toward one measurable goal | `/skill:fabric-supervisor` |
 | Strict feature-spec compliance, audited until verified | `/skill:fabric-spec` |
 | One command that infers advisor versus supervisor | `/skill:fabric-ambient` |
-| Durable actor team with mailboxes and CAS tasks | `/skill:fabric-swarm` |
+| Durable persistent agent team with mailboxes and CAS tasks | `/skill:fabric-swarm` |
 
-Prefer the smallest sufficient mechanism. Distinguish workflow/council/fusion by execution shape, RLM by context size, ambient roles by persistence, and swarm by durable multi-actor coordination.
+Prefer the smallest sufficient mechanism. Distinguish workflow/council/fusion by execution shape, RLM by context size, ambient roles by persistence, and swarm by durable multi-agent coordination.
 
 ## Completion criterion
 

@@ -1,37 +1,64 @@
 ---
 name: fabric-supervisor
-description: Starts a persistent Pi Fabric supervisor that watches the main session toward a concrete goal and steers only when needed. Use for long-running goal supervision without another extension.
+description: Creates or reuses Ultra Fabric's native persistent supervisor role for one concrete, measurable goal. Use for long-running Main-session drift, blocker, and completion supervision. Do not use for one-shot review or ordinary advice; use an Agent reviewer or fabric-advisor instead.
 disable-model-invocation: true
 ---
 
 # Fabric Supervisor
 
-Create the supervisor with Fabric primitives; do not install a supervisor extension. Derive a concrete, measurable goal from the skill arguments or active request without asking for information already present.
+This skill is setup UX. The native `supervisor` role profile owns event subscriptions, directive validation, delivery, coalescing, tools, model defaults, completion behavior, and turn bounds. Do not duplicate that policy in a second prompt or install a supervisor extension.
 
-Hard pointer: read `<skill-dir>/../fabric-ambient/references/setup.md` completely before setup, then use its program with:
+## Setup
 
-- `strings.name`: `supervisor`
-- `strings.events`: `["agent_settled","tool_error"]`
-- `strings.triggerTurn`: `true`
-- `strings.model`: model key or substring, or an empty string when unset
-- `strings.instructions`: the prompt below with `GOAL` replaced
+Derive one concrete goal from the skill arguments or active request. Pass it as `strings.goal` to this program:
 
-```text
-You are an ambient supervisor for this goal:
+```ts
+const goal = π.goal.trim();
+if (!goal) throw new Error("fabric-supervisor requires a concrete goal");
 
-<goal>
-GOAL
-</goal>
+const catalog = await agents.roles({ lifecycle: "persistent" });
+const profile = catalog.roles.find((candidate) => candidate.name === "supervisor");
+if (!profile) {
+  throw new Error(
+    `The native supervisor role is unavailable: ${catalog.diagnostics.join("; ") || "restore agents/supervisor.md"}`,
+  );
+}
 
-Review the supplied parent-session event and recent transcript as an outside observer, not a second implementer.
+const existing = (await agents.list({ lifecycle: "persistent" })).find(
+  (agent) => agent.name === "supervisor" && agent.status !== "stopped",
+);
+const instructions = `Supervise Main only for this concrete goal:
 
-Return {"action":"silent"} while work is productively advancing. Return {"action":"message","message":"..."} only when material work is missing at idle, work is drifting, a tool error left it stuck, or one concrete next action is needed. Keep guidance direct and at most three sentences. Do not repeat prior guidance, request credentials, or invent user decisions.
+${goal}`;
 
-The goal is complete only when the requested result and relevant validation are evident. Then return {"action":"stop","message":"Goal verified complete."}.
+if (existing) {
+  const warnings = [
+    ...(existing.role !== "supervisor" ? [`existing Agent has role ${existing.role}; stop and remove it before recreation`] : []),
+    ...(existing.goal !== goal ? ["existing supervisor owns a different goal; stop and remove it before recreation"] : []),
+    ...(existing.status !== "idle" ? [`existing supervisor is ${existing.status}; wait until idle before updating it`] : []),
+  ];
+  if (warnings.length) return { reused: false, agent: existing, profile, warnings };
+  await agents.setInstructions({ id: existing.id, instructions });
+  return { reused: true, agent: await agents.status({ id: existing.id }), profile, warnings: [] };
+}
+
+const agent = await agents.create({
+  name: "supervisor",
+  role: "supervisor",
+  goal,
+  instructions,
+});
+return { started: true, agent, profile, warnings: [] };
 ```
 
-Idle/error events avoid a model run on every turn. `triggerTurn: true` lets a material steer resume an idle Main session.
+Do not override the profile's events, delivery, directive mode, tools, or budget in this skill. Customize those defaults in `.pi/agents/supervisor.md`; choose a model afterward with `agents.setModel(...)` when an instance-specific override is needed.
 
 ## Completion criterion
 
-Complete only when setup returns a `supervisor` with both events, read-only native tools, `triggerTurn: true`, and no recreation warning. If warnings remain, report the required remediation without recreating or retrying automatically. Otherwise report the goal, actor ID, and derived `/fabric messages`/`stop` commands; do not wait.
+Complete when setup returns a persistent Agent with `role: "supervisor"`, the requested goal, and no warnings. Report its ID and the `agents.messages({ id })` and `agents.stop({ id })` calls. Do not wait for the supervised goal in the setup invocation.
+
+## When NOT to use
+
+- For one fresh correctness pass, run a one-shot `reviewer` Agent.
+- For advice only at explicit decision points, use `fabric-advisor`.
+- For task execution, use a `worker` Agent. A supervisor observes and steers; it does not become a second implementer.
