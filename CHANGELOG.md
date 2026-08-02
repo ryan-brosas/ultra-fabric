@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.31.1-ultra.0 - Unreleased
+## 0.31.1-ultra.0 - 2026-08-02
 
 First experimental Ultra Fabric prerelease, based on pi-fabric 0.31.1.
 
