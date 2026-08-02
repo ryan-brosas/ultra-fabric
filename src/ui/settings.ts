@@ -72,7 +72,7 @@ const BUDGET_VALUES = [0, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10];
 const TOKEN_VALUES = [0, 50_000, 100_000, 250_000, 500_000, 1_000_000, 2_000_000];
 const PREWALK_MODEL_UNSET_LABEL = "Ask each time";
 const PREWALK_THINKING_INHERIT_LABEL = "Agents default";
-const PREWALK_MODES = ["in-place", "trajectory"] as const;
+const PREWALK_MODES = ["research", "in-place", "trajectory"] as const;
 const PREWALK_RETURN_POLICIES = ["executor", "previous"] as const;
 const PREWALK_VERIFICATION_MODES = ["legacy", "gated"] as const;
 const PREWALK_REVISION_LIMITS = Array.from({ length: 9 }, (_, index) => String(index));
@@ -810,15 +810,15 @@ export const buildFabricSettingsItems = (
       ),
     }),
     setting("prewalk", "Prewalk", summaryFor("prewalk", config), {
-      description: "Continue Main in place or opt into a child trajectory handoff at the completed fabric_exec boundary.",
+      description: "Choose research-compatible first-mutation switching, legacy in-place continuation, or a child trajectory handoff.",
       submenu: sectionSubmenu(
         theme,
         "Prewalk",
-        "Automatic continuation at the completed outer fabric_exec boundary.",
+        "Research mode stops at the first successful host-observed mutation; legacy modes continue at the completed outer fabric_exec boundary.",
         [
           setting("prewalk.mode", "Mode", config.prewalk.mode, {
             description:
-              "In-place switches Main and queues a hidden continuation; its return policy decides whether the executor remains selected. Trajectory moves the session snapshot to a visible child executor, then queues a hidden verify-and-summarize continuation for Main when it finishes.",
+              "Research requires a host-accepted 5-9 item checklist, stops after the first successful configured mutation, and keeps the executor selected through verification. In-place switches after the outer call completes. Trajectory moves a completed snapshot to a child executor.",
             values: PREWALK_MODES,
           }),
           setting(
@@ -827,7 +827,7 @@ export const buildFabricSettingsItems = (
             config.prewalk.returnPolicy,
             {
               description:
-                "Keep the executor model, or restore the previous Main model after the owned continuation settles. Trajectory mode never changes Main's model.",
+                "Keep the executor model, or restore the previous Main model after a legacy in-place continuation settles. Research always keeps the executor; trajectory never changes Main's model.",
               values: PREWALK_RETURN_POLICIES,
             },
           ),
@@ -869,11 +869,11 @@ export const buildFabricSettingsItems = (
               : PREWALK_THINKING_INHERIT_LABEL,
             {
               description:
-                "Reasoning effort for the trajectory child executor. Agents default inherits Agents › Default thinking; in-place keeps Main's session level. The level is clamped to each model's supported levels.",
+                "Reasoning effort for the trajectory child executor. Agents default inherits Agents › Default thinking; research and in-place keep Main's session level. The level is clamped to each model's supported levels.",
               submenu: thinkingSubmenu(theme, {
                 title: "Prewalk thinking",
                 description:
-                  "Reasoning effort for the trajectory child executor. Agents default uses the Agents section's Default thinking; in-place keeps Main's session level. Clamped to each model's supported levels (next highest if unsupported).",
+                  "Reasoning effort for the trajectory child executor. Agents default uses the Agents section's Default thinking; research and in-place keep Main's session level. Clamped to each model's supported levels (next highest if unsupported).",
                 inheritLabel: PREWALK_THINKING_INHERIT_LABEL,
               }),
             },
@@ -884,7 +884,7 @@ export const buildFabricSettingsItems = (
             config.prewalk.model || PREWALK_MODEL_UNSET_LABEL,
             {
               description:
-                "Pi provider/model used by /fabric prewalk. In-place selects it for Main; trajectory uses it for the child executor. Ask each time is interactive only.",
+                "Pi provider/model used by /fabric prewalk. Research and in-place select it for Main; trajectory uses it for the child executor. Ask each time is interactive only.",
               submenu: modelPickerSubmenu(
                 theme,
                 options.modelSource,

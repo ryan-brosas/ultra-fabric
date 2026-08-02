@@ -169,6 +169,14 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ prewalk: { mode: "trajectory" } }).prewalk.mode).toBe(
       "trajectory",
     );
+    expect(normalizeFabricConfig({ prewalk: { mode: "research" } }).prewalk.mode).toBe(
+      "research",
+    );
+    expect(
+      normalizeFabricConfig({
+        prewalk: { mode: "research", returnPolicy: "previous" },
+      }).prewalk.returnPolicy,
+    ).toBe("executor");
     expect(normalizeFabricConfig({ prewalk: { mode: "child" } }).prewalk.mode).toBe(
       "in-place",
     );

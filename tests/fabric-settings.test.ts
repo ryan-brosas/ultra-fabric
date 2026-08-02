@@ -528,7 +528,7 @@ describe("FabricSettingsComponent", () => {
       ...DEFAULT_FABRIC_CONFIG,
       prewalk: {
         ...DEFAULT_FABRIC_CONFIG.prewalk,
-        mode: "in-place" as const,
+        mode: "research" as const,
         returnPolicy: "executor" as const,
         model: "anthropic/claude-sonnet-4-5",
         alwaysRearm: false,
@@ -542,7 +542,7 @@ describe("FabricSettingsComponent", () => {
     const lines = prewalk.submenu!("", () => {}).render(100).join("\n");
 
     expect(lines).toContain("Mode");
-    expect(lines).toContain("in-place");
+    expect(lines).toContain("research");
     expect(lines).toContain("Always re-arm");
     expect(lines).toContain("Verification");
     expect(lines).toContain("legacy");

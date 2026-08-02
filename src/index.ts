@@ -12,7 +12,10 @@ import { registerFabricPersistentAgentHostEventObservers } from "./agents/persis
 import { CapturedToolCatalog } from "./capture/catalog.js";
 import { installRegisteredToolCapture } from "./capture/interceptor.js";
 import { registerFabricCommand } from "./commands/fabric.js";
-import { filterPrewalkContinuationMessages } from "./prewalk/continuation.js";
+import {
+  filterPrewalkContinuationMessages,
+  filterPrewalkPlanningMessages,
+} from "./prewalk/continuation.js";
 import { restorePrewalkModel } from "./prewalk/model.js";
 import { withTrajectoryRearmDirective } from "./prewalk/handoff.js";
 import type { PendingFabricHandoff } from "./prewalk/handoff.js";
@@ -445,27 +448,29 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
   });
 
   pi.on("context", (event, context) => {
+    const sessionId = context.sessionManager.getSessionId();
     const continuation = filterPrewalkContinuationMessages(
       event.messages,
       (handoffId) =>
         state.initialized &&
-        state.prewalk.acceptContinuation(
-          context.sessionManager.getSessionId(),
-          handoffId,
-        ),
+        state.prewalk.acceptContinuation(sessionId, handoffId),
+    );
+    const planning = filterPrewalkPlanningMessages(
+      continuation.messages,
+      state.initialized && state.prewalk.isResearchPlanning(sessionId),
     );
     const contextQos = state.initialized
       ? state.config.compaction.contextQos
       : DEFAULT_FABRIC_CONFIG.compaction.contextQos;
     const qos = contextQos.enabled
-      ? applyContextQos(continuation.messages, contextQos)
+      ? applyContextQos(planning.messages, contextQos)
       : {
-          messages: continuation.messages,
+          messages: planning.messages,
           changed: false,
           report: { retiredResults: 0, retiredChars: 0, protectedResults: 0 },
         };
     state.noteContextQos(qos.report);
-    let changed = continuation.changed || qos.changed;
+    let changed = continuation.changed || planning.changed || qos.changed;
     const messages = qos.messages.map((message) => {
       if (message.role !== "user") return message;
       if (typeof message.content === "string") {
@@ -498,11 +503,10 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     const effectiveFullCodeMode = fullCodeMode || schemaMode === "enforce";
     if (!pi.getActiveTools().includes("fabric_exec")) return;
     const skills = event.systemPromptOptions.skills ?? [];
-    // Pi omits its entire skill catalog when the active tool set lacks a tool
-    // named read. Restore that catalog in full code mode with only the loader
-    // instruction adapted to Fabric's nested pi.read path.
+    // Full code mode replaces Pi's direct read tool, so retain task-relevant
+    // skill descriptions and a bounded path index for on-demand discovery.
     const systemPrompt = effectiveFullCodeMode
-      ? restoreSkillsForFullCodePrompt(event.systemPrompt, skills)
+      ? restoreSkillsForFullCodePrompt(event.systemPrompt, skills, { prompt: event.prompt })
       : event.systemPrompt;
     // Pi expands the invoked skill into the user message, but wrappers may
     // delegate by name. Resolve only explicit invocation lines so full code
@@ -511,8 +515,8 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
       ? buildSkillReferenceGuidance(event.prompt, skills)
       : undefined;
     const guidance = (effectiveFullCodeMode
-      ? "Pi Fabric full code mode: `fabric_exec` is the only way to call Pi core tools — use them as `pi.*` inside `code`.\nExamples and returns: `pi.read('/x')`, `pi.grep('TODO','src')` / `pi.grep({pattern:'TODO', path:'src', ignoreCase:true, context:2})`, `pi.find({pattern:'*.ts', path:'src', limit:20})`, and `pi.ls('src')` return strings; `pi.bash({cmd:'ls'})`, `pi.edit({path:'/x', old:'a', new:'b'})`, and `pi.write({path:'/y', text:'z'})` return `{ok, output, details}` (read `.output`); failed core calls reject, including `bash` on an ordinary nonzero exit; pass `settle: true` to `pi.bash` to get `{ ok: false, exitCode, output, error }` instead. Timeout, cancellation, approval, and security failures still reject.\n`tools` is discovery + generic calls only (`providers`/`catalog`/`list`/`search`/`describe`/`call`/`models`). Call known MCP tools as `mcp.<sanitized_server>.<sanitized_tool>(args)`, captured tools as `extensions.<tool>(args)`, and stable providers as `memory.*`, `state.*`, `schema.*`, or `compact.*`. Use `tools.call({ref,args})` for computed refs. `pi` is the core tools; `π.<key>` reads named `strings` (not a tool)."
-      : "Pi Fabric is in orchestration-only mode. Pi core and registered extension tools stay on their native direct execution path; inside fabric_exec, `pi.*` and `extensions.*` are unavailable. Call known actions through `mcp.<sanitized_server>.<sanitized_tool>(args)`, `memory.*`, `state.*`, `schema.*`, `compact.*`, `agents.*`, or `mesh.*`; use `tools.catalog`/`search`/`describe`/`list` for discovery and `tools.call({ref,args})` for computed refs. Other surfaces are opt-in via user-loaded skills.")
+      ? "Pi Fabric full code mode: fabric_exec is the exclusive model tool. Inside code, use pi.* for core tools, extensions.* for registered tools, mcp.<server>.<tool> for known MCP actions, stable provider globals (memory/state/schema/compact/agents/mesh), and tools.call({ref,args}) for computed refs. pi.read/grep/find/ls return strings; pi.bash/edit/write return {ok,output,details} and reject on failure (use settle:true for expected nonzero). Use top-level strings through π.key for awkward payloads; load the fabric-exec skill for exact signatures."
+      : "Pi Fabric orchestration-only mode keeps pi.* and extensions.* unavailable inside fabric_exec while native host tools remain direct. Use known mcp.<server>.<tool> actions, stable provider globals, discovery through tools.catalog/search/describe/list, and tools.call({ref,args}) for computed refs.")
       + (schemaMode === "enforce"
         ? "\n\nSchema enforce mode is fixed for this session. Reads remain available, but protected-workspace changes must use schema.hypothesize → schema.verify → schema.commit in the same fabric_exec invocation. Direct pi.edit/write/bash, agents, state/mesh writes, compaction requests, MCP, extensions, and external providers are blocked by the host gate."
         : schemaMode === "audit"

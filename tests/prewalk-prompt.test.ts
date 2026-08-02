@@ -38,7 +38,9 @@ describe("prewalk prompt isolation", () => {
     expect(end).toBeGreaterThan(start);
     const handler = source.slice(start, end);
     expect(handler).toContain("filterPrewalkContinuationMessages");
+    expect(handler).toContain("filterPrewalkPlanningMessages");
     expect(handler).toContain("state.prewalk.acceptContinuation");
+    expect(handler).toContain("state.prewalk.isResearchPlanning");
     expect(handler).toContain("context.sessionManager.getSessionId()");
     expect(handler).toContain("applyContextQos");
     expect(handler).toContain("state.noteContextQos");
@@ -61,24 +63,34 @@ describe("prewalk prompt isolation", () => {
       0,
     );
 
-    expect(visibleGuidelines).toHaveLength(5);
-    expect(visibleGuidelineChars).toBeLessThanOrEqual(2_200);
+    expect(visibleGuidelines).toHaveLength(3);
+    expect(visibleGuidelineChars).toBeLessThanOrEqual(1_200);
     expect(guidelines).toContain("acceptance ledger");
     expect(guidelines).toContain("direct behavioral probes");
     expect(guidelines).toContain("requested public symbols, registrations, and configuration entries");
-    expect(guidelines).toContain("smallest checks that cover the ledger");
-    expect(guidelines).toContain("instead of rerunning unchanged passing checks");
     expect(guidelines).toContain("A build alone is not completion");
     expect(guidelines).toContain("one `pi.edit({path, edits:[...]})`");
-    expect(guidelines).toContain("`all:true` only for intentional repeated exact anchors");
-    expect(guidelines).toContain("`literal:true` for exact punctuated text");
-    expect(guidelines).toContain("fan-out search limits small");
-    expect(guidelines).toContain("`settle:true` for tests or probes");
-    expect(guidelines).toContain("`timeout` in seconds once");
+    expect(guidelines).toContain("`literal:true`");
+    expect(guidelines).toContain("`settle:true`");
     expect(guidelines).toContain("batch only independent, bounded work");
-    expect(guidelines).toContain("not raw logs or unused intermediate results");
-    expect(guidelines).toContain("pass payloads through top-level `strings`");
-    expect(guidelines).toContain("prefer `pi.edit`/`pi.write`");
+    expect(guidelines).toContain("not raw logs");
+    expect(guidelines).toContain("top-level `strings`");
+    expect(visibleGuidelines.every((line) => line.includes("fabric_exec"))).toBe(true);
+  });
+
+  it("keeps full-code session guidance under its recurring budget", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "index.ts"), "utf8");
+    const start = source.indexOf('? "Pi Fabric full code mode:');
+    const end = source.indexOf(': "Pi Fabric orchestration-only mode', start);
+    const guidance = source.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(guidance.length).toBeLessThanOrEqual(800);
+    expect(guidance).toContain("fabric_exec");
+    expect(guidance).toContain("pi.*");
+    expect(guidance).toContain("tools.call");
+    expect(guidance).toContain("settle:true");
   });
 
   it("runs handoff from finalized outer message_end without aborting nested calls", () => {
@@ -97,6 +109,18 @@ describe("prewalk prompt isolation", () => {
     expect(boundaryHandlers).toContain('pi.on("message_end"');
     expect(boundaryHandlers).toContain("state.runHandoffAtBoundary");
     expect(toolSource).toContain("state.claimHandoff");
+    expect(toolSource).toContain("state.prewalk.executionBoundary(sessionId)");
+    expect(toolSource).toContain("...(prewalk ? { prewalk } : {})");
+  });
+
+  it("selects a prunable planning message type for research arms", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "commands", "fabric.ts"),
+      "utf8",
+    );
+    expect(source).toContain("prewalkArmedMessageType(state.config.prewalk.mode)");
+    expect(source).toContain("customType: armedMessageType");
+    expect(source).toContain("hasPrewalkArmedPrompt(");
   });
 
   it("disarms the captured task from the agent_settled lifecycle", () => {

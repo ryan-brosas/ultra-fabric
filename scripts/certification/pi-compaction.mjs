@@ -12,12 +12,11 @@ const internalCompactionUrl = pathToFileURL(
 ).href;
 const internalCompaction = await import(internalCompactionUrl);
 
-if (piPackage.version !== "0.80.6") {
-  throw new Error(`Certification requires Pi 0.80.6, resolved ${String(piPackage.version)}`);
-}
 if (typeof internalCompaction.prepareCompaction !== "function"
   || typeof internalCompaction.estimateContextTokens !== "function") {
-  throw new Error("Installed Pi compaction internals do not expose the expected 0.80.6 functions");
+  throw new Error(
+    `Installed Pi ${String(piPackage.version)} compaction internals do not expose the required certification functions`,
+  );
 }
 
 export const PI_COMPACTION_API = Object.freeze({

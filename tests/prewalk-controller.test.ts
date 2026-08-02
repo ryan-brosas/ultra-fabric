@@ -197,4 +197,79 @@ describe("PrewalkController", () => {
     ).toBeUndefined();
     expect(controller.status()).toEqual({ state: "idle" });
   });
+
+  it("gates research mutations on a host-observed checklist", () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      mode: "research",
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement",
+      returnPolicy: "previous",
+    });
+    const boundary = controller.executionBoundary("session-1");
+    expect(boundary).toBeDefined();
+    expect(controller.status()).toMatchObject({
+      mode: "research",
+      returnPolicy: "executor",
+    });
+
+    expect(() => boundary!.authorize({
+      ref: "pi.write",
+      risk: "write",
+      effect: "workspace",
+    })).toThrow(/checklist/i);
+
+    boundary!.registerChecklist({
+      items: Array.from({ length: 5 }, (_, index) => ({
+        task: `Change target ${index + 1}`,
+        validation: `Run check ${index + 1}`,
+      })),
+    });
+    const reservation = boundary!.authorize({
+      ref: "pi.write",
+      risk: "write",
+      effect: "workspace",
+    });
+    expect(reservation).toBe(true);
+    expect(boundary!.settle(reservation, audit("pi.write", true, 1, "write", "workspace")))
+      .toBe(true);
+    expect(controller.status()).toMatchObject({
+      state: "armed",
+      checklist: { items: expect.any(Array) },
+    });
+  });
+
+  it("serializes the research mode first mutation reservation", () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      mode: "research",
+      model: "anthropic/executor",
+      sessionId: "session-1",
+    });
+    const boundary = controller.executionBoundary("session-1")!;
+    boundary.registerChecklist({
+      items: Array.from({ length: 5 }, (_, index) => ({
+        task: `Change target ${index + 1}`,
+        validation: `Run check ${index + 1}`,
+      })),
+    });
+
+    const reservation = boundary.authorize({
+      ref: "pi.edit",
+      risk: "write",
+      effect: "workspace",
+    });
+    expect(() => boundary.authorize({
+      ref: "pi.write",
+      risk: "write",
+      effect: "workspace",
+    })).toThrow(/already in flight/i);
+    boundary.release(reservation);
+    expect(boundary.authorize({
+      ref: "pi.write",
+      risk: "write",
+      effect: "workspace",
+    })).toBe(true);
+  });
 });

@@ -8,9 +8,12 @@ import type { AgentToolResultMessage } from "../src/agents/types.js";
 import type { FabricExecutionResult } from "../src/execution-service.js";
 import { PrewalkController } from "../src/prewalk/controller.js";
 import {
+  type BoundaryHandoffRunner,
   PREWALK_ARMED_MESSAGE_TYPE,
+  PREWALK_PLAN_MESSAGE_TYPE,
   claimFabricHandoff,
   hasPrewalkArmedPrompt,
+  prewalkArmedMessageType,
   prewalkArmedPrompt,
   runFabricHandoffAtBoundary,
   withTrajectoryRearmDirective,
@@ -204,6 +207,64 @@ describe("outer-boundary Prewalk", () => {
       "fabric-prewalk",
       "continuation pending → anthropic/executor",
     );
+  });
+
+  it("continues research Prewalk in place with the accepted checklist", async () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      mode: "research",
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement the guard",
+      returnPolicy: "previous",
+    });
+    const items = Array.from({ length: 5 }, (_, index) => ({
+      task: `Change target ${index + 1}`,
+      validation: `Run check ${index + 1}`,
+    }));
+    controller.executionBoundary("session-1")!.registerChecklist({ items });
+    expect(controller.isResearchPlanning("session-1")).toBe(true);
+    const run = execution();
+    run.prewalkBoundary = { ref: "pi.edit", nestedToolCallId: "edit-one" };
+    const pending = claimFabricHandoff(controller, run, "session-1", "json");
+
+    expect(pending).toMatchObject({
+      kind: "prewalk-research",
+      checklist: { items },
+      returnPolicy: "executor",
+      triggerRef: "pi.edit",
+    });
+
+    const host = context();
+    const api = extension();
+    const result = await runFabricHandoffAtBoundary(
+      controller,
+      unusedRunner(),
+      api.value,
+      pending!,
+      outerResult(),
+      host.value,
+    );
+
+    expect(api.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: "pi-fabric-prewalk-continue",
+        content: expect.stringMatching(/Change target 1[\s\S]*Validation: Run check 1/),
+      }),
+      { deliverAs: "followUp", triggerTurn: true },
+    );
+    expect(result).toMatchObject({
+      prewalk: true,
+      mode: "research",
+      continued: true,
+      model: "anthropic/executor",
+    });
+    expect(controller.status()).toMatchObject({
+      state: "continuation_pending",
+      mode: "research",
+      returnPolicy: "executor",
+    });
+    expect(controller.isResearchPlanning("session-1")).toBe(false);
   });
 
   it("queues an explicit gated verification continuation", async () => {
@@ -458,6 +519,51 @@ describe("outer-boundary Prewalk", () => {
       "fabric-prewalk",
       "continuation pending → anthropic/executor",
     );
+  });
+
+  it("blocks continuation delivery failure without discarding a completed trajectory", async () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      mode: "trajectory",
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement the guard",
+    });
+    const pending = claimFabricHandoff(controller, execution(), "session-1", "json")!;
+    const ctx = context();
+    const ext = extension();
+    ext.sendMessage.mockImplementation(() => {
+      throw new Error("follow-up queue unavailable");
+    });
+    const runner: BoundaryHandoffRunner = {
+      executeHandoff: vi.fn(async () => ({
+        handedOff: true,
+        completed: true,
+        status: "completed",
+        implementation: "implemented",
+      })),
+    };
+
+    const result = await runFabricHandoffAtBoundary(
+      controller,
+      runner,
+      ext.value,
+      pending,
+      outerResult(),
+      ctx.value,
+    );
+
+    expect(result).toMatchObject({
+      completed: true,
+      implementation: "implemented",
+      continuationQueued: false,
+      continuationError: "follow-up queue unavailable",
+    });
+    expect(pending.audit.success).toBe(true);
+    expect(controller.status()).toMatchObject({
+      state: "blocked",
+      error: "Prewalk continuation delivery failed: follow-up queue unavailable",
+    });
   });
 
   it("turns a revise gate into a scoped revision handoff", () => {
@@ -828,6 +934,19 @@ describe("outer-boundary Prewalk", () => {
 });
 
 describe("prewalkArmedPrompt", () => {
+  it("defines the bounded research protocol before execution", () => {
+    const text = prewalkArmedPrompt("research", "anthropic/executor");
+    expect(prewalkArmedMessageType("research")).toBe(PREWALK_PLAN_MESSAGE_TYPE);
+    expect(text).toContain("anthropic/executor (research)");
+    expect(text).toContain("deep, concrete");
+    expect(text).toContain("prewalk.checklist");
+    expect(text).toContain("5-9");
+    expect(text).toContain("validation");
+    expect(text).toContain("first successful mutation");
+    expect(text).toContain("Do not batch");
+    expect(text).toContain("continue the task");
+  });
+
   it("describes the trajectory boundary for Main", () => {
     const text = prewalkArmedPrompt("trajectory", "anthropic/executor");
     expect(text).toContain("anthropic/executor (trajectory)");

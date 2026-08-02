@@ -4,6 +4,7 @@ import type { CapturedToolCatalog } from "../src/capture/catalog.js";
 import { registerFabricCommand } from "../src/commands/fabric.js";
 import {
   PREWALK_ARMED_MESSAGE_TYPE,
+  PREWALK_PLAN_MESSAGE_TYPE,
   prewalkArmedPrompt,
 } from "../src/prewalk/handoff.js";
 import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
@@ -111,6 +112,22 @@ describe("/fabric command", () => {
     // Advisory framing lands in the queue before the task submission.
     expect(sendMessage.mock.invocationCallOrder[0]).toBeLessThan(
       sendUserMessage.mock.invocationCallOrder[0]!,
+    );
+
+    state.config.prewalk.mode = "research";
+    sendMessage.mockClear();
+    await handler!("prewalk Research the token guard", context);
+    expect(arm).toHaveBeenLastCalledWith(expect.objectContaining({
+      mode: "research",
+      task: "Research the token guard",
+    }));
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: PREWALK_PLAN_MESSAGE_TYPE,
+        content: prewalkArmedPrompt("research", "anthropic/executor"),
+        display: false,
+      }),
+      { deliverAs: "nextTurn" },
     );
   });
 

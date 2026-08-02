@@ -126,6 +126,7 @@ See the [interface & commands reference](docs/interface.md) for every view, keyb
 - [Fork boundary](docs/adr/0001-fork-boundary.md) — what stays upstream-shaped and what becomes Ultra-native.
 - [Configuration](docs/configuration.md) — `fabric.json`, code modes, tool capture, approvals, and budgets.
 - [Quality enforcement](docs/quality.md). Configure trusted changed-file checks for programming languages, HTML, CSS, and custom formats.
+- [Certification and benchmarks](docs/certification.md) — offline certification, the 20-task Prewalk contract corpus, bounded evidence analysis, and opt-in real-model benchmarks.
 - [Interface & commands](docs/interface.md) — dashboard, settings, keybindings, slash commands, and headless runs.
 - [Agents & mesh](docs/agents.md) — Ultra Consult, agents, trajectory-preserving model handoff and `/fabric prewalk`, the Claude runner, transports, steering, persistent agents, global templates, councils, recursive queries, and durable coordination.
 - [External providers](docs/providers.md) — the versioned provider protocol for extensions.

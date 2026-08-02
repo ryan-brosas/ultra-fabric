@@ -24,6 +24,7 @@ import {
   type FabricCallAudit,
   type FabricRegistryActivityEvent,
 } from "./core/action-registry.js";
+import type { FabricPrewalkExecutionBoundary } from "./prewalk/controller.js";
 import {
   ApprovalController,
   FabricSessionApprovals,
@@ -247,6 +248,7 @@ export interface FabricExecutionResult {
   typeErrors?: FabricTypeError[];
   error?: string;
   handoffRequest?: Record<string, unknown>;
+  prewalkBoundary?: { ref: string; nestedToolCallId: string };
   usage?: Usage;
   run?: FabricRunEnvelopeV1;
   evidence?: FabricEvidenceRef[];
@@ -275,6 +277,7 @@ export interface FabricExecutionOptions {
   tokenBudget?: number;
   maxAgentCalls?: number;
   display?: FabricRunDisplay;
+  prewalk?: FabricPrewalkExecutionBoundary;
   onPartial(snapshot: FabricExecutionPartial): void;
 }
 
@@ -488,6 +491,13 @@ export class FabricExecutionService {
       });
     }
 
+    const prewalkAbort = options.prewalk ? new AbortController() : undefined;
+    const executionSignal = prewalkAbort
+      ? options.signal
+        ? AbortSignal.any([options.signal, prewalkAbort.signal])
+        : prewalkAbort.signal
+      : options.signal;
+    let prewalkBoundary: FabricExecutionResult["prewalkBoundary"];
     const classifierUsages: Usage[] = [];
     const recordAutoDecision = (
       audit: FabricAutoApprovalAudit,
@@ -667,7 +677,7 @@ export class FabricExecutionService {
       get run() {
         return run.envelope;
       },
-      signal: options.signal,
+      signal: executionSignal,
       parentToolCallId: options.parentToolCallId,
       nestedToolCallId: `${options.parentToolCallId}_metadata`,
       extensionContext: options.context,
@@ -750,6 +760,7 @@ export class FabricExecutionService {
       let reservation:
         | { id: string; tokens: number; args: Record<string, unknown> }
         | undefined;
+      let prewalkReservation = false;
       try {
         guardFullCodeRef(ref);
         reservation = reserveAgentCall(ref, args);
@@ -781,10 +792,12 @@ export class FabricExecutionService {
                 },
               }
             : {}),
-          ...(this.authorizer
+          ...(this.authorizer || options.prewalk
             ? {
-                authorize: (action) =>
-                  this.authorizer!.authorize(action.ref, options.parentToolCallId),
+                authorize: async (action) => {
+                  prewalkReservation = options.prewalk?.authorize(action) ?? false;
+                  await this.authorizer?.authorize(action.ref, options.parentToolCallId);
+                },
               }
             : {}),
           approve: async (action, preparedArgs) => {
@@ -799,10 +812,22 @@ export class FabricExecutionService {
           maxResultChars: this.config.executor.maxNestedResultChars,
           traceOperation,
           observeInvocation,
+          settleInvocation(audit) {
+            const stop = options.prewalk?.settle(prewalkReservation, audit) ?? false;
+            prewalkReservation = false;
+            if (!stop || prewalkBoundary) return;
+            prewalkBoundary = {
+              ref: audit.ref,
+              nestedToolCallId: audit.nestedToolCallId,
+            };
+            prewalkAbort?.abort(new Error("Research Prewalk reached its first mutation boundary"));
+          },
         });
         settleAgentCall(ref, reservation, value);
         return value;
       } catch (error) {
+        options.prewalk?.release(prewalkReservation);
+        prewalkReservation = false;
         settleAgentCall(ref, reservation, undefined, true);
         throw error;
       }
@@ -1224,6 +1249,19 @@ export class FabricExecutionService {
                 },
               );
 
+            case "fabric.$prewalkChecklist":
+              return traceAttempt(
+                "fabric.prewalk.checklist",
+                args,
+                runtimeSignal,
+                () => {
+                  if (!options.prewalk) {
+                    throw new Error("Research Prewalk is not armed for this Fabric execution");
+                  }
+                  return options.prewalk.registerChecklist(args);
+                },
+              );
+
             case "fabric.$item":
               return traceAttempt(
                 "fabric.workflow.item",
@@ -1282,7 +1320,7 @@ export class FabricExecutionService {
           ...(checked.javascript ? { transpiledCode: checked.javascript } : {}),
           ...(options.strings ? { strings: options.strings } : {}),
           ...(options.tokenBudget !== undefined ? { tokenBudget: options.tokenBudget } : {}),
-          ...(options.signal ? { signal: options.signal } : {}),
+          ...(executionSignal ? { signal: executionSignal } : {}),
         },
       );
     } catch (error) {
@@ -1308,10 +1346,15 @@ export class FabricExecutionService {
       flushEmit();
     }
 
-    const runtimeOutcome = executionOutcomeFromTermination(sandboxResult.terminationReason);
+    const stoppedAtPrewalkBoundary =
+      prewalkBoundary !== undefined && options.signal?.aborted !== true;
+    const runtimeOutcome = stoppedAtPrewalkBoundary
+      ? "succeeded"
+      : executionOutcomeFromTermination(sandboxResult.terminationReason);
     let qualityWarning: string | undefined;
     const qualityEligible =
       runtimeOutcome === "succeeded" &&
+      !stoppedAtPrewalkBoundary &&
       this.config.quality.mode !== "off" &&
       run.gates.terminal() === undefined &&
       run.gates.pending().length === 0;
@@ -1380,11 +1423,16 @@ export class FabricExecutionService {
     const succeeded = runOutcome === "succeeded";
     run.transitions.recordTerminal(succeeded ? "completed" : runOutcome);
     run.settle(runOutcome);
-    const runError = terminalGateError ?? gateRevisionError ?? sandboxResult.error;
+    const runError =
+      terminalGateError ??
+      gateRevisionError ??
+      (stoppedAtPrewalkBoundary ? undefined : sandboxResult.error);
     this.activity?.finish(options.parentToolCallId, succeeded, runError);
     return this.#recordOutcome({
       success: succeeded,
-      value: terminalGateError || gateRevisionError ? undefined : sandboxResult.value,
+      value: terminalGateError || gateRevisionError || stoppedAtPrewalkBoundary
+        ? undefined
+        : sandboxResult.value,
       logs: qualityWarning ? [...sandboxResult.logs, qualityWarning] : sandboxResult.logs,
       audits,
       phases,
@@ -1393,6 +1441,7 @@ export class FabricExecutionService {
       ...runDetails(),
       ...(runError ? { error: runError } : {}),
       ...(handoffRequest ? { handoffRequest } : {}),
+      ...(prewalkBoundary ? { prewalkBoundary } : {}),
       ...(classifierUsages.length > 0
         ? { usage: aggregateUsage(classifierUsages) }
         : {}),

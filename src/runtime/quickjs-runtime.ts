@@ -563,6 +563,10 @@ const __durableWorkflow = Object.freeze({
   },
 });
 
+globalThis.prewalk = Object.freeze({
+  checklist: (args) => __call("fabric.$prewalkChecklist", args),
+});
+
 globalThis.workflow = Object.freeze({
   agent: __workflowAgent,
   parallel: __workflowParallel,

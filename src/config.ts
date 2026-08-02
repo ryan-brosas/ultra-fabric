@@ -21,7 +21,7 @@ export type FabricAgentTransport =
 export type FabricAgentRunner = "pi" | "claude";
 export type FabricUiWidgetMode = "auto" | "always" | "hidden";
 export type FabricResultFormat = "auto" | "yaml" | "json" | "text";
-export type FabricPrewalkMode = "in-place" | "trajectory";
+export type FabricPrewalkMode = "research" | "in-place" | "trajectory";
 export type FabricPrewalkReturnPolicy = "executor" | "previous";
 type FabricPrewalkVerificationMode = "gated";
 export type FabricExecutorRuntime = "quickjs" | "node-process";
@@ -513,7 +513,9 @@ const prewalkModeValue = (
   value: unknown,
   fallback: FabricPrewalkMode,
 ): FabricPrewalkMode =>
-  value === "in-place" || value === "trajectory" ? value : fallback;
+  value === "research" || value === "in-place" || value === "trajectory"
+    ? value
+    : fallback;
 
 const prewalkReturnPolicyValue = (
   value: unknown,
@@ -723,6 +725,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       )].slice(0, 8)
     : [];
   const prewalkThinking = isFabricThinking(prewalk.thinking) ? prewalk.thinking : undefined;
+  const prewalkMode = prewalkModeValue(prewalk.mode, DEFAULT_FABRIC_CONFIG.prewalk.mode);
   const prewalkTriggerRisks = Array.isArray(prewalk.triggerRisks)
     ? [...new Set(prewalk.triggerRisks.filter((value): value is FabricRisk =>
         value === "read" || value === "write" || value === "execute" ||
@@ -869,11 +872,13 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       ),
     },
     prewalk: {
-      mode: prewalkModeValue(prewalk.mode, DEFAULT_FABRIC_CONFIG.prewalk.mode),
-      returnPolicy: prewalkReturnPolicyValue(
-        prewalk.returnPolicy,
-        DEFAULT_FABRIC_CONFIG.prewalk.returnPolicy,
-      ),
+      mode: prewalkMode,
+      returnPolicy: prewalkMode === "research"
+        ? "executor"
+        : prewalkReturnPolicyValue(
+            prewalk.returnPolicy,
+            DEFAULT_FABRIC_CONFIG.prewalk.returnPolicy,
+          ),
       ...(prewalkModel ? { model: prewalkModel } : {}),
       ...(prewalkFallbackModels.length > 0
         ? { fallbackModels: prewalkFallbackModels }

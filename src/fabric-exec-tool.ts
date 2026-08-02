@@ -93,15 +93,13 @@ export const createFabricExecTool = (
     name: "fabric_exec",
     label: "Fabric",
     description:
-      "Execute type-checked TypeScript through Fabric's configured executor for Pi core tools, MCP, Fabric providers, discovery, and extensions. QuickJS is isolated by default; the optional Node process is an unsafe trusted-code escape hatch. In full code mode, and always in Schema enforce mode, this is the exclusive model tool path.",
+      "Execute type-checked TypeScript through Fabric for discovery, providers, agents, MCP, extensions, and, in full-code or Schema enforce mode, Pi core tools. QuickJS is isolated; Node mode is trusted and unsafe.",
     promptSnippet:
       "Pi core tools, MCP, Fabric providers, discovery, and extensions",
     promptGuidelines: [
-      "Batch independent operations in one `fabric_exec` program (`Promise.all` for parallel, sequential `await` for ordered), not one call per tool; keep dependent/conditional steps sequential. Coalesce non-dependent replacements from one file snapshot into one `pi.edit({path, edits:[...]})`; use `all:true` only for intentional repeated exact anchors. Return only the compact final value; intermediate results stay in the sandbox.",
-      "Search before reading: use `pi.grep`/`pi.find` to locate relevant lines, then `pi.read({path, offset, limit})` that range. Escape regex metacharacters, or use `literal:true` for exact punctuated text. Keep fan-out search limits small and widen only on misses. An unbounded `pi.read` returns at most 2000 lines or 50KB and, when truncated, ends with a `Use offset=…` continuation notice; reserve whole-file reads for small files you will use in full.",
-      "For coding tasks, keep an acceptance ledger: turn the request into concrete checks, trace the relevant execution path before editing, implement end to end, then run targeted tests and direct behavioral probes. Mechanically confirm requested public symbols, registrations, and configuration entries. Use the smallest checks that cover the ledger, escalating only for failures or cross-cutting risk; inspect failures and iterate instead of rerunning unchanged passing checks. A build alone is not completion.",
-      "Amortize round trips without inflating context: batch only independent, bounded work. Keep search→read and edit→verify sequential when an output determines the next action. Use `settle:true` for tests or probes whose nonzero result is evidence rather than an exceptional stop; for a known long suite, set `pi.bash` `timeout` in seconds once instead of retrying a timed-out call. Filter or summarize noisy command output inside the program and return decisions, failures, and evidence—not raw logs or unused intermediate results.",
-      "For multiline edits or writes, pass payloads through top-level `strings` and use `π.key`; prefer `pi.edit`/`pi.write` over shell patching or heredocs.",
+      "In `fabric_exec`, batch only independent, bounded work; use `Promise.all` for independent calls and sequence search→read and edit→verify. Search with bounded `pi.grep`/`pi.find`, use `pi.read` ranges and `literal:true` for punctuated text, and coalesce same-file replacements into one `pi.edit({path, edits:[...]})` call.",
+      "In `fabric_exec` coding work, keep an acceptance ledger; trace the execution path, use direct behavioral probes, confirm requested public symbols, registrations, and configuration entries, and run the smallest relevant checks. Inspect failures instead of rerunning unchanged checks. A build alone is not completion.",
+      "In `fabric_exec`, use `settle:true` for expected nonzero probes, set one realistic timeout, pass multiline payloads through top-level `strings` and π, prefer `pi.edit`/`pi.write`, and return compact decisions and evidence—not raw logs or unused intermediate results.",
     ],
     // The model-facing schema is intentionally flat: one large `code` string
     // plus scalar/optional params. Do not add nested arrays-of-objects with
@@ -114,7 +112,7 @@ export const createFabricExecTool = (
     parameters: Type.Object({
       code: Type.String({
         description:
-          "TypeScript function body. Top-level await and return are supported. Globals include `tools`, `mcp`, `memory`, `state`, `schema`, `compact`, `agents`, `mesh`, `print`, and `π`; full-code mode adds `pi` and `extensions`. See session guidance / `fabric-exec` skill for exact signatures.",
+          "TypeScript body with top-level await/return. Globals: tools, mcp, memory, state, schema, compact, agents, mesh, print, and π; full-code mode adds pi and extensions. Load the fabric-exec skill for exact signatures.",
       }),
       strings: Type.Optional(
         Type.Record(Type.String(), Type.String(), {
@@ -649,12 +647,15 @@ export const createFabricExecTool = (
       // non-string code param. Strict providers reject an array upstream
       // against the Type.String schema, so this branch is a no-op there.
       const code = Array.isArray(params.code) ? params.code.join("\n") : params.code;
+      const sessionId = context.sessionManager.getSessionId();
+      const prewalk = state.prewalk.executionBoundary(sessionId);
       const result = await state.execution.execute({
         code,
         ...(params.strings ? { strings: params.strings } : {}),
         signal,
         parentToolCallId: toolCallId,
         context,
+        ...(prewalk ? { prewalk } : {}),
         ...(params.tokenBudget !== undefined ? { tokenBudget: params.tokenBudget } : {}),
         ...(params.agentBudget !== undefined ? { maxAgentCalls: params.agentBudget } : {}),
         ...(params.display
@@ -681,7 +682,7 @@ export const createFabricExecTool = (
         params.resultFormat ?? state.config.executor.resultFormat;
       const pendingHandoff = state.claimHandoff(
         result,
-        context.sessionManager.getSessionId(),
+        sessionId,
         selectedResultFormat,
         toolCallId,
       );

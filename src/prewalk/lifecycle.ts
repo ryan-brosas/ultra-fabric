@@ -3,6 +3,7 @@ import type {
   FabricPrewalkReturnPolicy,
 } from "../config.js";
 import type { FabricThinking } from "../thinking.js";
+import type { FabricPrewalkChecklist } from "./checklist.js";
 
 export interface FabricPrewalkArm {
   mode: FabricPrewalkMode;
@@ -13,6 +14,7 @@ export interface FabricPrewalkArm {
   returnPolicy: FabricPrewalkReturnPolicy;
   fallbackModels?: string[];
   task?: string;
+  checklist?: FabricPrewalkChecklist;
   thinking?: FabricThinking;
   verificationMode?: "gated";
   maxPhaseRevisions?: number;
@@ -65,6 +67,7 @@ export type FabricPrewalkStatus =
 export type FabricPrewalkEvent =
   | { kind: "armed"; arm: FabricPrewalkArm }
   | { kind: "task_observed"; sessionId: string; task: string }
+  | { kind: "checklist_ready"; sessionId: string; checklist: FabricPrewalkChecklist }
   | { kind: "task_settled"; sessionId: string; at: number }
   | { kind: "handoff_claimed"; sessionId: string; handoffId: string }
   | { kind: "executor_selected"; model: string }
@@ -107,6 +110,9 @@ const toArmed = (
   ...(status.fallbackModels ? { fallbackModels: [...status.fallbackModels] } : {}),
   attempt: options.attempt,
   ...(options.preserveTask && status.task ? { task: status.task } : {}),
+  ...(options.preserveTask && status.checklist
+    ? { checklist: structuredClone(status.checklist) }
+    : {}),
   ...(status.thinking ? { thinking: status.thinking } : {}),
   ...(status.verificationMode ? { verificationMode: status.verificationMode } : {}),
   ...(status.maxPhaseRevisions !== undefined
@@ -142,6 +148,12 @@ export const reducePrewalkLifecycle = (
         status.sessionId === event.sessionId &&
         !status.task
         ? { ...status, task: event.task }
+        : status;
+    case "checklist_ready":
+      return status.state === "armed" &&
+        status.mode === "research" &&
+        status.sessionId === event.sessionId
+        ? { ...status, checklist: structuredClone(event.checklist) }
         : status;
     case "task_settled":
       return status.state === "armed" &&

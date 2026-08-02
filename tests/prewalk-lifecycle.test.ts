@@ -308,4 +308,30 @@ describe("reducePrewalkLifecycle", () => {
       }),
     ).toEqual({ state: "idle" });
   });
+
+  it("records checklist readiness only for the owning research task", () => {
+    const state = armed({ mode: "research" });
+    const checklist = {
+      items: Array.from({ length: 5 }, (_, index) => ({
+        task: `Change target ${index + 1}`,
+        validation: `Run check ${index + 1}`,
+      })),
+      readyAt: 15,
+    };
+    expect(reducePrewalkLifecycle(state, {
+      kind: "checklist_ready",
+      sessionId: "session-2",
+      checklist,
+    })).toBe(state);
+    expect(reducePrewalkLifecycle(state, {
+      kind: "checklist_ready",
+      sessionId: "session-1",
+      checklist,
+    })).toEqual({ ...state, checklist });
+    expect(reducePrewalkLifecycle(armed(), {
+      kind: "checklist_ready",
+      sessionId: "session-1",
+      checklist,
+    })).toEqual(armed());
+  });
 });

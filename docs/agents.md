@@ -118,9 +118,9 @@ return "Frontier Fabric invocation completed";
 
 Inside the guest, `agents.handoff()` resolves to `{ scheduled: true, status: "deferred", boundary: "fabric_exec_end" }`; child output cannot be consumed by later code in that same Fabric invocation. At the outer boundary, Main's tool result is replaced with the compact completion `{ handedOff, completed, status, agent, implementation, error? }`. `model` is required, the target runner is Pi, and `worktree` is intentionally unavailable because implementation must remain visible in the caller's workspace. Optional fields are `task`, `name`, `transport`, `thinking`, `tools`, `timeoutMs`, `extensions`, `recursive`, and `schema`. The source session is not switched or historically rewritten.
 
-### Automatic Fabric-boundary prewalk
+### Automatic Prewalk
 
-`/fabric prewalk` is Fabric's automatic adaptation of Can Bölük's [Prewalk research](https://stencil.so/blog/prewalk). OMP switches models inside one live agent loop at the first todo-gated edit/write. Fabric keeps its coarser atomic boundary: the first successful monitored mutation marks the current outer `fabric_exec`, but every remaining nested call still settles before prewalk continues. This preserves programmable sequential and parallel Fabric semantics.
+`/fabric prewalk` offers a research-compatible adaptation of Can Bölük's [Prewalk research](https://stencil.so/blog/prewalk) alongside Ultra's legacy in-place and trajectory modes. Research mode switches models inside one live Main session at the first checklist-gated successful mutation. The compatibility modes retain Fabric's older completed-outer-call behavior.
 
 ```text
 /fabric prewalk
@@ -132,7 +132,17 @@ Inside the guest, `agents.handoff()` resolves to `{ scheduled: true, status: "de
 
 With a task, Fabric arms prewalk and submits it to Main immediately. Without one, it captures the next user input. Configure the executor under `/fabric settings` → **Prewalk**. **Always re-arm** captures successive tasks until `/fabric prewalk --off`.
 
-The default `prewalk.mode` is `"in-place"`:
+Set `prewalk.mode` to `"research"` for the first-mutation protocol:
+
+1. Fabric sends Main a hidden, phase-owned instruction to form a grounded plan and submit `prewalk.checklist({ items })` with 5–9 ordered tasks and a specific validation for each.
+2. The host rejects every matching mutation until that checklist is accepted. One matching mutation can be in flight; concurrent matches are rejected.
+3. The first successful configured mutation aborts the Fabric runtime as an owned boundary. This works in both QuickJS and the unsafe Node-process runtime, and no later guest statement or nested call runs.
+4. Fabric records the exact successful audit as the trigger, filters the planning instruction out of the next model context, switches the same Main session to the configured executor, and sends the accepted checklist in the identity-owned continuation.
+5. The executor completes the remaining implementation and verification. Research mode always keeps the executor selected, even if configuration requested `returnPolicy: "previous"`.
+
+Failed mutation attempts release the reservation and do not switch models. Trigger matching still comes from `triggerEffects`, `triggerRisks`, and `triggerRefs`; Bash cannot be inferred as a workspace mutation and remains opaque unless named explicitly. Research mode does not spawn a child and does not require `agents.enabled`. Matching these protocol boundaries does not import the article’s cost or quality claims; Ultra must establish those through its own benchmark.
+
+The default compatibility mode remains `prewalk.mode: "in-place"`:
 
 1. Fabric observes a successful `pi.edit`, `pi.write`, or `schema.commit` and lets the complete outer program settle.
 2. At the finalized outer result boundary, it selects `prewalk.model` on Main.
@@ -145,7 +155,7 @@ Set `prewalk.mode` to `"trajectory"` to opt into the child-based behavior. Fabri
 
 For a host-enforced verification loop, set `prewalk.verificationMode` to `"gated"`. The hidden verify turn must run checks and report `workflow.gate()`; passing evidence settles, `revise` creates one scoped executor handoff, and missing/aborted/crashed evidence blocks at the configured `maxPhaseRevisions` cap. Omit the field for legacy prompt-only verification.
 
-Prewalk adds no system-prompt instructions. Each hidden continuation carries the handoff's generated identity. The context hook retains only the continuation owned by the current pending/continuing lifecycle and removes stale or legacy Prewalk continuation messages before provider calls. Successful handoffs remain `continuation_pending` until that exact message is accepted, then settle only after Pi reports no follow-up work remains; **Always re-arm** activates after settlement rather than during the same task. If a captured task settles without a monitored trigger, prewalk disarms instead of leaking into the next task. Failed handoffs remain blocked and never retry automatically; retry is an explicit user action. An explicit successful `agents.handoff()` takes precedence over automatic prewalk. Both modes require full code mode and are unavailable in Schema enforce mode.
+Prewalk adds no system-prompt instructions. Research uses a dedicated hidden planning message that the context hook keeps only while the frontier phase is armed; accepting the identity-owned executor continuation removes it before provider inference. The hook also retains only the continuation owned by the current pending/continuing lifecycle and removes stale or legacy Prewalk continuation messages. Successful handoffs settle only after Pi reports no follow-up work remains; **Always re-arm** activates after settlement rather than during the same task. If a captured task settles without a monitored trigger, prewalk disarms instead of leaking into the next task. Failed handoffs remain blocked and never retry automatically; retry is explicit. An explicit successful `agents.handoff()` takes precedence over automatic prewalk. All modes require full code mode and are unavailable in Schema enforce mode.
 
 ### Pi model-provider extensions
 

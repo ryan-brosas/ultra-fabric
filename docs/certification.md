@@ -1,11 +1,13 @@
-# Context and memory certification
+# Certification and benchmarks
 
-This repository has two separate evaluation paths:
+This repository has four separate evaluation paths:
 
 - `pnpm certify:context` is deterministic, offline, and non-billable.
+- `pnpm benchmark:prewalk` validates operator-supplied, prompt-free Prewalk comparison evidence and never invokes a model.
+- `pnpm benchmark:prewalk:real` is an opt-in, billable paired Prewalk collector. Its default behavior is a safe skip.
 - `pnpm benchmark:real-resume` is an opt-in, billable Pi RPC benchmark. Its default behavior is a safe skip.
 
-Neither command is part of `pnpm test`. The normal test suite remains offline and fast.
+`pnpm benchmark:prewalk:corpus` materializes the bundled non-billable 20-task contract corpus for the Prewalk collector. None of these commands is part of `pnpm test`; corpus qualification itself remains covered by the normal offline suite.
 
 ## Deterministic certification
 
@@ -76,6 +78,123 @@ The source phase persists a handoff envelope containing the compacted context an
 Only after exact source expansion does the simulator decode `CERT_TASK_V1` and apply its operations. If an exact operation or file payload is unavailable, it throws and fails instead of inventing success. The external oracle then scores exact filesystem state, forbidden-file integrity, and process exit status; it never supplies `task.operations` to the simulator.
 
 This proves that the emitted address, current persisted session identity, and allowed memory operations can carry these mechanically executable tasks across a fresh handoff. Pi's compaction result does not itself expose a session ID or source hash, so those come respectively from persisted current-session context and `MemoryProvider`; the report does not claim they are emitted by Pi. It does not claim that arbitrary prose can be converted into operations, that a model will choose to recall, or that the two fixtures represent all software work.
+
+## Prewalk comparison analyzer
+
+The Prewalk analyzer applies the repository's minimum 20-task evidence gate without making model calls:
+
+```sh
+pnpm benchmark:prewalk
+pnpm benchmark:prewalk -- /absolute/path/to/prewalk-results.json
+```
+
+Without a result file the command exits zero with `SKIP`. With a file it validates every record strictly, prints a deterministic aggregate report, and exits nonzero unless the report reaches `comparison_ready`.
+
+The top-level JSON object contains `representativeTaskSet`, optional `minimumTasks` (never lower than 20), optional bounded model/version/cost `provenance`, and `runs`. Real collections include a SHA-256 digest of the parsed private manifest, binding results to the exact corpus without publishing its prompts or fixture bytes. Every task/repeat must have one `in-place` and one `research` run. A run stores only a bounded task identifier, acceptance counts, unsupported-claim and missed-constraint counts, request and parent context-token counts, latency, total tokens, USD cost, and research protocol evidence. Unknown fields such as raw prompts, outputs, credentials, or unrestricted prose fail closed. Input is capped at 8 MiB and 10,000 run records before aggregation.
+
+Research records additionally require:
+
+- a checklist count between 5 and 9;
+- observed first-mutation boundary, planning-instruction pruning, and executor verification booleans;
+- a 0–1 plan-quality score plus the bounded evaluator/rubric identifier that produced it.
+
+The report includes Wilson 95% full-acceptance intervals, paired wins/ties for acceptance, constraints, claims, tokens, cost, and latency, protocol compliance rates, and average plan quality. `representativeTaskSet: true` is an explicit operator attestation; the analyzer cannot infer representativeness from a task ID.
+
+### Opt-in real collector
+
+Validate a manifest and inspect its paired schedule without credentials or model calls:
+
+```sh
+pnpm benchmark:prewalk:real -- --dry-run /absolute/path/to/prewalk-manifest.json
+```
+
+#### Bundled contract corpus
+
+Materialize the portable corpus with machine-local absolute Node and evaluator paths:
+
+```sh
+pnpm benchmark:prewalk:corpus -- --output /absolute/path/to/prewalk-manifest.json
+pnpm benchmark:prewalk:real -- --dry-run /absolute/path/to/prewalk-manifest.json
+```
+
+The corpus contains 20 source-mapped contract tasks across Prewalk, persistent Agents, reliability, run context, path coordination, durable workflows, Context QoS, routing, quality, memory, Consult, outcomes, and retention. Every fixture includes a protected contract and executable verifier. Repository tests prove each fixture fails with its stub and passes with its reference solution; source paths and hidden solution bytes are excluded from the generated manifest.
+
+The default manifest sets `representativeTaskSet: false`. The tasks cover current backend contracts but are not historical maintenance work. Only an operator who accepts that scope for a specific decision should add the explicit attestation:
+
+```sh
+pnpm benchmark:prewalk:corpus -- \
+  --output /absolute/path/to/prewalk-manifest.json \
+  --attest-representative
+```
+
+That switch changes only the analyzer evidence flag; it does not improve the corpus or establish general representativeness.
+
+A manifest is strict JSON with a maximum of 100 tasks. Every task supplies a bounded prompt, initial and exact expected text files, protected initial files, and one literal-argv test command. `.pi` and `.git` fixture paths, path traversal, symlink satisfaction, unknown fields, oversized files, and malformed commands fail closed. The runner creates a separate temporary trusted project for every task/repeat/variant and removes it after collection.
+
+The manifest also supplies one independent evaluator command:
+
+```json
+{
+  "format": 1,
+  "representativeTaskSet": false,
+  "minimumTasks": 20,
+  "evaluator": {
+    "id": "independent-rubric-v1",
+    "billable": false,
+    "command": "/absolute/path/to/node",
+    "args": ["/absolute/path/to/evaluator.mjs"],
+    "timeoutMs": 5000,
+    "env": []
+  },
+  "tasks": [
+    {
+      "id": "task-01",
+      "prompt": "Implement the exact fixture behavior.",
+      "initialFiles": { "verify.mjs": "..." },
+      "expectedFiles": { "verify.mjs": "...", "src/value.js": "..." },
+      "protectedPaths": ["verify.mjs"],
+      "test": {
+        "command": "/absolute/path/to/node",
+        "args": ["verify.mjs"],
+        "timeoutMs": 15000,
+        "env": []
+      }
+    }
+  ]
+}
+```
+
+The evaluator receives the task, research checklist, final response, and exact oracle result through stdin only. It returns `unsupportedClaims` and, for research runs, `planQualityScore`. Its prompt, checklist, response, and explanation are never written to the result dataset. `billable` must be `false`; model-judge spending is not covered by this collector's Pi-arm budget.
+
+A real run requires both explicit trust gates, configured frontier/executor credentials, repeat count, task timeout, and a positive observed-cost stop:
+
+```sh
+PI_FABRIC_PREWALK_REAL=1 \
+PI_FABRIC_PREWALK_TRUST_MANIFEST=1 \
+PI_FABRIC_BENCH_PROVIDER=anthropic \
+PI_FABRIC_BENCH_MODEL=claude-opus-4-6 \
+PI_FABRIC_BENCH_KEY_ENV=ANTHROPIC_API_KEY \
+PI_FABRIC_PREWALK_EXECUTOR_PROVIDER=anthropic \
+PI_FABRIC_PREWALK_EXECUTOR_MODEL=claude-sonnet-4-6 \
+PI_FABRIC_PREWALK_EXECUTOR_KEY_ENV=ANTHROPIC_API_KEY \
+PI_FABRIC_BENCH_REPEATS=1 \
+PI_FABRIC_BENCH_MAX_USD=10 \
+PI_FABRIC_BENCH_TASK_TIMEOUT_MS=600000 \
+pnpm benchmark:prewalk:real -- /absolute/path/to/prewalk-manifest.json --output /absolute/path/to/prewalk-results.json
+```
+
+The collector verifies that Pi loaded `/fabric`, disables unrelated context files, skills, prompt templates, extensions, agents, MCP, quality hooks, and Schema enforcement, and pins both model thinking levels to off. `--output` requires an absolute, not-yet-existing path and writes a mode-0600 pure JSON dataset through a same-directory atomic link, so it can be passed directly to `pnpm benchmark:prewalk -- <results.json>`. A trailing probe records only request context counts, model IDs, checklist count, mutation count, and planning/continuation presence. It never records message or checklist content. Each complete run is revalidated through the analyzer schema before output.
+
+The USD limit is an observed stop checked before each next arm, not a provider-side hard cap; one in-flight arm can overshoot. Missing commands, timeouts, malformed evaluator output, absent probe evidence, or unloaded Fabric are benchmark infrastructure failures rather than task failures. Model/task failures remain scored as incomplete acceptance, missed constraints, or unsupported claims.
+
+### What remains missing
+
+- The bundled corpus is source-qualified contract coverage, not an independently sampled set of historical repository changes.
+- Its bundled evaluator scores checklist structure, artifact specificity, and unsupported success claims after oracle failure; it does not establish semantic plan quality.
+- Representative-task attestation remains an explicit operator decision and is not independently verified.
+- No real collector run has been performed in this repository, so no cost, quality, or success-rate comparison is established.
+
+The protocol target is the primary Stencil article: [“You only need the frontier model for one single edit”](https://stencil.so/blog/prewalk). Mechanical protocol compatibility is necessary for comparison, not evidence that plan quality is correct or that Ultra reproduces the article's reported outcomes.
 
 ## Real Pi RPC benchmark
 

@@ -45,6 +45,28 @@ describe("full code skill prompt", () => {
     );
   });
 
+  it("bounds large catalogs to relevant descriptions plus a discovery index", () => {
+    const catalog = Array.from({ length: 40 }, (_, index) => makeSkill({
+      name: `skill-${index}`,
+      description: index === 7
+        ? "Audit accessibility and keyboard behavior for user interfaces."
+        : `Specialized capability ${index} for an unrelated workflow. ${"detail ".repeat(40)}`,
+      filePath: `/skills/skill-${index}/SKILL.md`,
+    }));
+
+    const prompt = restoreSkillsForFullCodePrompt(
+      "Core prompt\nCurrent working directory: /workspace",
+      catalog,
+      { prompt: "Audit accessibility for this interface", maxSkills: 3, maxIndexChars: 2_000 },
+    );
+
+    expect(prompt).toContain("Audit accessibility and keyboard behavior");
+    expect(prompt).toContain("<skill_index>");
+    expect(prompt).toContain("skill-39");
+    expect(occurrences(prompt, "<skill>")).toBeLessThanOrEqual(3);
+    expect(prompt.length).toBeLessThan(12_000);
+  });
+
   it("uses Pi's XML escaping for model-visible skill metadata", () => {
     const prompt = restoreSkillsForFullCodePrompt(
       "Core prompt",

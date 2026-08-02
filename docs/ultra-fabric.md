@@ -7,7 +7,7 @@
 
 ## Adoption status
 
-Slices 0-7 now have tested backend contracts. Prewalk v2 owns typed continuity, configurable effect triggers, identity-checked continuation, and bounded execute → verify → revise. Persistent Agents own durable inbox/outbox replay, retry/dead-letter/circuit behavior, quotas, telemetry, root traces, and outcomes. Fabric propagates run identity, gates, reservations, durable phase leases, cooperative path leases, deterministic Context QoS, capability/auth routing, explicit delegation intent, capability profiles, and a prompt-free outcome ledger with confidence-bounded recommendations. Automatic policy promotion remains disabled until the Slice 8 benchmark and soak gates are run on representative real tasks. The quality increment adds opt-in host-owned changed-file gates with broad language detection, trusted shell-free checks, explicit coverage failure, and distinct failed, timed-out, and crashed outcomes.
+Slices 0-7 now have tested backend contracts. Prewalk v2 owns typed continuity, configurable effect triggers, identity-checked continuation, bounded execute → verify → revise, and an opt-in research-compatible path with a host-accepted 5–9 item checklist, first-successful-mutation runtime stop, planning-message pruning, and permanent same-session executor ownership. Legacy in-place and trajectory behavior remains available for compatibility. Persistent Agents own durable inbox/outbox replay, retry/dead-letter/circuit behavior, quotas, telemetry, root traces, and outcomes. Fabric propagates run identity, gates, reservations, durable phase leases, cooperative path leases, deterministic Context QoS, capability/auth routing, explicit delegation intent, capability profiles, and a prompt-free outcome ledger with confidence-bounded recommendations. Automatic policy promotion remains disabled until the Slice 8 benchmark and soak gates are run on representative real tasks. Research-mode protocol compatibility does not inherit external cost, quality, or success-rate claims. The offline `benchmark:prewalk` analyzer now enforces strict prompt-free records, paired in-place/research coverage across at least 20 operator-attested representative tasks, provenance, protocol evidence, and confidence reporting. The opt-in `benchmark:prewalk:real` collector adds isolated paired Pi RPC runs, exact filesystem/test oracles, prompt-free probe telemetry, a non-billable evaluator seam, and an observed USD stop. A bundled 20-task source-mapped contract corpus is offline RED/GREEN qualified and defaults to non-representative; independently sampled historical work and empirical results remain Slice 8 gates. The quality increment adds opt-in host-owned changed-file gates with broad language detection, trusted shell-free checks, explicit coverage failure, and distinct failed, timed-out, and crashed outcomes.
 
 ## Thesis
 
@@ -61,10 +61,10 @@ The audit covered current source, tests, and configuration. The broad CodeGraphC
 
 | Area | Current source behavior | Consequence |
 |---|---|---|
-| Prewalk lifecycle | The typed reducer owns blocked/retry, bounded in-place fallback, identity-checked continuation settlement, delayed re-arm, previous-model restoration, opt-in evidence-gated execute → verify → revise cycles, and configurable risk/ref triggers. | Legacy prompt-only verification remains available until gated mode is benchmarked. |
-| Prewalk trigger | Every resolved action records its declared risk in live audits and durable traces. Prewalk triggers from bounded `triggerEffects`/`triggerRisks`/`triggerRefs`; defaults preserve the three built-ins and include declared workspace effects without confusing state bookkeeping for code mutation. | Bash remains intentionally opaque unless explicitly named in `triggerRefs`. |
-| Model ownership | In-place Prewalk keeps the executor by default or restores the exact boundary model after the owned continuation settles. | A multi-level planner/executor stack is unnecessary until nested Prewalk phases exist. |
-| Continuity | Hidden messages carry handoff identity; gated mode requires a passing host gate, returns scoped revise evidence to the executor, and blocks missing/aborted/crashed verification within a configured cap. | Legacy prompt-only verification remains the compatibility default until gated mode is measured. |
+| Prewalk lifecycle | The typed reducer owns blocked/retry, bounded fallback, checklist readiness, one-mutation reservation, identity-checked continuation settlement, delayed re-arm, opt-in evidence-gated execute → verify → revise cycles, and configurable effect/risk/ref triggers. | Legacy prompt-only verification and completed-call handoff modes remain compatibility paths until comparative evaluation is complete. |
+| Prewalk trigger | Research mode rejects matching mutation authorization before checklist readiness, reserves one matching call, and stops QuickJS or Node execution only after that exact audit succeeds. Failed attempts release the reservation. Defaults preserve `pi.edit`, `pi.write`, `schema.commit`, and declared workspace effects. | Bash remains intentionally opaque unless explicitly named in `triggerRefs`; unknown shell effects cannot satisfy the research claim. |
+| Model ownership | Research mode switches the same Main session at the first successful mutation and always retains the executor through implementation and verification. Legacy in-place can still retain the executor or restore the exact boundary model after its owned continuation settles. | Automatic nested planner/executor stacks remain out of scope. |
+| Continuity | Hidden messages carry handoff identity. Research planning uses a distinct phase-owned message removed from model context when the executor continuation is accepted; the accepted checklist is carried forward. Gated mode requires passing evidence and bounds revision. | Legacy prompt-only verification remains the compatibility default until gated mode is measured. |
 | Persistent Agent durability | A per-persistent Agent atomic `inbox.json` stores accepted queued and in-flight activations by stable ID before acknowledgement; interrupted in-flight work reloads at the head for at-least-once replay. | Media bytes remain transient and replay depends on stable-ID effect deduplication. |
 | Persistent Agent recovery | Zero-effect startup failures can retry one-for-one with bounded backoff; outbox delivery has independent retry, explicit stable-ID replay, dead letters, and a persisted closed/open/half-open Main-delivery circuit. | Runs with any turns, tool calls, or token usage remain terminal by design; richer effect evidence is required before safe resume. |
 | Persistent Agent delivery | Every completed output records independent mesh and Main receipts with attempts, timestamps, errors, dead-letter/circuit states; persistent Agent mesh events deduplicate by the outbox message ID. | Cross-provider Main delivery relies on the stable message ID contract for idempotent adapters. |
@@ -75,7 +75,7 @@ The audit covered current source, tests, and configuration. The broad CodeGraphC
 | Admission | Host policy can require a typed delegation reason plus expected artifact. Named capability profiles compile to fixed child tools and recursive risk grants; outcomes retain reason counts. | Semantic value remains recommendation-only rather than a host guess. |
 | Routing | Pi agent and trajectory requests can declare modality, reasoning, context, output, and cost requirements plus an ordered fallback set. The host checks registry availability/auth before launch, allows capability-preserving fallbacks automatically, gates quality downgrade by host policy, and persists a typed route artifact. | Outcome-ranked routes remain recommendations; Fabric never silently rewrites configured defaults. |
 | Context QoS | Every model request gets a deterministic pre-threshold pass that retires only large, old, superseded read/grep/find/ls bodies while preserving message count, call/result pairing, recent turns, errors, mutations, and typed Fabric evidence. Cumulative omission counters are host-visible. | Semantic compression and model-authored summaries remain outside this pass. |
-| Evaluation | Terminal Fabric and ambient persistent Agent runs persist prompt-free duration/token/cost/verification/route records. Deterministic fixtures and optional model-judge scores feed sample-gated route reports with Wilson confidence bounds. | The 20-task comparative benchmark remains a rollout gate, not a fabricated in-repository result. |
+| Evaluation | Terminal Fabric and ambient persistent Agent runs persist prompt-free duration/token/cost/verification/route records. The offline Prewalk analyzer rejects raw fields and requires complete paired evidence. The opt-in real collector isolates every arm, invokes Pi through public RPC, runs exact literal-argv oracles, records prompt-free protocol telemetry and provenance, and stops before the next arm at its observed USD boundary. | The bundled 20-task contract corpus and structural evaluator are qualification aids; independently sampled historical work, semantic rubric review, and an actual comparative run remain rollout gates. |
 | Trace correlation | One run/trace/span envelope crosses providers, recursive children, direct and ambient persistent Agent activations; durable phase leases retain owner run/trace/span; final details persist bounded evidence, gates, transitions, and reservations. | External systems still need to propagate the public envelope explicitly. |
 | Shared writes | `leases.acquire/release/list` atomically owns file/tree paths per run; active foreign leases reject `pi.edit`/`pi.write` before mutation. Worktrees remain available for stronger isolation. | Shell commands are opaque and must use worktrees or explicit coordination. |
 | Quality enforcement | Successful `pi.write`, `pi.edit`, and committed `schema.commit` paths are language-classified and routed to trusted bounded checks. Audit warns; enforce aborts on failed checks or uncovered languages. | Shell, direct orchestration-only, child-agent, and foreign-process writes remain outside exact attribution. Subjective cleanliness requires concrete project rules. |
@@ -195,34 +195,29 @@ A crashed gate becomes an explicit infrastructure failure. It does **not** silen
 
 ### Prewalk v2
 
-Prewalk becomes a task-scoped transition machine:
+Prewalk is a task-scoped transition machine:
 
 ```text
 idle
   → armed
-  → planning
-  → handoff_pending
-  → executing
-  → verifying
-  → completed
-
-handoff_pending | executing | verifying
-  → retry_wait → fallback | prior phase
-  → blocked
-  → cancelled
+  → armed + accepted checklist (research)
+  → mutation_in_flight (research)
+  → handing_off
+  → continuation_pending | verification_pending
+  → continuing | verifying
+  → idle | armed | blocked
 ```
 
-Key changes:
+Current contracts:
 
-- snapshot the planner model, executor route, thinking level, and task identity;
-- separate `finishSuccess`, `finishFailure`, `cancel`, and `settleWithoutMutation` transitions;
-- preserve the current task across retryable failure;
-- classify model unavailable/auth failure as blocked until route/config changes, not an infinite retry;
-- support `returnPolicy: "planner" | "executor" | "previous"`;
-- use successful audited effect classes plus configurable exact refs for transition triggers;
-- cap `maxCycles`, `maxFallbacks`, and phase revisions;
-- verification failure returns a scoped revision to execution; it never restarts the whole task automatically;
-- every hidden continuation carries run/phase identity and is rejected when stale.
+- research mode requires a host-validated 5–9 item checklist with one concrete validation per item before a matching mutation can authorize;
+- one matching mutation reservation closes parallel races; a failed attempt releases it, while the first successful audit owns the boundary;
+- an internal cancellation signal stops QuickJS and Node execution at that boundary, and the result records the exact audit rather than treating the owned stop as failure;
+- the research planning message is removed from context before executor inference, while the accepted checklist is included in the identity-owned continuation;
+- research always keeps the executor model through completion and verification; legacy in-place retains configurable executor/previous ownership and trajectory remains child-based;
+- model unavailability or authentication failure blocks with preserved task intent instead of retrying indefinitely;
+- verification failure returns scoped evidence to execution within a configured revision cap and never restarts the whole task automatically;
+- hidden continuations carry lifecycle identity and stale messages are rejected.
 
 ### Persistent-Agent supervision
 
@@ -321,7 +316,7 @@ Host limits validate shape and budget. Semantic judgment initially remains advis
 
 ## Delivery slices
 
-Current adoption on `prewalk-continuity`: Slices 0-7 and the Ultra Consult context-delegation increment are implemented and tested. Slice 1 adds configurable effect-aware continuity and gated revision. Slice 2 adds durable persistent Agents, delivery recovery, quotas, overload telemetry, and ambient outcomes. Slice 3 propagates run identity, evidence/gates, and atomic reservations. Slice 4 provides durable phase/DAG execution plus owner spans and cooperative write leases. Slice 5 provides deterministic pre-threshold Context QoS. Slice 6 provides explicit admission, capability profiles, and capability/auth-aware routing. Slice 7 provides live health surfaces, derived outcomes, deterministic/model-judge scoring, and confidence-bounded recommendations. The context increment adds one typed `consult.run` surface with context-aware zero-agent admission, bounded fresh read-only workers, Partition/Challenge/Compare semantics, host-resolved file evidence, explicit partial coverage, and prompt-free outcome metrics. The quality increment adds broad file-language detection, trusted command normalization, contained mutation attribution, serial argv execution, and host-owned audit or enforce gates. Slice 8 remains operational rollout and benchmark evidence, not another backend feature slice.
+Current adoption on `prewalk-continuity`: Slices 0-7, the research-compatible Prewalk increment, and the Ultra Consult context-delegation increment are implemented and tested. The Prewalk increment adds checklist-gated first-mutation ownership, runtime preemption, planning-context pruning, and same-session executor completion without changing compatibility defaults. Its offline analyzer gates bounded paired evidence, and its opt-in real collector now owns trusted manifests, deterministic pair order, isolated Pi RPC execution, exact oracles, independent non-billable scoring, provenance, and observed-cost stopping. The bundled contract corpus is offline-qualified but defaults non-representative; independently sampled historical tasks and empirical results remain Slice 8 work. Slice 1 adds configurable effect-aware continuity and gated revision. Slice 2 adds durable persistent Agents, delivery recovery, quotas, overload telemetry, and ambient outcomes. Slice 3 propagates run identity, evidence/gates, and atomic reservations. Slice 4 provides durable phase/DAG execution plus owner spans and cooperative write leases. Slice 5 provides deterministic pre-threshold Context QoS. Slice 6 provides explicit admission, capability profiles, and capability/auth-aware routing. Slice 7 provides live health surfaces, derived outcomes, deterministic/model-judge scoring, and confidence-bounded recommendations. The context increment adds one typed `consult.run` surface with context-aware zero-agent admission, bounded fresh read-only workers, Partition/Challenge/Compare semantics, host-resolved file evidence, explicit partial coverage, and prompt-free outcome metrics. The quality increment adds broad file-language detection, trusted command normalization, contained mutation attribution, serial argv execution, and host-owned audit or enforce gates. Slice 8 remains operational rollout and benchmark evidence, not another backend feature slice.
 
 ### Slice 0: establish the fork
 
@@ -334,8 +329,9 @@ Current adoption on `prewalk-continuity`: Slices 0-7 and the Ultra Consult conte
 
 - Pure reducer in a new module.
 - Existing Prewalk behavior represented as compatibility transitions.
-- Blocked/retry/fallback and return policy behind opt-in config.
-- RED/GREEN transition and lifecycle-event tests.
+- Opt-in research mode with a bounded checklist, atomic mutation reservation, exact successful-audit boundary, and executor-only completion.
+- Blocked/retry/fallback, planning-message pruning, and legacy return policy behind typed config.
+- RED/GREEN transition, runtime-preemption, prompt-isolation, and lifecycle-event tests.
 
 ### Slice 2: reliable persistent agents
 
@@ -426,7 +422,7 @@ This increment closes the context-capacity and fresh-subagent gap identified aft
 
 ## Benchmark
 
-Use at least 20 representative repository tasks and compare upstream Fabric with Ultra by:
+Use at least 20 representative repository tasks and compare upstream Fabric with Ultra. `pnpm benchmark:prewalk:corpus -- --output <manifest.json>` materializes the source-mapped contract corpus with a non-representative default, `pnpm benchmark:prewalk:real -- --dry-run <manifest.json>` validates its 40-arm schedule, `pnpm benchmark:prewalk:real -- <manifest.json>` collects opt-in paired evidence, and `pnpm benchmark:prewalk -- <results.json>` applies the rollout gate:
 
 - completed acceptance criteria;
 - unsupported claims and missed constraints;

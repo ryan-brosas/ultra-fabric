@@ -159,14 +159,15 @@ Prewalk trigger matching is host-owned. `prewalk.triggerEffects` defaults to `["
 
 `prewalk.model` is the optional Pi `provider/model` selected by `/fabric prewalk`. `prewalk.mode` chooses how execution continues:
 
-- `"in-place"` (default) switches Main to the executor model and queues a hidden follow-up in the same session.
+- `"research"` requires a host-accepted 5–9 item checklist, rejects matching mutations until it is ready, stops the current Fabric runtime after the first successful configured mutation, removes the planning instruction, and switches the same Main session permanently to the executor through implementation and verification.
+- `"in-place"` (default compatibility mode) switches Main to the executor only after the complete outer Fabric call settles and queues a hidden follow-up in the same session.
 - `"trajectory"` forks the finalized outer Fabric call/result to a visible Pi child and waits; when the child finishes, a hidden continuation turn has Main verify the work and summarize instead of going idle.
 
 ```json
 {
   "prewalk": {
-    "mode": "in-place",
-    "returnPolicy": "previous",
+    "mode": "research",
+    "returnPolicy": "executor",
     "model": "anthropic/claude-haiku-4-5",
     "fallbackModels": ["openai/gpt-5-mini", "google/gemini-2.5-flash"],
     "thinking": "high",
@@ -175,15 +176,15 @@ Prewalk trigger matching is host-owned. `prewalk.triggerEffects` defaults to `["
 }
 ```
 
-`prewalk.fallbackModels` is an optional ordered list of at most eight unique Pi `provider/model` keys. In-place mode tries that finite chain only when the primary model is unavailable, unauthenticated, or fails during selection, before any continuation starts. The selected fallback is visible in the result and lifecycle. Trajectory mode never retries another child automatically because a failed child may already have changed the workspace.
+`prewalk.fallbackModels` is an optional ordered list of at most eight unique Pi `provider/model` keys. Research and in-place modes try that finite chain only when the primary model is unavailable, unauthenticated, or fails during selection, before any continuation starts. The selected fallback is visible in the result and lifecycle. Trajectory mode never retries another child automatically because a failed child may already have changed the workspace.
 
-`prewalk.thinking` is the optional reasoning effort (`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`) for the trajectory child executor, clamped to each model's supported levels. When unset, the executor inherits `agents.thinking`; in-place mode keeps Main's session level.
+`prewalk.thinking` is the optional reasoning effort (`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`) for the trajectory child executor, clamped to each model's supported levels. When unset, the executor inherits `agents.thinking`; research and in-place modes keep Main's session level.
 
-`prewalk.alwaysRearm` defaults to `false`. When enabled, prewalk returns to an armed, taskless state after the matching hidden continuation reaches `agent_settled` or after a triggerless task settles; it does not re-arm inside the continuation's own work. A failed in-place switch or trajectory handoff enters a blocked state that preserves its task and attempt; it never retries automatically. Use `/fabric prewalk --status` to inspect the failure and `/fabric prewalk --retry` after correcting it. The settings UI labels an unset model **Ask each time**; non-interactive sessions must configure a model. In-place mode does not require child agents. Trajectory mode requires `agents.enabled` and exposes child spawn, progress, nested tools, metrics, and completion in Main's Fabric activity UI.
+`prewalk.alwaysRearm` defaults to `false`. When enabled, prewalk returns to an armed, taskless state after the matching hidden continuation reaches `agent_settled` or after a triggerless task settles; it does not re-arm inside the continuation's own work. A failed same-session switch or trajectory handoff enters a blocked state that preserves its task and attempt; it never retries automatically. Use `/fabric prewalk --status` to inspect the failure and `/fabric prewalk --retry` after correcting it. The settings UI labels an unset model **Ask each time**; non-interactive sessions must configure a model. Research and in-place modes do not require child agents. Trajectory mode requires `agents.enabled` and exposes child spawn, progress, nested tools, metrics, and completion in Main's Fabric activity UI.
 
 Set `prewalk.verificationMode` to `"gated"` to require an identity-owned verification continuation to finish through `workflow.gate()`. A passing evidence gate settles the task; `revise` returns only scoped failure evidence to the executor; abort, crash, missing evidence, or exceeding `prewalk.maxPhaseRevisions` blocks without losing task intent. The compatibility default remains prompt-only verification when the field is omitted. `maxPhaseRevisions` defaults to 2 and is bounded to 0–8.
 
-`prewalk.returnPolicy` controls in-place model ownership. `"executor"` (default) keeps the executor selected. `"previous"` snapshots Main's current provider/model at the handoff boundary and restores it only after the identity-owned continuation reaches `agent_settled`; trajectory mode never changes Main's model. An unavailable or unauthenticated return model is reported visibly and the completed task is not rerun.
+`prewalk.returnPolicy` controls legacy in-place model ownership. `"executor"` (default) keeps the executor selected. `"previous"` snapshots Main's current provider/model at the handoff boundary and restores it only after the identity-owned continuation reaches `agent_settled`; trajectory mode never changes Main's model. Research mode always normalizes this setting to `"executor"`, matching its permanent same-conversation switch. An unavailable or unauthenticated return model is reported visibly and the completed task is not rerun.
 
 ## Run context and gates
 
@@ -236,7 +237,7 @@ Pi core calls reject when the native tool reports an error; the `{ ok: true, out
 
 Fabric remembers which native core tools were active before taking ownership. Switching to orchestration-only mode or unloading Fabric restores that selection. Full-mode ownership is applied only when the session initializes or the mode changes. Fabric does not reset an explicitly selected active tool set from input, agent-start, turn-end, or settled lifecycle hooks; the system prompt carries the full-mode execution rule.
 
-Pi core normally includes its model-visible skill catalog only while the native `read` tool is active. Full code mode restores the same catalog from Pi's structured skill registry and adapts only its loader instruction to use `pi.read` inside `fabric_exec`; native core tools remain hidden. Packaged skills mark cross-document paths with `<skill-dir>`; Fabric replaces that marker inline from Pi's expanded skill `location` or the actual `SKILL.md` read path, without matching skill names or enumerating directories. Ordinary document reads are unchanged. When an expanded skill invokes another installed skill, Fabric also adds an exact name-to-path resolution hint for that turn so the delegated `SKILL.md` is loaded before task work.
+Pi core normally includes its model-visible skill catalog only while the native `read` tool is active. Full code mode instead restores a bounded view from Pi's structured registry: up to 12 task-relevant model-invocable descriptions plus a compact name/root index capped at 8,000 characters for on-demand discovery. The loader instruction uses `pi.read` inside `fabric_exec`, and native core tools remain hidden. Packaged skills mark cross-document paths with `<skill-dir>`; Fabric replaces that marker inline from Pi's expanded skill `location` or the actual `SKILL.md` read path, without matching skill names or enumerating directories. Ordinary document reads are unchanged. When an expanded skill invokes another installed skill, Fabric also adds an exact name-to-path resolution hint for that turn so the delegated `SKILL.md` is loaded before task work.
 
 ### Orchestration-only mode
 

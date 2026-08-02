@@ -4,8 +4,8 @@ import type { CapturedToolCatalog } from "../capture/catalog.js";
 import type { FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import type { FabricState } from "../fabric-state.js";
 import {
-  PREWALK_ARMED_MESSAGE_TYPE,
   hasPrewalkArmedPrompt,
+  prewalkArmedMessageType,
   prewalkArmedPrompt,
 } from "../prewalk/handoff.js";
 import { truncateMiddle } from "../util.js";
@@ -324,10 +324,15 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         // the task when one is submitted below). nextTurn never triggers a
         // turn; custom messages never fire `input`, so observeTask ignores it.
         const armedPrompt = prewalkArmedPrompt(state.config.prewalk.mode, model);
-        if (!hasPrewalkArmedPrompt(context.sessionManager.getBranch(), armedPrompt)) {
+        const armedMessageType = prewalkArmedMessageType(state.config.prewalk.mode);
+        if (!hasPrewalkArmedPrompt(
+          context.sessionManager.getBranch(),
+          armedPrompt,
+          armedMessageType,
+        )) {
           pi.sendMessage(
             {
-              customType: PREWALK_ARMED_MESSAGE_TYPE,
+              customType: armedMessageType,
               content: armedPrompt,
               display: false,
               details: { mode: state.config.prewalk.mode, model },
@@ -340,9 +345,11 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           `armed (${state.config.prewalk.mode}) → ${model}`,
         );
         const modeLabel =
-          state.config.prewalk.mode === "in-place"
-            ? "Main will continue in place"
-            : "the trajectory will move to a visible child executor";
+          state.config.prewalk.mode === "trajectory"
+            ? "the trajectory will move to a visible child executor"
+            : state.config.prewalk.mode === "research"
+              ? "Main will switch in place at the first host-observed mutation"
+              : "Main will continue in place";
         context.ui.notify(
           task
             ? `Fabric prewalk armed for the next matching Fabric boundary; ${modeLabel} with ${model}${state.config.prewalk.alwaysRearm ? "; always re-arm enabled" : ""}`

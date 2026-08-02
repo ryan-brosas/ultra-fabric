@@ -10,6 +10,7 @@ import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
 import { ActionRegistry } from "../src/core/action-registry.js";
 import { FabricExecutionService } from "../src/execution-service.js";
 import { PiToolsProvider } from "../src/providers/pi-tools-provider.js";
+import { PrewalkController } from "../src/prewalk/controller.js";
 
 describe("FabricExecutionService", () => {
   it("defers explicit handoff and completes every later call in the same program", async () => {
@@ -184,6 +185,100 @@ return "complete outer result";
           "second.txt",
           "third.txt",
         ]);
+      } finally {
+        fs.rmSync(cwd, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(["quickjs", "node-process"] as const)(
+    "stops the %s executor immediately after the first successful research mutation",
+    async (runtime) => {
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ultra-prewalk-research-"));
+      try {
+        const registry = new ActionRegistry();
+        registry.register(new PiToolsProvider(cwd, undefined, undefined));
+        const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+        config.executor.runtime = runtime;
+        if (runtime === "node-process") config.executor.memoryLimitBytes = 128 * 1024 * 1024;
+        config.approvals.write = "allow";
+        const controller = new PrewalkController();
+        controller.arm({
+          mode: "research",
+          model: "anthropic/executor",
+          sessionId: "session-1",
+        });
+        const result = await new FabricExecutionService(registry, config).execute({
+          code: `
+await prewalk.checklist({
+  items: Array.from({ length: 5 }, (_, index) => ({
+    task: "Change target " + (index + 1),
+    validation: "Run check " + (index + 1),
+  })),
+});
+try {
+  await pi.edit({
+    path: "missing.txt",
+    edits: [{ oldText: "missing", newText: "changed" }],
+  });
+} catch {}
+await pi.write({ path: "first.txt", content: "first" });
+await pi.write({ path: "second.txt", content: "second" });
+return "late result";
+`,
+          signal: undefined,
+          parentToolCallId: `research-boundary-${runtime}`,
+          context: { cwd, hasUI: false } as ExtensionContext,
+          prewalk: controller.executionBoundary("session-1")!,
+          onPartial() {},
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.trace.outcome).toBe("succeeded");
+        expect(result.value).toBeUndefined();
+        expect(result.prewalkBoundary).toMatchObject({ ref: "pi.write" });
+        expect(result.audits.map((audit) => [audit.ref, audit.success])).toEqual([
+          ["pi.edit", false],
+          ["pi.write", true],
+        ]);
+        expect(fs.existsSync(path.join(cwd, "first.txt"))).toBe(true);
+        expect(fs.existsSync(path.join(cwd, "second.txt"))).toBe(false);
+      } finally {
+        fs.rmSync(cwd, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(["quickjs", "node-process"] as const)(
+    "blocks a %s research mutation before checklist readiness",
+    async (runtime) => {
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ultra-prewalk-unready-"));
+      try {
+        const registry = new ActionRegistry();
+        registry.register(new PiToolsProvider(cwd, undefined, undefined));
+        const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+        config.executor.runtime = runtime;
+        if (runtime === "node-process") config.executor.memoryLimitBytes = 128 * 1024 * 1024;
+        config.approvals.write = "allow";
+        const controller = new PrewalkController();
+        controller.arm({
+          mode: "research",
+          model: "anthropic/executor",
+          sessionId: "session-1",
+        });
+        const result = await new FabricExecutionService(registry, config).execute({
+          code: 'await pi.write({ path: "unready.txt", content: "no" });',
+          signal: undefined,
+          parentToolCallId: `research-unready-${runtime}`,
+          context: { cwd, hasUI: false } as ExtensionContext,
+          prewalk: controller.executionBoundary("session-1")!,
+          onPartial() {},
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/prewalk\.checklist/i);
+        expect(result.prewalkBoundary).toBeUndefined();
+        expect(fs.existsSync(path.join(cwd, "unready.txt"))).toBe(false);
       } finally {
         fs.rmSync(cwd, { recursive: true, force: true });
       }

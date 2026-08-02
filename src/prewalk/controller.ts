@@ -7,8 +7,13 @@ import type { FabricEffect, FabricRisk } from "../protocol.js";
 import type { FabricGateResult } from "../run/context.js";
 import { isFabricThinking, type FabricThinking } from "../thinking.js";
 import {
+  parsePrewalkChecklist,
+  type FabricPrewalkChecklist,
+} from "./checklist.js";
+import {
   reducePrewalkLifecycle,
   type FabricPrewalkArm,
+  type FabricPrewalkArmedStatus,
   type FabricPrewalkEvent,
   type FabricPrewalkStatus,
 } from "./lifecycle.js";
@@ -24,6 +29,19 @@ const PREWALK_TRIGGER_REFS = new Set([
 export interface FabricPrewalkClaim {
   arm: FabricPrewalkArm;
   mutation: FabricCallAudit;
+}
+
+interface FabricPrewalkBoundaryAction {
+  ref: string;
+  risk?: FabricRisk;
+  effect?: FabricEffect;
+}
+
+export interface FabricPrewalkExecutionBoundary {
+  registerChecklist(input: unknown): FabricPrewalkChecklist;
+  authorize(action: FabricPrewalkBoundaryAction): boolean;
+  settle(reservation: boolean, audit: FabricCallAudit): boolean;
+  release(reservation: boolean): void;
 }
 
 const normalizedFallbackModels = (
@@ -52,6 +70,7 @@ const armFromStatus = (
   returnPolicy: status.returnPolicy,
   ...(status.fallbackModels ? { fallbackModels: [...status.fallbackModels] } : {}),
   ...(status.task ? { task: status.task } : {}),
+  ...(status.checklist ? { checklist: structuredClone(status.checklist) } : {}),
   ...(status.thinking ? { thinking: status.thinking } : {}),
   ...(status.verificationMode ? { verificationMode: status.verificationMode } : {}),
   ...(status.maxPhaseRevisions !== undefined
@@ -90,6 +109,7 @@ export class PrewalkController {
   #triggerRefs = new Set(PREWALK_TRIGGER_REFS);
   #triggerRisks = new Set<FabricRisk>();
   #triggerEffects = new Set<FabricEffect>(["workspace"]);
+  #researchMutationReserved = false;
 
   configureTriggers(
     risks: readonly FabricRisk[],
@@ -103,6 +123,59 @@ export class PrewalkController {
 
   status(): FabricPrewalkStatus {
     return structuredClone(this.#status);
+  }
+
+  #matchesTrigger(action: FabricPrewalkBoundaryAction): boolean {
+    return (
+      this.#triggerRefs.has(action.ref) ||
+      (action.risk !== undefined && this.#triggerRisks.has(action.risk)) ||
+      (action.effect !== undefined && this.#triggerEffects.has(action.effect))
+    );
+  }
+
+  #researchStatus(sessionId: string): FabricPrewalkArmedStatus | undefined {
+    return this.#status.state === "armed" &&
+      this.#status.mode === "research" &&
+      this.#status.sessionId === sessionId
+      ? this.#status
+      : undefined;
+  }
+
+  executionBoundary(sessionId: string): FabricPrewalkExecutionBoundary | undefined {
+    if (!this.#researchStatus(sessionId)) return undefined;
+    return {
+      registerChecklist: (input) => {
+        if (!this.#researchStatus(sessionId)) {
+          throw new Error("Research Prewalk is no longer armed for this session");
+        }
+        const checklist = parsePrewalkChecklist(input);
+        this.#transition({ kind: "checklist_ready", sessionId, checklist });
+        return checklist;
+      },
+      authorize: (action) => {
+        const status = this.#researchStatus(sessionId);
+        if (!status || !this.#matchesTrigger(action)) return false;
+        if (!status.checklist) {
+          throw new Error(
+            "Research Prewalk requires prewalk.checklist with 5-9 validated items before the first mutation",
+          );
+        }
+        if (this.#researchMutationReserved) {
+          throw new Error("Research Prewalk first mutation is already in flight");
+        }
+        this.#researchMutationReserved = true;
+        return true;
+      },
+      settle: (reservation, audit) => {
+        if (!reservation) return false;
+        if (audit.success === true && this.#matchesTrigger(audit)) return true;
+        this.#researchMutationReserved = false;
+        return false;
+      },
+      release: (reservation) => {
+        if (reservation) this.#researchMutationReserved = false;
+      },
+    };
   }
 
   #transition(event: FabricPrewalkEvent): FabricPrewalkStatus {
@@ -129,15 +202,17 @@ export class PrewalkController {
     }
     const task = normalizedTask(input.task);
     const fallbackModels = normalizedFallbackModels(input.fallbackModels, model);
+    const mode = input.mode ?? "in-place";
+    this.#researchMutationReserved = false;
     return this.#transition({
       kind: "armed",
       arm: {
-        mode: input.mode ?? "in-place",
+        mode,
         model,
         sessionId: input.sessionId,
         armedAt: Date.now(),
         alwaysRearm: input.alwaysRearm === true,
-        returnPolicy: input.returnPolicy ?? "executor",
+        returnPolicy: mode === "research" ? "executor" : input.returnPolicy ?? "executor",
         ...(fallbackModels.length > 0 ? { fallbackModels } : {}),
         ...(task ? { task } : {}),
         ...(input.thinking ? { thinking: input.thinking } : {}),
@@ -166,6 +241,10 @@ export class PrewalkController {
       this.#status.state === "armed" &&
       (sessionId === undefined || this.#status.sessionId === sessionId)
     );
+  }
+
+  isResearchPlanning(sessionId: string): boolean {
+    return this.#researchStatus(sessionId) !== undefined;
   }
 
   settleTask(sessionId: string): boolean {
@@ -299,12 +378,9 @@ export class PrewalkController {
       return undefined;
     }
     const mutation = audits.find(
-      (audit) => audit.success === true && (
-        this.#triggerRefs.has(audit.ref) ||
-        (audit.risk !== undefined && this.#triggerRisks.has(audit.risk)) ||
-        (audit.effect !== undefined && this.#triggerEffects.has(audit.effect))
-      ),
+      (audit) => audit.success === true && this.#matchesTrigger(audit),
     );
+    if (this.#status.mode === "research" && !this.#status.checklist) return undefined;
     if (!mutation) return undefined;
     const arm = armFromStatus(this.#status);
     this.#transition({
@@ -312,10 +388,12 @@ export class PrewalkController {
       sessionId,
       handoffId: handoffId ?? mutation.nestedToolCallId,
     });
+    this.#researchMutationReserved = false;
     return { arm, mutation };
   }
 
   cancel(): void {
+    this.#researchMutationReserved = false;
     this.#transition({ kind: "cancelled" });
   }
 }

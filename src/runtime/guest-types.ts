@@ -1182,6 +1182,18 @@ interface FabricCompactApi {
   cancel(): Promise<{ cancelled: true }>;
 }
 
+interface FabricPrewalkChecklistItem {
+  task: string;
+  validation: string;
+}
+interface FabricPrewalkChecklist {
+  items: FabricPrewalkChecklistItem[];
+  readyAt: number;
+}
+interface FabricPrewalkApi {
+  checklist(input: { items: FabricPrewalkChecklistItem[] }): Promise<FabricPrewalkChecklist>;
+}
+
 interface FabricWorkflowAgentOptions extends Omit<FabricAgentRequest, "task"> {
   label?: string;
 }
@@ -1344,6 +1356,7 @@ declare const outcomes: FabricOutcomesApi;
 declare const leases: FabricLeasesApi;
 declare const council: FabricCouncilApi;
 declare const consult: FabricConsultApi;
+declare const prewalk: FabricPrewalkApi;
 declare const workflow: FabricWorkflowApi;
 declare function agent<T = string>(prompt: string, options?: FabricWorkflowAgentOptions): Promise<T>;
 declare function parallel<T, R>(items: T[], mapper: (item: T, index: number) => Promise<R> | R, concurrency?: number | { concurrency?: number }): Promise<R[]>;

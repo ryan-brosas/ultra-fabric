@@ -85,6 +85,7 @@ export interface FabricRegistryInvocationContext extends FabricInvocationContext
   trace?: FabricExecutionTraceRecorder;
   traceOperation?: FabricExecutionTraceOperationHandle;
   observeInvocation?(event: FabricRegistryActivityEvent): void;
+  settleInvocation?(audit: FabricCallAudit): void;
 }
 
 /**
@@ -595,6 +596,7 @@ export class ActionRegistry {
       } else {
         traceOperation?.succeed(bounded.value);
       }
+      context.settleInvocation?.(activeAudit);
       return bounded.value;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -609,6 +611,7 @@ export class ActionRegistry {
           success: false,
           error: audit.error,
         });
+        context.settleInvocation?.(audit);
       }
       throw error;
     } finally {

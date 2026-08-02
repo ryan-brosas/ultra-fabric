@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   PREWALK_CONTINUE_MESSAGE_TYPE,
+  PREWALK_PLAN_MESSAGE_TYPE,
   filterPrewalkContinuationMessages,
+  filterPrewalkPlanningMessages,
 } from "../src/prewalk/continuation.js";
 
 interface TestMessage {
@@ -48,5 +50,25 @@ describe("filterPrewalkContinuationMessages", () => {
 
     expect(result).toEqual({ messages: [ordinary, active], changed: true });
     expect(accept.mock.calls).toEqual([["handoff-stale"], ["handoff-current"]]);
+  });
+});
+
+describe("filterPrewalkPlanningMessages", () => {
+  const planning: TestMessage = {
+    role: "custom",
+    customType: PREWALK_PLAN_MESSAGE_TYPE,
+    content: "research planning instruction",
+  };
+  const ordinary: TestMessage = { role: "user", content: "continue" };
+
+  it("keeps the instruction only while the research planner owns the phase", () => {
+    const visible = filterPrewalkPlanningMessages([planning, ordinary], true);
+    expect(visible).toEqual({ messages: [planning, ordinary], changed: false });
+    expect(visible.messages[0]).toBe(planning);
+
+    expect(filterPrewalkPlanningMessages([planning, ordinary], false)).toEqual({
+      messages: [ordinary],
+      changed: true,
+    });
   });
 });
