@@ -67,12 +67,31 @@ Installed Pi model-provider extensions and `~/.pi/agent/models.json` entries are
 
 Requires Node.js 24+ and Pi 0.80.6+. Fabric also checks a detectable Pi host version at startup and warns when an older host may ignore continuation APIs such as persistent-agent `triggerTurn`.
 
+### npm prerelease
+
+Install an exact experimental version so it does not move unexpectedly:
+
+```bash
+pi install npm:ultra-fabric@0.31.1-ultra.0
+```
+
+If `pi-fabric` is installed, replace it rather than loading both package identities:
+
+```bash
+pi remove npm:pi-fabric
+pi install npm:ultra-fabric@0.31.1-ultra.0
+```
+
+Restart Pi after changing extension packages.
+
+### Git
+
 ```bash
 pi install git:github.com/ryan-brosas/ultra-fabric
 ```
 
 <details>
-<summary>Other install methods</summary>
+<summary>Local development methods</summary>
 
 From a local checkout:
 

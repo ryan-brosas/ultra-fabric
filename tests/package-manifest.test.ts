@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 interface PackageManifest {
   dependencies?: Record<string, string>;
+  publishConfig?: { access?: string; tag?: string };
+  scripts?: Record<string, string>;
 }
 
 const packageName = (specifier: string): string =>
@@ -12,6 +14,13 @@ const packageName = (specifier: string): string =>
     : (specifier.split("/")[0] ?? specifier);
 
 describe("package manifest", () => {
+  it("builds Git installs and keeps prerelease publications off latest", () => {
+    const manifest = JSON.parse(fs.readFileSync("package.json", "utf8")) as PackageManifest;
+
+    expect(manifest.scripts?.prepare).toBe("npm run build");
+    expect(manifest.publishConfig).toEqual({ access: "public", tag: "next" });
+  });
+
   it("installs every standalone worker import as a runtime dependency", () => {
     const root = path.resolve(import.meta.dirname, "..");
     const manifest = JSON.parse(

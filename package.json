@@ -20,10 +20,16 @@
     "agents/",
     "skills/",
     "docs/",
+    "scripts/",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
+  },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -36,6 +42,7 @@
     "benchmark:memory-heads": "pnpm run build && node scripts/benchmark-memory-heads.mjs",
     "lint:dead": "knip --no-gitignore",
     "check": "pnpm run typecheck && pnpm run build && pnpm run test && pnpm run lint:dead",
+    "prepare": "npm run build",
     "prepack": "pnpm run check"
   },
   "keywords": [

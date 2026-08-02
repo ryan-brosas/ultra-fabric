@@ -1,10 +1,10 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { formatSkillsForPrompt, loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { GUEST_TYPE_DECLARATIONS } from "../src/runtime/guest-types.js";
 import { typeCheckFabricCode } from "../src/runtime/type-checker.js";
+import { readPackedFilePaths } from "./helpers/package-pack.js";
 
 const stableProviderActions = {
   memory: ["recall", "expand", "sessions"],
@@ -184,18 +184,34 @@ describe("fabric-exec skill provider contracts", () => {
     expect(swarm).not.toContain("## Completion criterion");
   });
 
-  it("packs every skill and required progressive reference", () => {
-    type PackRecord = { files: Array<{ path: string }> };
-    const payload = JSON.parse(execFileSync(
-      process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "npm",
-      process.platform === "win32"
-        ? ["/d", "/s", "/c", "npm", "pack", "--ignore-scripts", "--dry-run", "--json"]
-        : ["pack", "--ignore-scripts", "--dry-run", "--json"],
-      { cwd: process.cwd(), encoding: "utf8" },
-    )) as PackRecord[] | Record<string, PackRecord>;
-    const packed = Array.isArray(payload) ? payload : Object.values(payload);
-    expect(packed).not.toHaveLength(0);
-    const files = new Set(packed[0]!.files.map((entry) => entry.path));
+  it("packs the runtime, scripts, skills, and required progressive references", () => {
+    const files = readPackedFilePaths();
+    const manifest = JSON.parse(fs.readFileSync("package.json", "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+
+    for (const required of [
+      "CHANGELOG.md",
+      "LICENSE",
+      "README.md",
+      "THIRD_PARTY_NOTICES.md",
+      "dist/index.js",
+    ]) {
+      expect(files, `packed file missing: ${required}`).toContain(required);
+    }
+    for (const command of Object.values(manifest.scripts ?? {})) {
+      for (const match of command.matchAll(/\bnode\s+(scripts\/[^\s]+\.mjs)\b/g)) {
+        expect(files, `packed script missing: ${match[1]}`).toContain(match[1]);
+      }
+    }
+
+    const machinePath = /\/(?:Users|home)\/[^/\s`]+\/(?:VCS|work|projects)\//;
+    for (const file of files) {
+      if (!file.endsWith(".md") || !fs.existsSync(file)) continue;
+      expect(fs.readFileSync(file, "utf8"), `machine-local path in ${file}`)
+        .not.toMatch(machinePath);
+    }
+
     expect(files).toContain("docs/skills.md");
     expect(files).toContain("skills/fabric-ambient/references/setup.md");
     for (const entry of fs.readdirSync("skills", { withFileTypes: true })) {
