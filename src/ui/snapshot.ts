@@ -65,6 +65,19 @@ const stateEntry = (entry: MeshStateEntry): FabricUiStateEntry => {
   };
 };
 
+const activePathLeases = (entries: MeshStateEntry[], now: number): number => {
+  const value = entries.find((entry) => entry.key === "path-leases/v1")?.value;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return 0;
+  const leases = (value as { leases?: unknown }).leases;
+  return Array.isArray(leases)
+    ? leases.filter((lease) =>
+        typeof lease === "object" && lease !== null &&
+        typeof (lease as { expiresAt?: unknown }).expiresAt === "number" &&
+        (lease as { expiresAt: number }).expiresAt > now,
+      ).length
+    : 0;
+};
+
 export const createDashboardSnapshot = (
   state: FabricState,
   events: MeshEvent[],
@@ -110,6 +123,9 @@ export const createDashboardSnapshot = (
       cwd: record.cwd,
       ...(!isRunRecord(record) && linked ? { startedAt: linked.call.startedAt } : {}),
       ...(record.model ? { model: record.model } : {}),
+      ...(record.route ? { route: structuredClone(record.route) } : {}),
+      ...(record.profile ? { profile: record.profile } : {}),
+      ...(record.admission ? { admission: structuredClone(record.admission) } : {}),
       ...(record.thinking ? { thinking: record.thinking } : {}),
       ...(record.attachCommand ? { attachCommand: record.attachCommand } : {}),
       ...(isRunRecord(record) && record.logFile ? { logFile: record.logFile } : {}),
@@ -255,7 +271,8 @@ export const createDashboardSnapshot = (
       (entry) =>
         !entry.key.startsWith("actors/") &&
         !entry.key.startsWith("sessions/") &&
-        !entry.key.startsWith("topology/"),
+        !entry.key.startsWith("topology/") &&
+        !entry.key.startsWith("outcomes/"),
     )
     .map(stateEntry)
     .sort((left, right) => {
@@ -281,5 +298,39 @@ export const createDashboardSnapshot = (
     }),
     state: stateEntries,
     events: events.map((event) => structuredClone(event)),
+    observability: {
+      contextQos: state.contextQosTelemetry ?? {
+        passes: 0,
+        retiredResults: 0,
+        retiredChars: 0,
+        protectedResults: 0,
+      },
+      actorBudgets: typeof state.actors.telemetry === "function"
+        ? state.actors.telemetry()
+        : {
+            actors: 0,
+            open: 0,
+            lifetimeExhausted: 0,
+            windowExhausted: 0,
+            lifetimeActivations: 0,
+            lifetimeTokens: 0,
+            rejectedActivations: 0,
+            queueRejected: 0,
+            activationDeadLetters: 0,
+            deliveryDeadLetters: 0,
+          },
+      outcomes: (() => {
+        if (state.config.outcomes?.enabled !== true) {
+          return { records: 0, succeeded: 0, verified: 0, downgraded: 0, evaluated: 0 };
+        }
+        try {
+          return state.outcomes.summary();
+        } catch {
+          return { records: 0, succeeded: 0, verified: 0, downgraded: 0, evaluated: 0 };
+        }
+      })(),
+      workflows: meshEntries.filter((entry) => entry.key.startsWith("workflows/")).length,
+      pathLeases: activePathLeases(meshEntries, Date.now()),
+    },
   };
 };

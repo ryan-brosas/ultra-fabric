@@ -6,12 +6,16 @@ const audit = (
   ref: string,
   success: boolean,
   sequence = 1,
+  risk?: FabricCallAudit["risk"],
+  effect?: FabricCallAudit["effect"],
 ): FabricCallAudit => ({
   ref,
   nestedToolCallId: `call-${sequence}`,
   startedAt: sequence,
   endedAt: sequence + 1,
   success,
+  ...(risk ? { risk } : {}),
+  ...(effect ? { effect } : {}),
 });
 
 describe("PrewalkController", () => {
@@ -89,6 +93,88 @@ describe("PrewalkController", () => {
     });
     expect(controller.status()).toMatchObject({ state: "handing_off" });
     expect(controller.claim([audit("schema.commit", true)], "session-1")).toBeUndefined();
+  });
+
+  it("distinguishes workspace effects from state bookkeeping with the same write risk", () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement",
+    });
+
+    const claim = controller.claim([
+      audit("state.put", true, 1, "write", "state"),
+      audit("extensions.generated_write", true, 2, "write", "workspace"),
+    ], "session-1");
+
+    expect(claim?.mutation.ref).toBe("extensions.generated_write");
+  });
+
+  it("claims configured write-risk providers without treating bash as a mutation", () => {
+    const controller = new PrewalkController();
+    controller.configureTriggers(["write"], []);
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement",
+    });
+
+    const claim = controller.claim([
+      audit("pi.bash", true, 1, "execute"),
+      audit("extensions.generated_write", true, 2, "write"),
+    ], "session-1");
+
+    expect(claim?.mutation.ref).toBe("extensions.generated_write");
+  });
+
+  it("claims one identity-owned revision from effective verification gates", () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement",
+      verificationMode: "gated",
+      maxPhaseRevisions: 1,
+    } as never);
+    controller.claim([audit("pi.edit", true)], "session-1", "execute-1");
+    controller.completeHandoff("anthropic/frontier");
+    expect(controller.acceptContinuation("session-1", "execute-1")).toBe(true);
+
+    const observe = (controller as unknown as {
+      observeVerification(
+        gates: Array<Record<string, unknown>>,
+        sessionId: string,
+        handoffId: string,
+      ): unknown;
+    }).observeVerification.bind(controller);
+    const revision = observe([
+      {
+        gate: "acceptance",
+        passed: false,
+        disposition: "revise",
+        evidence: [{ kind: "command", ref: "test:failed" }],
+        reason: "test failed",
+        sequence: 1,
+        recordedAt: 20,
+        decision: "revise",
+        revision: 1,
+      },
+    ], "session-1", "revise-1");
+
+    expect(revision).toMatchObject({
+      kind: "revision",
+      gate: "acceptance",
+      feedback: "test failed",
+      revision: 1,
+      returnModel: "anthropic/frontier",
+    });
+    expect(controller.status()).toMatchObject({
+      state: "handing_off",
+      handoffId: "revise-1",
+      revision: 1,
+      revisionGate: "acceptance",
+    });
   });
 
   it("does not cross session boundaries", () => {

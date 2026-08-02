@@ -21,9 +21,16 @@ export type FabricAgentRunner = "pi" | "claude";
 export type FabricUiWidgetMode = "auto" | "always" | "hidden";
 export type FabricResultFormat = "auto" | "yaml" | "json" | "text";
 export type FabricPrewalkMode = "in-place" | "trajectory";
+export type FabricPrewalkReturnPolicy = "executor" | "previous";
+type FabricPrewalkVerificationMode = "gated";
 export type FabricExecutorRuntime = "quickjs" | "node-process";
 type FabricCompactionEngine = "pi" | "fabric";
 type FabricActorScope = "project" | "session";
+type FabricActorOverflowPolicy =
+  | "reject"
+  | "coalesce"
+  | "drop-oldest"
+  | "dead-letter";
 
 interface FabricExecutorConfig {
   runtime: FabricExecutorRuntime;
@@ -31,6 +38,9 @@ interface FabricExecutorConfig {
   memoryLimitBytes: number;
   maxOutputChars: number;
   maxNestedResultChars: number;
+  maxGateRevisions: number;
+  maxRunEvidence: number;
+  maxRunTransitions: number;
   resultFormat: FabricResultFormat;
 }
 
@@ -58,10 +68,17 @@ interface FabricClaudeRunnerConfig {
 
 interface FabricPrewalkConfig {
   mode: FabricPrewalkMode;
+  returnPolicy: FabricPrewalkReturnPolicy;
   model?: string;
+  fallbackModels?: string[];
+  triggerRisks: FabricRisk[];
+  triggerEffects: Array<"none" | "workspace" | "state" | "external">;
+  triggerRefs: string[];
   alwaysRearm: boolean;
   // Reasoning effort for the trajectory executor; unset inherits agents.thinking.
   thinking?: FabricThinking;
+  verificationMode?: FabricPrewalkVerificationMode;
+  maxPhaseRevisions?: number;
 }
 
 export interface FabricAgentConfig {
@@ -69,6 +86,10 @@ export interface FabricAgentConfig {
   runner: FabricAgentRunner;
   transport: FabricAgentTransport;
   model?: string;
+  fallbackModels: string[];
+  allowQualityDowngrade: boolean;
+  requireAdmissionIntent: boolean;
+  capabilityProfiles: Record<string, { tools: string[]; risks: FabricRisk[] }>;
   claude: FabricClaudeRunnerConfig;
   thinking: FabricThinking;
   maxConcurrent: number;
@@ -81,6 +102,17 @@ export interface FabricAgentConfig {
   notifyOnComplete: boolean;
   budgetUsd: number;
   maxTokensPerChild: number;
+}
+
+interface FabricConsultConfig {
+  enabled: boolean;
+  maxWorkers: number;
+  contextPressureThreshold: number;
+  maxFindingsPerWorker: number;
+  maxEvidencePerFinding: number;
+  maxEvidenceFileBytes: number;
+  maxEvidenceBytesPerConsult: number;
+  maxTokensPerWorker: number;
 }
 
 export interface FabricToolCaptureConfig {
@@ -119,10 +151,23 @@ interface FabricUiConfig {
   nestedToolDebounceMs: number;
 }
 
+interface FabricContextQosConfig {
+  enabled: boolean;
+  turnWindow: number;
+  minResultChars: number;
+}
+
 interface FabricCompactionConfig {
   engine: FabricCompactionEngine;
   targetContextRatio: number;
   thresholds: Record<string, number>;
+  contextQos: FabricContextQosConfig;
+}
+
+interface FabricOutcomeConfig {
+  enabled: boolean;
+  maxRecords: number;
+  minRecommendationSamples: number;
 }
 
 export interface FabricRetentionConfig {
@@ -139,6 +184,17 @@ export interface FabricMeshConfig {
   maxReadEvents: number;
   actorPollMs: number;
   actorQueueLimit: number;
+  actorOverflowPolicy: FabricActorOverflowPolicy;
+  actorRunMaxAttempts: number;
+  actorRunBaseDelayMs: number;
+  actorRunMaxDelayMs: number;
+  actorRunJitterMs: number;
+  actorDeliveryMaxAttempts: number;
+  actorDeliveryBaseDelayMs: number;
+  actorDeliveryMaxDelayMs: number;
+  actorDeliveryJitterMs: number;
+  actorCircuitFailureThreshold: number;
+  actorCircuitCooldownMs: number;
   eventContextChars: number;
   actorContextEntries: number;
 }
@@ -170,9 +226,11 @@ export interface FabricConfig {
   mcp: FabricMcpConfig;
   prewalk: FabricPrewalkConfig;
   agents: FabricAgentConfig;
+  consult: FabricConsultConfig;
   capture: FabricToolCaptureConfig;
   ui: FabricUiConfig;
   compaction: FabricCompactionConfig;
+  outcomes: FabricOutcomeConfig;
   retention: FabricRetentionConfig;
   mesh: FabricMeshConfig;
   memory: FabricMemoryConfig;
@@ -201,6 +259,9 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     memoryLimitBytes: 64 * 1024 * 1024,
     maxOutputChars: 50_000,
     maxNestedResultChars: 2_000_000,
+    maxGateRevisions: 2,
+    maxRunEvidence: 256,
+    maxRunTransitions: 512,
     resultFormat: "auto",
   },
   approvals: {
@@ -218,12 +279,20 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
   },
   prewalk: {
     mode: "in-place",
+    returnPolicy: "executor",
+    triggerRisks: [],
+    triggerEffects: ["workspace"],
+    triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
     alwaysRearm: false,
   },
   agents: {
     enabled: true,
     runner: "pi",
     transport: "process",
+    fallbackModels: [],
+    allowQualityDowngrade: false,
+    requireAdmissionIntent: false,
+    capabilityProfiles: {},
     claude: { binary: "claude" },
     thinking: DEFAULT_FABRIC_THINKING,
     maxConcurrent: 4,
@@ -236,6 +305,16 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     notifyOnComplete: true,
     budgetUsd: 0,
     maxTokensPerChild: 0,
+  },
+  consult: {
+    enabled: true,
+    maxWorkers: 3,
+    contextPressureThreshold: 0.6,
+    maxFindingsPerWorker: 8,
+    maxEvidencePerFinding: 8,
+    maxEvidenceFileBytes: 2 * 1024 * 1024,
+    maxEvidenceBytesPerConsult: 8 * 1024 * 1024,
+    maxTokensPerWorker: 8_000,
   },
   capture: {
     enabled: true,
@@ -266,6 +345,16 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     engine: "fabric",
     targetContextRatio: 0.65,
     thresholds: {},
+    contextQos: {
+      enabled: true,
+      turnWindow: 2,
+      minResultChars: 4_000,
+    },
+  },
+  outcomes: {
+    enabled: true,
+    maxRecords: 1_000,
+    minRecommendationSamples: 5,
   },
   retention: {
     orphanedTempRunMs: 6 * 60 * 60 * 1_000,
@@ -279,6 +368,17 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     maxReadEvents: 500,
     actorPollMs: 250,
     actorQueueLimit: 32,
+    actorOverflowPolicy: "reject",
+    actorRunMaxAttempts: 1,
+    actorRunBaseDelayMs: 250,
+    actorRunMaxDelayMs: 5_000,
+    actorRunJitterMs: 100,
+    actorDeliveryMaxAttempts: 3,
+    actorDeliveryBaseDelayMs: 100,
+    actorDeliveryMaxDelayMs: 2_000,
+    actorDeliveryJitterMs: 50,
+    actorCircuitFailureThreshold: 3,
+    actorCircuitCooldownMs: 30_000,
     eventContextChars: 40_000,
     actorContextEntries: 14,
   },
@@ -328,9 +428,6 @@ const readJsonObjectFile = (filePath: string): JsonObjectFile | undefined => {
     throw new Error(`Failed to read ${filePath}: ${message}`);
   }
 };
-
-const readJsonObject = (filePath: string): Record<string, unknown> | undefined =>
-  readJsonObjectFile(filePath)?.document;
 
 const mergeObjects = (
   base: Record<string, unknown>,
@@ -388,6 +485,12 @@ const prewalkModeValue = (
 ): FabricPrewalkMode =>
   value === "in-place" || value === "trajectory" ? value : fallback;
 
+const prewalkReturnPolicyValue = (
+  value: unknown,
+  fallback: FabricPrewalkReturnPolicy,
+): FabricPrewalkReturnPolicy =>
+  value === "executor" || value === "previous" ? value : fallback;
+
 const transportValue = (
   value: unknown,
   fallback: FabricAgentTransport,
@@ -435,6 +538,17 @@ const compactionEngineValue = (
 const actorScopeValue = (value: unknown, fallback: FabricActorScope): FabricActorScope =>
   value === "project" || value === "session" ? value : fallback;
 
+const actorOverflowPolicyValue = (
+  value: unknown,
+  fallback: FabricActorOverflowPolicy,
+): FabricActorOverflowPolicy =>
+  value === "reject" ||
+  value === "coalesce" ||
+  value === "drop-oldest" ||
+  value === "dead-letter"
+    ? value
+    : fallback;
+
 const schemaModeValue = (value: unknown, fallback: FabricSchemaMode): FabricSchemaMode =>
   value === "off" || value === "audit" || value === "enforce" ? value : fallback;
 
@@ -453,10 +567,13 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
   const mcp = objectValue(input.mcp);
   const prewalk = objectValue(input.prewalk);
   const agents = objectValue(input.agents);
+  const consult = objectValue(input.consult);
   const claude = objectValue(agents.claude);
   const capture = objectValue(input.capture);
   const ui = objectValue(input.ui);
   const compaction = objectValue(input.compaction);
+  const contextQos = objectValue(compaction.contextQos);
+  const outcomes = objectValue(input.outcomes);
   const retention = objectValue(input.retention);
   const mesh = objectValue(input.mesh);
   const memory = objectValue(input.memory);
@@ -472,6 +589,26 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         (tool): tool is string => typeof tool === "string" && Boolean(tool),
       )
     : DEFAULT_FABRIC_CONFIG.agents.defaultTools;
+  const capabilityProfiles = Object.fromEntries(
+    Object.entries(objectValue(agents.capabilityProfiles))
+      .filter(([name]) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(name))
+      .slice(0, 32)
+      .map(([name, raw]) => {
+        const profile = objectValue(raw);
+        const tools = Array.isArray(profile.tools)
+          ? [...new Set(profile.tools.filter((tool): tool is string =>
+              typeof tool === "string" && Boolean(tool.trim())
+            ).map((tool) => tool.trim()))].slice(0, 32)
+          : [];
+        const risks = Array.isArray(profile.risks)
+          ? [...new Set(profile.risks.filter((risk): risk is FabricRisk =>
+              risk === "read" || risk === "write" || risk === "execute" ||
+              risk === "network" || risk === "agent"
+            ))]
+          : [];
+        return [name, { tools, risks }];
+      }),
+  );
   const approvalModel = stringValue(approvals.model);
   const configPath = stringValue(mcp.configPath);
   const meshRoot = stringValue(mesh.root);
@@ -489,8 +626,45 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       ]),
   );
   const prewalkModel = stringValue(prewalk.model);
+  const prewalkFallbackModels = Array.isArray(prewalk.fallbackModels)
+    ? [...new Set(
+        prewalk.fallbackModels
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter((value) => /^[^/\s]+\/\S+$/.test(value)),
+      )].slice(0, 8)
+    : [];
   const prewalkThinking = isFabricThinking(prewalk.thinking) ? prewalk.thinking : undefined;
+  const prewalkTriggerRisks = Array.isArray(prewalk.triggerRisks)
+    ? [...new Set(prewalk.triggerRisks.filter((value): value is FabricRisk =>
+        value === "read" || value === "write" || value === "execute" ||
+        value === "network" || value === "agent"
+      ))]
+    : DEFAULT_FABRIC_CONFIG.prewalk.triggerRisks;
+  const prewalkTriggerEffects = Array.isArray(prewalk.triggerEffects)
+    ? [...new Set(prewalk.triggerEffects.filter(
+        (value): value is "none" | "workspace" | "state" | "external" =>
+          value === "none" || value === "workspace" || value === "state" || value === "external",
+      ))]
+    : DEFAULT_FABRIC_CONFIG.prewalk.triggerEffects;
+  const prewalkTriggerRefs = Array.isArray(prewalk.triggerRefs)
+    ? [...new Set(
+        prewalk.triggerRefs
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter((value) => /^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_.-]+$/.test(value)),
+      )].slice(0, 32)
+    : DEFAULT_FABRIC_CONFIG.prewalk.triggerRefs;
+  const prewalkVerificationMode = prewalk.verificationMode === "gated" ? "gated" : undefined;
   const agentModel = stringValue(agents.model);
+  const agentFallbackModels = Array.isArray(agents.fallbackModels)
+    ? [...new Set(
+        agents.fallbackModels
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter((value) => /^[^/\s]+\/\S+$/.test(value)),
+      )].slice(0, 8)
+    : DEFAULT_FABRIC_CONFIG.agents.fallbackModels;
   const claudeBinary = stringValue(claude.binary);
   const claudeModel = stringValue(claude.model);
   const agentThinking = thinkingValue(agents.thinking, DEFAULT_FABRIC_CONFIG.agents.thinking);
@@ -555,6 +729,24 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         10_000,
         20_000_000,
       ),
+      maxGateRevisions: boundedInteger(
+        executor.maxGateRevisions,
+        DEFAULT_FABRIC_CONFIG.executor.maxGateRevisions,
+        0,
+        10,
+      ),
+      maxRunEvidence: boundedInteger(
+        executor.maxRunEvidence,
+        DEFAULT_FABRIC_CONFIG.executor.maxRunEvidence,
+        1,
+        10_000,
+      ),
+      maxRunTransitions: boundedInteger(
+        executor.maxRunTransitions,
+        DEFAULT_FABRIC_CONFIG.executor.maxRunTransitions,
+        1,
+        10_000,
+      ),
       resultFormat: resultFormatValue(
         executor.resultFormat,
         DEFAULT_FABRIC_CONFIG.executor.resultFormat,
@@ -585,8 +777,24 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
     },
     prewalk: {
       mode: prewalkModeValue(prewalk.mode, DEFAULT_FABRIC_CONFIG.prewalk.mode),
+      returnPolicy: prewalkReturnPolicyValue(
+        prewalk.returnPolicy,
+        DEFAULT_FABRIC_CONFIG.prewalk.returnPolicy,
+      ),
       ...(prewalkModel ? { model: prewalkModel } : {}),
+      ...(prewalkFallbackModels.length > 0
+        ? { fallbackModels: prewalkFallbackModels }
+        : {}),
       ...(prewalkThinking ? { thinking: prewalkThinking } : {}),
+      triggerRisks: prewalkTriggerRisks,
+      triggerEffects: prewalkTriggerEffects,
+      triggerRefs: prewalkTriggerRefs,
+      ...(prewalkVerificationMode
+        ? {
+            verificationMode: prewalkVerificationMode,
+            maxPhaseRevisions: boundedInteger(prewalk.maxPhaseRevisions, 2, 0, 8),
+          }
+        : {}),
       alwaysRearm: booleanValue(
         prewalk.alwaysRearm,
         DEFAULT_FABRIC_CONFIG.prewalk.alwaysRearm,
@@ -597,6 +805,16 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       runner: runnerValue(agents.runner, DEFAULT_FABRIC_CONFIG.agents.runner),
       transport: transportValue(agents.transport, DEFAULT_FABRIC_CONFIG.agents.transport),
       ...(agentModel ? { model: agentModel } : {}),
+      fallbackModels: agentFallbackModels,
+      allowQualityDowngrade: booleanValue(
+        agents.allowQualityDowngrade,
+        DEFAULT_FABRIC_CONFIG.agents.allowQualityDowngrade,
+      ),
+      requireAdmissionIntent: booleanValue(
+        agents.requireAdmissionIntent,
+        DEFAULT_FABRIC_CONFIG.agents.requireAdmissionIntent,
+      ),
+      capabilityProfiles,
       claude: {
         binary: claudeBinary ?? DEFAULT_FABRIC_CONFIG.agents.claude.binary,
         ...(claudeModel ? { model: claudeModel } : {}),
@@ -641,6 +859,51 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         100_000_000,
       ),
     },
+    consult: {
+      enabled: booleanValue(consult.enabled, DEFAULT_FABRIC_CONFIG.consult.enabled),
+      maxWorkers: boundedInteger(
+        consult.maxWorkers,
+        DEFAULT_FABRIC_CONFIG.consult.maxWorkers,
+        1,
+        3,
+      ),
+      contextPressureThreshold: boundedFloat(
+        consult.contextPressureThreshold,
+        DEFAULT_FABRIC_CONFIG.consult.contextPressureThreshold,
+        0.25,
+        0.95,
+      ),
+      maxFindingsPerWorker: boundedInteger(
+        consult.maxFindingsPerWorker,
+        DEFAULT_FABRIC_CONFIG.consult.maxFindingsPerWorker,
+        1,
+        16,
+      ),
+      maxEvidencePerFinding: boundedInteger(
+        consult.maxEvidencePerFinding,
+        DEFAULT_FABRIC_CONFIG.consult.maxEvidencePerFinding,
+        1,
+        16,
+      ),
+      maxEvidenceFileBytes: boundedInteger(
+        consult.maxEvidenceFileBytes,
+        DEFAULT_FABRIC_CONFIG.consult.maxEvidenceFileBytes,
+        1_024,
+        16 * 1024 * 1024,
+      ),
+      maxEvidenceBytesPerConsult: boundedInteger(
+        consult.maxEvidenceBytesPerConsult,
+        DEFAULT_FABRIC_CONFIG.consult.maxEvidenceBytesPerConsult,
+        1_024,
+        64 * 1024 * 1024,
+      ),
+      maxTokensPerWorker: boundedInteger(
+        consult.maxTokensPerWorker,
+        DEFAULT_FABRIC_CONFIG.consult.maxTokensPerWorker,
+        256,
+        1_000_000,
+      ),
+    },
     capture: {
       enabled: booleanValue(capture.enabled, DEFAULT_FABRIC_CONFIG.capture.enabled),
       hideFromModel: booleanValue(
@@ -683,6 +946,39 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         0.85,
       ),
       thresholds: compactionThresholds,
+      contextQos: {
+        enabled: booleanValue(
+          contextQos.enabled,
+          DEFAULT_FABRIC_CONFIG.compaction.contextQos.enabled,
+        ),
+        turnWindow: boundedInteger(
+          contextQos.turnWindow,
+          DEFAULT_FABRIC_CONFIG.compaction.contextQos.turnWindow,
+          1,
+          20,
+        ),
+        minResultChars: boundedInteger(
+          contextQos.minResultChars,
+          DEFAULT_FABRIC_CONFIG.compaction.contextQos.minResultChars,
+          256,
+          1_000_000,
+        ),
+      },
+    },
+    outcomes: {
+      enabled: booleanValue(outcomes.enabled, DEFAULT_FABRIC_CONFIG.outcomes.enabled),
+      maxRecords: boundedInteger(
+        outcomes.maxRecords,
+        DEFAULT_FABRIC_CONFIG.outcomes.maxRecords,
+        100,
+        10_000,
+      ),
+      minRecommendationSamples: boundedInteger(
+        outcomes.minRecommendationSamples,
+        DEFAULT_FABRIC_CONFIG.outcomes.minRecommendationSamples,
+        2,
+        1_000,
+      ),
     },
     retention: {
       orphanedTempRunMs: boundedInteger(
@@ -731,6 +1027,70 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         DEFAULT_FABRIC_CONFIG.mesh.actorQueueLimit,
         1,
         1_000,
+      ),
+      actorOverflowPolicy: actorOverflowPolicyValue(
+        mesh.actorOverflowPolicy,
+        DEFAULT_FABRIC_CONFIG.mesh.actorOverflowPolicy,
+      ),
+      actorRunMaxAttempts: boundedInteger(
+        mesh.actorRunMaxAttempts,
+        DEFAULT_FABRIC_CONFIG.mesh.actorRunMaxAttempts,
+        1,
+        10,
+      ),
+      actorRunBaseDelayMs: boundedInteger(
+        mesh.actorRunBaseDelayMs,
+        DEFAULT_FABRIC_CONFIG.mesh.actorRunBaseDelayMs,
+        0,
+        60_000,
+      ),
+      actorRunMaxDelayMs: boundedInteger(
+        mesh.actorRunMaxDelayMs,
+        DEFAULT_FABRIC_CONFIG.mesh.actorRunMaxDelayMs,
+        0,
+        60_000,
+      ),
+      actorRunJitterMs: boundedInteger(
+        mesh.actorRunJitterMs,
+        DEFAULT_FABRIC_CONFIG.mesh.actorRunJitterMs,
+        0,
+        60_000,
+      ),
+      actorDeliveryMaxAttempts: boundedInteger(
+        mesh.actorDeliveryMaxAttempts,
+        DEFAULT_FABRIC_CONFIG.mesh.actorDeliveryMaxAttempts,
+        1,
+        10,
+      ),
+      actorDeliveryBaseDelayMs: boundedInteger(
+        mesh.actorDeliveryBaseDelayMs,
+        DEFAULT_FABRIC_CONFIG.mesh.actorDeliveryBaseDelayMs,
+        0,
+        60_000,
+      ),
+      actorDeliveryMaxDelayMs: boundedInteger(
+        mesh.actorDeliveryMaxDelayMs,
+        DEFAULT_FABRIC_CONFIG.mesh.actorDeliveryMaxDelayMs,
+        0,
+        60_000,
+      ),
+      actorDeliveryJitterMs: boundedInteger(
+        mesh.actorDeliveryJitterMs,
+        DEFAULT_FABRIC_CONFIG.mesh.actorDeliveryJitterMs,
+        0,
+        60_000,
+      ),
+      actorCircuitFailureThreshold: boundedInteger(
+        mesh.actorCircuitFailureThreshold,
+        DEFAULT_FABRIC_CONFIG.mesh.actorCircuitFailureThreshold,
+        1,
+        100,
+      ),
+      actorCircuitCooldownMs: boundedInteger(
+        mesh.actorCircuitCooldownMs,
+        DEFAULT_FABRIC_CONFIG.mesh.actorCircuitCooldownMs,
+        0,
+        24 * 60 * 60 * 1_000,
       ),
       eventContextChars: boundedInteger(
         mesh.eventContextChars,

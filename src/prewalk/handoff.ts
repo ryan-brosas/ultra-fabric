@@ -3,7 +3,11 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { FabricPrewalkMode, FabricResultFormat } from "../config.js";
+import type {
+  FabricPrewalkMode,
+  FabricPrewalkReturnPolicy,
+  FabricResultFormat,
+} from "../config.js";
 import {
   NESTED_TOOL_CALL_ID_PREFIX,
   type FabricCallAudit,
@@ -19,6 +23,8 @@ import type {
   AgentToolResultMessage,
 } from "../agents/types.js";
 import type { PrewalkController } from "./controller.js";
+import { PREWALK_CONTINUE_MESSAGE_TYPE } from "./continuation.js";
+import { requirePrewalkModel } from "./model.js";
 
 const PREWALK_CONTINUE_PROMPT = [
   "Continue the existing task in this same session under the new executor model.",
@@ -29,6 +35,14 @@ const PREWALK_CONTINUE_PROMPT = [
 // Forced continuation after a completed trajectory handoff: Main must not
 // settle idle at the boundary. The executor's implementation is the source of
 // truth — Main verifies it with real checks and reports, redoing nothing.
+const PREWALK_GATED_VERIFY_PROMPT = [
+  "Prewalk execution phase complete. Verify the existing implementation; do not redo it speculatively.",
+  "Run the smallest relevant behavioral checks in fabric_exec, then finish that same fabric_exec with workflow.gate().",
+  "Report passed: true with concrete command/artifact evidence when acceptance holds.",
+  "If a check fails, report passed: false, disposition: 'revise', the failed evidence ref, and scoped reason; Prewalk will return only that feedback to the executor within its revision cap.",
+  "Use disposition: 'abort' only when downstream work must stop. Do not claim completion without a passing gate.",
+].join(" ");
+
 const PREWALK_TRAJECTORY_VERIFY_PROMPT = [
   "Prewalk trajectory handoff complete: the executor's implementation above is final — do not redo it.",
   "Continue now: run the relevant verification (matching test module, build, or an equivalent probe) and check the changed call sites for consistency, then summarize what the executor implemented and how the checks went.",
@@ -42,7 +56,7 @@ export const PREWALK_ARMED_MESSAGE_TYPE = "pi-fabric-prewalk-armed";
 // be captured as the next prewalk task and never triggers a turn by itself.
 export const prewalkArmedPrompt = (mode: FabricPrewalkMode, model: string): string =>
   [
-    `Prewalk armed → ${model} (${mode}): the first successful pi.edit / pi.write / schema.commit inside fabric_exec hands off to the executor automatically; ${
+    `Prewalk armed → ${model} (${mode}): the first successful configured write effect inside fabric_exec (by default pi.edit / pi.write / schema.commit or any declared workspace-effect action) hands off to the executor automatically; ${
       mode === "trajectory"
         ? "the executor takes over the implementation there, and a hidden follow-up asks you to verify its work and summarize when it finishes."
         : `this session switches to ${model} and keeps working.`
@@ -96,15 +110,71 @@ export interface PendingFabricHandoff {
   args: Record<string, unknown>;
   audit: FabricCallAudit;
   resultFormat: FabricResultFormat;
+  returnPolicy?: FabricPrewalkReturnPolicy;
+  fallbackModels?: string[];
   triggerRef?: string;
+  verificationMode?: "gated";
+  maxPhaseRevisions?: number;
+  revision?: number;
+  returnModel?: string;
 }
+
+const createPrewalkPending = (input: {
+  arm: import("./lifecycle.js").FabricPrewalkArm;
+  nestedToolCallId: string;
+  resultFormat: FabricResultFormat;
+  triggerRef: string;
+  revision?: { number: number; gate: string; feedback: string };
+  returnModel?: string;
+}): PendingFabricHandoff => {
+  const inPlace = input.arm.mode === "in-place";
+  const revisionTask = input.revision
+    ? [
+        input.arm.task ? `Continue the existing task: ${input.arm.task}` : "Continue the existing task.",
+        `Revision ${input.revision.number} required by verification gate ${input.revision.gate}.`,
+        `Scoped feedback: ${input.revision.feedback}`,
+        "Change only what the failed evidence requires, then leave verification to Main.",
+      ].join("\n\n").slice(0, 20_000)
+    : input.arm.task;
+  const args = {
+    model: input.arm.model,
+    name: inPlace ? "In-place Prewalk" : "Prewalk trajectory executor",
+    ...(revisionTask ? { task: revisionTask } : {}),
+    ...(!inPlace && input.arm.thinking ? { thinking: input.arm.thinking } : {}),
+  };
+  const audit: FabricCallAudit = {
+    ref: inPlace ? "fabric.prewalk" : "agents.handoff",
+    nestedToolCallId: input.nestedToolCallId,
+    startedAt: Date.now(),
+    tool: inPlace ? "prewalk" : "handoff",
+    provider: inPlace ? "fabric" : "agents",
+    args,
+  };
+  return {
+    kind: inPlace ? "prewalk-in-place" : "prewalk-trajectory",
+    args,
+    audit,
+    resultFormat: input.resultFormat,
+    returnPolicy: input.arm.returnPolicy,
+    ...(input.arm.fallbackModels
+      ? { fallbackModels: [...input.arm.fallbackModels] }
+      : {}),
+    triggerRef: input.triggerRef,
+    ...(input.arm.verificationMode ? { verificationMode: input.arm.verificationMode } : {}),
+    ...(input.arm.maxPhaseRevisions !== undefined
+      ? { maxPhaseRevisions: input.arm.maxPhaseRevisions }
+      : {}),
+    ...(input.revision ? { revision: input.revision.number } : {}),
+    ...(input.returnModel ? { returnModel: input.returnModel } : {}),
+  };
+};
 
 // Appended to the replaced boundary tool result so the framing persists with
 // what Main keeps seeing, anchoring every later turn. Advisory only: prewalk
 // cannot gate the next claim on a plan, and bash edits stay invisible to it.
 const TRAJECTORY_REARM_DIRECTIVE = [
   "Prewalk handoff completed — the executor's result above is final; don't redo it.",
-  "Prewalk re-armed: on the next request, restate remaining steps (skip if trivial), then make changes via pi.edit / pi.write in fabric_exec to hand off again.",
+  "Prewalk will re-arm after the hidden follow-up settles; on the next request, restate remaining steps (skip if trivial), then make changes via pi.edit / pi.write in fabric_exec to hand off again.",
   "A hidden follow-up turn verifies the executor's work and summarizes; keep any fixes scoped to what verification fails.",
 ].join("\n");
 
@@ -114,12 +184,18 @@ export const withTrajectoryRearmDirective = (
   handoff: Record<string, unknown>,
   controller: PrewalkController,
   sessionId: string,
-): string =>
-  pending.kind === "prewalk-trajectory" &&
-  handoff.completed === true &&
-  controller.isArmed(sessionId)
+): string => {
+  const status = controller.status();
+  return pending.kind === "prewalk-trajectory" &&
+    handoff.completed === true &&
+    (status.state === "continuation_pending" ||
+      status.state === "verification_pending") &&
+    status.sessionId === sessionId &&
+    status.handoffId === pending.audit.nestedToolCallId &&
+    status.alwaysRearm
     ? `${text}\n\n${TRAJECTORY_REARM_DIRECTIVE}`
     : text;
+};
 
 export const claimFabricHandoff = (
   controller: PrewalkController,
@@ -128,7 +204,7 @@ export const claimFabricHandoff = (
   resultFormat: FabricResultFormat,
 ): PendingFabricHandoff | undefined => {
   if (execution.handoffRequest) {
-    controller.completeTask();
+    controller.supersedeTask();
     let audit: FabricCallAudit | undefined;
     for (let index = execution.audits.length - 1; index >= 0; index--) {
       const candidate = execution.audits[index];
@@ -148,46 +224,40 @@ export const claimFabricHandoff = (
     };
   }
 
-  const claim = controller.claim(execution.audits, sessionId);
-  if (!claim) return undefined;
-  const inPlace = claim.arm.mode === "in-place";
   const nestedToolCallId = `${NESTED_TOOL_CALL_ID_PREFIX}prewalk_${randomUUID()}`;
-  const args = {
-    model: claim.arm.model,
-    name: inPlace ? "In-place Prewalk" : "Prewalk trajectory executor",
-    ...(claim.arm.task ? { task: claim.arm.task } : {}),
-    // Thinking applies to the child executor only; in-place keeps Main's level.
-    ...(!inPlace && claim.arm.thinking ? { thinking: claim.arm.thinking } : {}),
-  };
-  const audit: FabricCallAudit = {
-    ref: inPlace ? "fabric.prewalk" : "agents.handoff",
+  const verification = controller.observeVerification(
+    execution.gates ?? [],
+    sessionId,
     nestedToolCallId,
-    startedAt: Date.now(),
-    tool: inPlace ? "prewalk" : "handoff",
-    provider: inPlace ? "fabric" : "agents",
-    args,
-  };
-  execution.audits.push(audit);
-  return {
-    kind: inPlace ? "prewalk-in-place" : "prewalk-trajectory",
-    args,
-    audit,
+  );
+  if (verification?.kind === "revision") {
+    const pending = createPrewalkPending({
+      arm: verification.arm,
+      nestedToolCallId,
+      resultFormat,
+      triggerRef: `workflow.gate:${verification.gate}`,
+      revision: {
+        number: verification.revision,
+        gate: verification.gate,
+        feedback: verification.feedback,
+      },
+      ...(verification.returnModel ? { returnModel: verification.returnModel } : {}),
+    });
+    execution.audits.push(pending.audit);
+    return pending;
+  }
+  if (verification) return undefined;
+
+  const claim = controller.claim(execution.audits, sessionId, nestedToolCallId);
+  if (!claim) return undefined;
+  const pending = createPrewalkPending({
+    arm: claim.arm,
+    nestedToolCallId,
     resultFormat,
     triggerRef: claim.mutation.ref,
-  };
-};
-
-const modelForKey = (key: string, context: ExtensionContext) => {
-  const separator = key.indexOf("/");
-  if (separator <= 0 || separator === key.length - 1) {
-    throw new Error("Prewalk requires a provider/model executor target");
-  }
-  const model = context.modelRegistry.find(
-    key.slice(0, separator),
-    key.slice(separator + 1),
-  );
-  if (!model) throw new Error(`Prewalk model is unavailable: ${key}`);
-  return model;
+  });
+  execution.audits.push(pending.audit);
+  return pending;
 };
 
 const runInPlacePrewalk = async (
@@ -195,26 +265,51 @@ const runInPlacePrewalk = async (
   pending: PendingFabricHandoff,
   context: ExtensionContext,
 ): Promise<Record<string, unknown>> => {
-  const modelKey = String(pending.args.model ?? "");
-  context.ui.setStatus("fabric-prewalk", `switching Main → ${modelKey}`);
-  const model = modelForKey(modelKey, context);
-  const switched = await extension.setModel(model);
-  if (!switched) {
-    throw new Error(`No authentication configured for prewalk model: ${modelKey}`);
+  const primaryModel = String(pending.args.model ?? "");
+  const candidates = [...new Set([primaryModel, ...(pending.fallbackModels ?? [])])];
+  const failures: string[] = [];
+  let modelKey: string | undefined;
+  for (const candidate of candidates) {
+    context.ui.setStatus("fabric-prewalk", `switching Main → ${candidate}`);
+    try {
+      const model = requirePrewalkModel(candidate, context);
+      if (await extension.setModel(model)) {
+        modelKey = candidate;
+        break;
+      }
+      failures.push(`${candidate}: no authentication`);
+    } catch (error) {
+      failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
+  if (!modelKey) {
+    throw new Error(
+      `No available prewalk executor from ${candidates.length} configured route(s): ${failures.join("; ")}`,
+    );
+  }
+  const fallback = modelKey !== primaryModel;
   context.ui.notify(
-    `Prewalk continuing Main in place with ${modelKey}. Pi will retain this model after the task.`,
+    pending.returnPolicy === "previous"
+      ? `Prewalk continuing Main in place with ${modelKey}${fallback ? " (fallback)" : ""}. Previous Main model will be restored after the task.`
+      : `Prewalk continuing Main in place with ${modelKey}${fallback ? " (fallback)" : ""}. Pi will retain this model after the task.`,
     "info",
   );
   extension.sendMessage(
     {
-      customType: "pi-fabric-prewalk-continue",
-      content: PREWALK_CONTINUE_PROMPT,
+      customType: PREWALK_CONTINUE_MESSAGE_TYPE,
+      content: pending.verificationMode === "gated"
+        ? PREWALK_GATED_VERIFY_PROMPT
+        : PREWALK_CONTINUE_PROMPT,
       display: false,
       details: {
         mode: "in-place",
         model: modelKey,
+        fallback,
         trigger: pending.triggerRef,
+        continuationId: pending.audit.nestedToolCallId,
+        ...(pending.verificationMode === "gated"
+          ? { phase: "verify", revision: pending.revision ?? 0 }
+          : {}),
       },
     },
     { deliverAs: "followUp", triggerTurn: true },
@@ -226,6 +321,7 @@ const runInPlacePrewalk = async (
     continued: true,
     status: "continued",
     model: modelKey,
+    fallback,
     trigger: { ref: pending.triggerRef },
   };
 };
@@ -245,9 +341,20 @@ export const runFabricHandoffAtBoundary = async (
     "fabric-prewalk",
     inPlace ? `switching Main → ${model}` : `handing off trajectory → ${model}`,
   );
+  const returnModel = pending.returnModel ?? (
+    pending.kind === "prewalk-in-place" &&
+    pending.returnPolicy === "previous" &&
+    context.model
+      ? `${context.model.provider}/${context.model.id}`
+      : undefined
+  );
+  let handoffError: string | undefined;
   try {
     if (inPlace) {
       const result = await runInPlacePrewalk(extension, pending, context);
+      if (typeof result.model === "string") {
+        controller.selectHandoffModel(result.model);
+      }
       pending.audit.success = true;
       pending.audit.result = result;
       pending.audit.endedAt = Date.now();
@@ -278,7 +385,14 @@ export const runFabricHandoffAtBoundary = async (
     };
     const result = await runner.executeHandoff(pending.args, invocation, seed);
     const completed = result.completed === true;
+    if (!completed) {
+      handoffError =
+        typeof result.error === "string" && result.error.trim()
+          ? result.error.trim()
+          : `Prewalk trajectory ${String(result.status ?? "failed")}`;
+    }
     pending.audit.success = completed;
+    if (handoffError) pending.audit.error = handoffError;
     pending.audit.result = result;
     pending.audit.endedAt = Date.now();
     if (pending.kind === "prewalk-trajectory" && completed) {
@@ -288,13 +402,19 @@ export const runFabricHandoffAtBoundary = async (
       try {
         extension.sendMessage(
           {
-            customType: "pi-fabric-prewalk-continue",
-            content: PREWALK_TRAJECTORY_VERIFY_PROMPT,
+            customType: PREWALK_CONTINUE_MESSAGE_TYPE,
+            content: pending.verificationMode === "gated"
+              ? PREWALK_GATED_VERIFY_PROMPT
+              : PREWALK_TRAJECTORY_VERIFY_PROMPT,
             display: false,
             details: {
               mode: "trajectory",
               model,
               trigger: pending.triggerRef,
+              continuationId: pending.audit.nestedToolCallId,
+              ...(pending.verificationMode === "gated"
+                ? { phase: "verify", revision: pending.revision ?? 0 }
+                : {}),
             },
           },
           { deliverAs: "followUp", triggerTurn: true },
@@ -315,6 +435,7 @@ export const runFabricHandoffAtBoundary = async (
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    handoffError = message;
     pending.audit.success = false;
     pending.audit.error = message;
     pending.audit.endedAt = Date.now();
@@ -334,9 +455,21 @@ export const runFabricHandoffAtBoundary = async (
       error: message,
     };
   } finally {
-    const status = controller.completeTask();
+    const status = handoffError
+      ? controller.failHandoff(handoffError)
+      : controller.completeHandoff(returnModel);
     if (status.state === "armed") {
       context.ui.setStatus("fabric-prewalk", `armed → ${status.model}`);
+    } else if (
+      status.state === "continuation_pending" ||
+      status.state === "verification_pending"
+    ) {
+      context.ui.setStatus(
+        "fabric-prewalk",
+        status.state === "verification_pending"
+          ? `verification pending → ${status.model}`
+          : `continuation pending → ${status.model}`,
+      );
     }
   }
 };

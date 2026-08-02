@@ -3,6 +3,13 @@ import {
   type FabricExecutionTraceOperationV1,
   type FabricExecutionTraceV1,
 } from "./trace.js";
+import type {
+  FabricEvidenceRef,
+  FabricGateResult,
+  FabricRunBudgetSnapshot,
+  FabricRunEnvelopeV1,
+  FabricRunTransition,
+} from "../run/context.js";
 
 export const FABRIC_EXECUTION_DETAILS_MAX_BYTES = 512 * 1024;
 
@@ -12,6 +19,11 @@ export interface FabricPersistedExecutionDetailsV1 {
   outputFormat?: "yaml" | "json";
   outputFormatStartLine?: number;
   outputFormatLines?: number;
+  run?: FabricRunEnvelopeV1;
+  evidence?: FabricEvidenceRef[];
+  gates?: FabricGateResult[];
+  transitions?: FabricRunTransition[];
+  budget?: FabricRunBudgetSnapshot;
 }
 
 export interface FabricLegacyRenderAudit {
@@ -56,7 +68,23 @@ export const createFabricPersistedExecutionDetails = (input: {
   outputFormat?: "yaml" | "json";
   outputFormatStartLine?: number;
   outputFormatLines?: number;
+  run?: FabricRunEnvelopeV1;
+  evidence?: FabricEvidenceRef[];
+  gates?: FabricGateResult[];
+  transitions?: FabricRunTransition[];
+  budget?: FabricRunBudgetSnapshot;
 }): FabricPersistedExecutionDetailsV1 => {
+  const gates = input.gates?.map((gate) => {
+    const projected = structuredClone(gate);
+    delete projected.reason;
+    delete projected.error;
+    return projected;
+  });
+  const droppedGateValues = input.gates?.reduce(
+    (count, gate) =>
+      count + (gate.reason !== undefined ? 1 : 0) + (gate.error !== undefined ? 1 : 0),
+    0,
+  ) ?? 0;
   const details: FabricPersistedExecutionDetailsV1 = {
     success: input.success,
     trace: cloneTrace(input.trace),
@@ -67,7 +95,13 @@ export const createFabricPersistedExecutionDetails = (input: {
     ...(input.outputFormatLines !== undefined
       ? { outputFormatLines: Math.max(0, Math.floor(input.outputFormatLines)) }
       : {}),
+    ...(input.run ? { run: structuredClone(input.run) } : {}),
+    ...(input.evidence ? { evidence: structuredClone(input.evidence) } : {}),
+    ...(gates ? { gates } : {}),
+    ...(input.transitions ? { transitions: structuredClone(input.transitions) } : {}),
+    ...(input.budget ? { budget: structuredClone(input.budget) } : {}),
   };
+  details.trace.counts.droppedValues += droppedGateValues;
   while (
     serializedBytes(details) > FABRIC_EXECUTION_DETAILS_MAX_BYTES &&
     details.trace.operations.length > 0
@@ -81,6 +115,16 @@ export const createFabricPersistedExecutionDetails = (input: {
   ) {
     details.trace.phases.pop();
     details.trace.counts.droppedValues++;
+  }
+  for (const key of ["transitions", "evidence", "gates"] as const) {
+    while (
+      serializedBytes(details) > FABRIC_EXECUTION_DETAILS_MAX_BYTES &&
+      details[key] &&
+      details[key].length > 0
+    ) {
+      details[key].pop();
+      details.trace.counts.droppedValues++;
+    }
   }
   if (serializedBytes(details) > FABRIC_EXECUTION_DETAILS_MAX_BYTES) {
     delete details.trace.error;

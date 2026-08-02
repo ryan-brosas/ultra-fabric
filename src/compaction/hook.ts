@@ -463,16 +463,6 @@ export const computeCut = (
   );
 };
 
-interface FabricCompactionDetailsV1 {
-  compactor: "fabric";
-  version: 1;
-  sections: string[];
-  summarizedEntryRange: { first: string; last: string };
-  sourceEntryCount: number;
-  firstKeptEntryId: string;
-  timestamp: string;
-}
-
 interface EntryRange {
   first: string;
   last: string;

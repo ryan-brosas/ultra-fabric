@@ -1,5 +1,5 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs, { type FSWatcher } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,14 +11,31 @@ import {
   type FabricRetentionConfig,
 } from "../config.js";
 import { MeshStore, type MeshEvent, type MeshIdentity } from "../mesh/store.js";
+import {
+  actorBudgetSnapshot,
+  admitActorActivation,
+  createActorBudgetUsage,
+  normalizeActorBudgetPolicy,
+  recordActorTokens,
+  restoreActorBudgetUsage,
+  summarizeActorBudgets,
+  type FabricActorBudgetPolicy,
+  type FabricActorBudgetUsage,
+} from "./budget.js";
 import type { FabricMainAgentTarget } from "../main-agent.js";
 import { AgentManager } from "../agents/manager.js";
 import type { AgentRunRecord, AgentRunRequest, AgentRunResult } from "../agents/types.js";
+import type { FabricOutcomeInput } from "../outcomes/store.js";
 import { readJsonlPage } from "../log-tail.js";
+import {
+  isFabricRunEnvelopeV1,
+  type FabricRunEnvelopeV1,
+} from "../run/context.js";
 import { pruneActorRunArchives } from "../storage/retention.js";
 import { FABRIC_ACTOR_HOST_EVENTS } from "./types.js";
 import type {
   FabricActorDelivery,
+  FabricActorDeliveryCircuit,
   FabricActorActivation,
   FabricActorDeliveryRequest,
   FabricActorDirective,
@@ -34,17 +51,33 @@ import type {
 import { isFabricThinking, type FabricThinking } from "../thinking.js";
 import { resolveActorDeliveryPolicy } from "./delivery-policy.js";
 import { evaluateActorValidWhile, validateActorValidWhile } from "./predicate.js";
+import {
+  retryWithBackoff,
+  type RetryBackoffDependencies,
+} from "../retry.js";
 
 interface ActorQueueItem {
   id: string;
   source: string;
   payload: unknown;
   images?: ImageContent[];
+  runContext?: FabricRunEnvelopeV1;
+  maxTokens?: number;
   createdAt: number;
   coalesceKey?: string;
   activation: FabricActorActivation;
   resolve?: (message: FabricActorMessage) => void;
   reject?: (error: Error) => void;
+}
+
+interface ActorEnqueueOptions {
+  resolve?: (message: FabricActorMessage) => void;
+  reject?: (error: Error) => void;
+  coalesceKey?: string;
+  images?: readonly ImageContent[];
+  ownershipChecked?: boolean;
+  runContext?: FabricRunEnvelopeV1;
+  maxTokens?: number;
 }
 
 interface ManagedActor {
@@ -55,6 +88,7 @@ interface ManagedActor {
   events: FabricActorHostEvent[];
   topics: string[];
   delivery: FabricActorDelivery;
+  deliveryCircuit: FabricActorDeliveryCircuit;
   responseMode: FabricActorResponseMode;
   triggerTurn: boolean;
   coalesce: boolean;
@@ -67,9 +101,12 @@ interface ManagedActor {
   timeoutMs?: number;
   extensions?: boolean;
   validWhile?: FabricActorValidWhileSource;
+  budgetPolicy: FabricActorBudgetPolicy;
+  budgetUsage: FabricActorBudgetUsage;
   latestActivationSequence: number;
   sessionFile: string;
   queue: ActorQueueItem[];
+  inFlight?: ActorQueueItem;
   messages: FabricActorMessage[];
   createdAt: number;
   updatedAt: number;
@@ -91,6 +128,8 @@ const MAIN_REVISION_EVENTS: ReadonlySet<FabricActorHostEvent> = new Set([
   "session_compact",
 ]);
 const MESSAGE_HISTORY_LIMIT = 100;
+const ACTOR_INBOX_FORMAT = 1;
+const MAX_ACTOR_DELIVERY_ATTEMPTS = 3;
 const MESH_WATCH_RECONCILE_MS = 2_000;
 const ACTOR_REGISTRY_LOCK_TIMEOUT_MS = 5_000;
 const ACTOR_REGISTRY_STALE_LOCK_MS = 30_000;
@@ -103,6 +142,25 @@ const errorCode = (error: unknown): string | undefined =>
   error instanceof Error && "code" in error
     ? String((error as NodeJS.ErrnoException).code)
     : undefined;
+
+const restoredDeliveryCircuit = (value: unknown): FabricActorDeliveryCircuit => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { state: "closed", failures: 0 };
+  }
+  const record = value as Partial<FabricActorDeliveryCircuit>;
+  const state = record.state === "open" || record.state === "half_open"
+    ? "open"
+    : "closed";
+  const failures = Number.isSafeInteger(record.failures) && (record.failures ?? -1) >= 0
+    ? Number(record.failures)
+    : 0;
+  return {
+    state,
+    failures,
+    ...(typeof record.openedAt === "number" ? { openedAt: record.openedAt } : {}),
+    ...(typeof record.retryAt === "number" ? { retryAt: record.retryAt } : {}),
+  };
+};
 
 const atomicWrite = (filePath: string, value: unknown): void => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
@@ -159,6 +217,21 @@ const asDirective = (result: AgentRunResult): FabricActorDirective => {
   return directive as FabricActorDirective;
 };
 
+const retryableActorRunResult = (result: AgentRunResult): boolean =>
+  result.status === "failed" &&
+  result.turns === 0 &&
+  result.toolCalls === 0 &&
+  result.usage.input === 0 &&
+  result.usage.output === 0 &&
+  result.usage.cacheRead === 0 &&
+  result.usage.cacheWrite === 0;
+
+class RetryableActorRunError extends Error {
+  constructor(readonly result: AgentRunResult) {
+    super(result.error || "Actor startup failed before observable work");
+  }
+}
+
 export class ActorManager {
   readonly #actors = new Map<string, ManagedActor>();
   readonly #actorRoot: string;
@@ -167,6 +240,9 @@ export class ActorManager {
   readonly #mainAgent: FabricMainAgentTarget | undefined;
   readonly #canManageActor: ((id: string) => boolean | undefined) | undefined;
   readonly #retention: FabricRetentionConfig;
+  readonly #retryDependencies: RetryBackoffDependencies;
+  readonly #now: () => number;
+  readonly #outcomeSink: { record(input: FabricOutcomeInput): Promise<unknown> } | undefined;
   readonly #locallyCreated = new Set<string>();
   readonly #ownership = new Map<string, boolean>();
   readonly #listeners = new Set<() => void>();
@@ -194,13 +270,18 @@ export class ActorManager {
     readonly mesh: MeshStore,
     readonly meshConfig: FabricMeshConfig,
     readonly agents: AgentManager,
-    readonly onDeliver: (request: FabricActorDeliveryRequest) => void,
+    readonly onDeliver: (
+      request: FabricActorDeliveryRequest,
+    ) => void | Promise<void>,
     options: {
       actorRoot?: string;
       persistent?: boolean;
       mainAgent?: FabricMainAgentTarget;
       canManageActor?: (id: string) => boolean | undefined;
       retention?: FabricRetentionConfig;
+      retryDependencies?: RetryBackoffDependencies;
+      now?: () => number;
+      outcomeSink?: { record(input: FabricOutcomeInput): Promise<unknown> };
     } = {},
   ) {
     this.#actorRoot =
@@ -209,17 +290,26 @@ export class ActorManager {
     this.#mainAgent = options.mainAgent;
     this.#canManageActor = options.canManageActor;
     this.#registryPath = path.join(this.#actorRoot, "actors.json");
+    this.#now = options.now ?? Date.now;
+    this.#outcomeSink = options.outcomeSink;
     if (this.#persistent && meshConfig.enabled) this.#loadActors();
     this.#registryFingerprint = this.#currentRegistryFingerprint();
     for (const actor of this.#actors.values()) {
       this.#ownership.set(actor.id, this.#ownershipDecision(actor.id));
     }
     this.#retention = options.retention ?? DEFAULT_FABRIC_CONFIG.retention;
+    this.#retryDependencies = options.retryDependencies ?? {
+      sleep: delay,
+      random: Math.random,
+    };
     this.#sweepRetainedRuns();
     this.#retentionTimer = setInterval(() => this.#sweepRetainedRuns(), RETENTION_SWEEP_INTERVAL_MS);
     this.#retentionTimer.unref();
     this.#meshOffset = mesh.latestOffset();
     this.#startMeshMonitor();
+    for (const actor of this.#actors.values()) {
+      if (this.#canManageCached(actor.id)) this.#ensureDrain(actor);
+    }
   }
 
   subscribe(listener: () => void): () => void {
@@ -272,6 +362,7 @@ export class ActorManager {
       events,
       topics,
       delivery: deliveryPolicy.delivery,
+      deliveryCircuit: { state: "closed", failures: 0 },
       responseMode: request.responseMode ?? "text",
       triggerTurn: deliveryPolicy.triggerTurn,
       coalesce: request.coalesce ?? true,
@@ -283,6 +374,8 @@ export class ActorManager {
       ...(request.timeoutMs ? { timeoutMs: request.timeoutMs } : {}),
       ...(typeof request.extensions === "boolean" ? { extensions: request.extensions } : {}),
       ...(request.validWhile ? { validWhile: structuredClone(request.validWhile) } : {}),
+      budgetPolicy: normalizeActorBudgetPolicy(request.budget),
+      budgetUsage: createActorBudgetUsage(this.#now()),
       latestActivationSequence: 0,
       sessionFile: path.join(actorDirectory, "session.jsonl"),
       queue: [],
@@ -314,6 +407,28 @@ export class ActorManager {
   status(id: string): FabricActorInfo {
     this.#syncActorsFromRegistry();
     return this.#publicInfo(this.#requireActor(id));
+  }
+
+  telemetry() {
+    this.#syncActorsFromRegistry();
+    const actors = [...this.#actors.values()];
+    const budgets = summarizeActorBudgets(
+      actors.map((actor) =>
+        actorBudgetSnapshot(actor.budgetPolicy, actor.budgetUsage, this.#now())
+      ),
+    );
+    const messages = actors.flatMap((actor) => actor.messages);
+    return {
+      ...budgets,
+      queueRejected: messages.filter((message) =>
+        message.direction === "in" && message.rejected === true
+      ).length,
+      activationDeadLetters: messages.filter((message) => message.deadLettered === true).length,
+      deliveryDeadLetters: messages.filter((message) =>
+        message.deliveryReceipt?.mesh.status === "dead_lettered" ||
+        message.deliveryReceipt?.main.status === "dead_lettered"
+      ).length,
+    };
   }
 
   owns(id: string): boolean {
@@ -406,6 +521,8 @@ export class ActorManager {
     const policy = resolveActorDeliveryPolicy(delivery, triggerTurn);
     actor.delivery = policy.delivery;
     actor.triggerTurn = policy.triggerTurn;
+    actor.deliveryCircuit = { state: "closed", failures: 0 };
+    delete actor.lastError;
     actor.updatedAt = Date.now();
     await this.#publishPresence(actor);
     return this.#publicInfo(actor);
@@ -420,6 +537,7 @@ export class ActorManager {
     const actor = this.#requireOwnedActor(id);
     actor.messages = [];
     actor.updatedAt = Date.now();
+    this.#persistInbox(actor);
     await this.#publishPresence(actor);
     return this.#publicInfo(actor);
   }
@@ -443,13 +561,20 @@ export class ActorManager {
     return this.#publicInfo(actor);
   }
 
-  tell(id: string, message: string, data?: unknown): { queued: true; messageId: string } {
+  tell(
+    id: string,
+    message: string,
+    data?: unknown,
+    options: { runContext?: FabricRunEnvelopeV1; maxTokens?: number } = {},
+  ): { queued: true; messageId: string } {
     this.#validateDirectMessage(message, data);
     const actor = this.#requireOwnedActiveActor(id);
-    const item = this.#enqueue(actor, "direct", {
-      message,
-      ...(data === undefined ? {} : { data }),
-    });
+    const item = this.#enqueue(
+      actor,
+      "direct",
+      { message, ...(data === undefined ? {} : { data }) },
+      options,
+    );
     void this.mesh
       .publish({
         topic: "fabric.actor.input",
@@ -493,6 +618,7 @@ export class ActorManager {
     message: string,
     data?: unknown,
     signal?: AbortSignal,
+    options: { runContext?: FabricRunEnvelopeV1; maxTokens?: number } = {},
   ): Promise<FabricActorMessage> {
     this.#validateDirectMessage(message, data);
     const actor = this.#requireOwnedActiveActor(id);
@@ -502,12 +628,13 @@ export class ActorManager {
         actor,
         "direct",
         { message, ...(data === undefined ? {} : { data }) },
-        { resolve, reject },
+        { ...options, resolve, reject },
       );
       const onAbort = () => {
         const index = actor.queue.findIndex((queued) => queued.id === item.id);
         if (index >= 0) {
           actor.queue.splice(index, 1);
+          this.#persistInboxSafely(actor);
           reject(new Error("Actor request cancelled"));
           return;
         }
@@ -542,6 +669,109 @@ export class ActorManager {
     const bounded = Math.max(1, Math.min(Math.floor(limit), MESSAGE_HISTORY_LIMIT));
     return actor.messages.slice(-bounded).map((message) => structuredClone(message));
   }
+
+  async retryDelivery(id: string, messageId: string): Promise<FabricActorMessage> {
+    const actor = this.#requireOwnedActor(id);
+    const message = actor.messages.find((candidate) => candidate.id === messageId);
+    if (!message || message.direction !== "out" || !message.deliveryReceipt) {
+      throw new Error(`Unknown actor outbox message: ${messageId}`);
+    }
+    const receipt = structuredClone(message.deliveryReceipt);
+    if (receipt.main.status === "failed" && !this.#beginMainDelivery(actor)) {
+      throw new Error(
+        `Actor delivery circuit is open until ${actor.deliveryCircuit.retryAt ?? "manual reset"}`,
+      );
+    }
+    let retried = false;
+    let mainRetried = false;
+
+    if (receipt.mesh.status === "failed") {
+      retried = true;
+      const attempts = receipt.mesh.attempts + 1;
+      const at = Date.now();
+      try {
+        await this.mesh.publish({
+          id: message.id,
+          topic: "fabric.actor.output",
+          kind: message.action ?? "message",
+          from: { id: actor.id, name: actor.name, kind: "actor", sessionId: this.sessionId },
+          ...(message.text ? { text: message.text } : {}),
+          ...(message.data !== undefined ? { data: message.data } : {}),
+        });
+        receipt.mesh = { status: "published", attempts, at };
+      } catch (error) {
+        receipt.mesh = {
+          status: attempts >= MAX_ACTOR_DELIVERY_ATTEMPTS ? "dead_lettered" : "failed",
+          attempts,
+          at,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+
+    if (receipt.main.status === "failed") {
+      retried = true;
+      mainRetried = true;
+      const attempts = receipt.main.attempts + 1;
+      const at = Date.now();
+      const delivery = receipt.main.mode;
+      if (
+        !message.text ||
+        (message.action !== "message" && message.action !== "stop") ||
+        delivery === "mailbox"
+      ) {
+        receipt.main = {
+          status: "dead_lettered",
+          mode: delivery,
+          attempts,
+          at,
+          error: "Actor outbox message is no longer deliverable to Main",
+        };
+      } else {
+        try {
+          await this.onDeliver({
+            actor: this.#publicInfo(actor),
+            message: structuredClone({ ...message, deliveryReceipt: receipt }),
+            delivery,
+            triggerTurn: actor.triggerTurn,
+          });
+          receipt.main = { status: "delivered", mode: delivery, attempts, at };
+        } catch (error) {
+          receipt.main = {
+            status: attempts >= MAX_ACTOR_DELIVERY_ATTEMPTS ? "dead_lettered" : "failed",
+            mode: delivery,
+            attempts,
+            at,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }
+    }
+
+    if (mainRetried) this.#recordMainDelivery(actor, receipt.main);
+
+    if (!retried) {
+      const deadLettered =
+        receipt.mesh.status === "dead_lettered" ||
+        receipt.main.status === "dead_lettered";
+      throw new Error(
+        deadLettered
+          ? `Actor outbox message is already dead-lettered: ${messageId}`
+          : `Actor outbox message has no failed delivery to retry: ${messageId}`,
+      );
+    }
+
+    message.deliveryReceipt = receipt;
+    const errors = [receipt.mesh.error, receipt.main.error].filter(
+      (error): error is string => Boolean(error),
+    );
+    if (errors.length > 0) actor.lastError = errors.join("; ");
+    else delete actor.lastError;
+    actor.updatedAt = Date.now();
+    await this.#publishPresence(actor);
+    return structuredClone(message);
+  }
+
 
   /**
    * Read an actor's default instruction (its persona / system-prompt body).
@@ -578,6 +808,10 @@ export class ActorManager {
       ...(actor.timeoutMs ? { timeoutMs: actor.timeoutMs } : {}),
       ...(typeof actor.extensions === "boolean" ? { extensions: actor.extensions } : {}),
       ...(actor.validWhile ? { validWhile: structuredClone(actor.validWhile) } : {}),
+      ...(actor.budgetPolicy.lifetimeActivations > 0 ||
+      actor.budgetPolicy.windowActivations > 0
+        ? { budget: structuredClone(actor.budgetPolicy) }
+        : {}),
     };
   }
 
@@ -725,6 +959,7 @@ export class ActorManager {
     actor.updatedAt = Date.now();
     actor.abortController?.abort();
     for (const item of actor.queue.splice(0)) item.reject?.(new Error("Actor stopped"));
+    this.#persistInboxSafely(actor);
     await this.#publishPresence(actor);
     await this.mesh
       .publish({
@@ -777,6 +1012,7 @@ export class ActorManager {
       for (const item of actor.queue.splice(0)) {
         item.reject?.(new Error("Fabric actor halted by user interrupt"));
       }
+      this.#persistInboxSafely(actor);
       actor.updatedAt = Date.now();
       // If no run is in flight, settle the status now; otherwise the drain
       // loop's finally block owns the transition once the run settles.
@@ -818,7 +1054,7 @@ export class ActorManager {
       const owned = [...this.#actors.values()].filter((actor) => this.#canManage(actor.id));
       for (const actor of owned) {
         actor.abortController?.abort();
-        for (const item of actor.queue.splice(0)) {
+        for (const item of actor.queue) {
           item.reject?.(new Error("Actor suspended with its Fabric session"));
         }
       }
@@ -826,8 +1062,11 @@ export class ActorManager {
         owned.map((actor) => actor.drain ?? Promise.resolve()),
       );
       for (const actor of owned) {
-        if (actor.status !== "stopped") actor.status = "idle";
+        if (actor.status !== "stopped") {
+          actor.status = actor.queue.length > 0 ? "queued" : "idle";
+        }
         actor.updatedAt = Date.now();
+        this.#persistInboxSafely(actor);
       }
       if (owned.length > 0) await this.#saveActors();
       return;
@@ -839,17 +1078,109 @@ export class ActorManager {
     fs.rmSync(this.#actorRoot, { recursive: true, force: true });
   }
 
+  #coalesceQueueItem(
+    actor: ManagedActor,
+    item: ActorQueueItem,
+    source: string,
+    payload: unknown,
+    sequence: number,
+    createdAt: number,
+    images: readonly ImageContent[] | undefined,
+    runContext: FabricRunEnvelopeV1 | undefined,
+    maxTokens: number | undefined,
+  ): ActorQueueItem {
+    const inputMessageIndex = actor.messages.findIndex(
+      (message) => message.direction === "in" && message.id === item.id,
+    );
+    const previousInputMessage = inputMessageIndex >= 0
+      ? structuredClone(actor.messages[inputMessageIndex])
+      : undefined;
+    const previous = {
+      payload: structuredClone(item.payload),
+      ...(item.images ? { images: item.images.map((image) => ({ ...image })) } : {}),
+      ...(item.runContext ? { runContext: structuredClone(item.runContext) } : {}),
+      ...(item.maxTokens !== undefined ? { maxTokens: item.maxTokens } : {}),
+      createdAt: item.createdAt,
+      activation: structuredClone(item.activation),
+    };
+    item.payload = structuredClone(payload);
+    if (images && images.length > 0) {
+      item.images = images.map((image) => ({ ...image }));
+    } else {
+      delete item.images;
+    }
+    if (runContext) item.runContext = structuredClone(runContext);
+    else delete item.runContext;
+    if (maxTokens !== undefined) item.maxTokens = maxTokens;
+    else delete item.maxTokens;
+    item.createdAt = createdAt;
+    item.activation = this.#activation(item.id, source, payload, sequence, createdAt);
+    if (inputMessageIndex >= 0) {
+      actor.messages[inputMessageIndex] = {
+        id: item.id,
+        actorId: actor.id,
+        actorName: actor.name,
+        direction: "in",
+        source,
+        createdAt,
+        data: structuredClone(payload),
+      };
+    }
+    try {
+      this.#persistInbox(actor);
+    } catch (error) {
+      item.payload = previous.payload;
+      if (previous.images) item.images = previous.images;
+      else delete item.images;
+      if (previous.runContext) item.runContext = previous.runContext;
+      else delete item.runContext;
+      if (previous.maxTokens !== undefined) item.maxTokens = previous.maxTokens;
+      else delete item.maxTokens;
+      item.createdAt = previous.createdAt;
+      item.activation = previous.activation;
+      if (inputMessageIndex >= 0 && previousInputMessage) {
+        actor.messages[inputMessageIndex] = previousInputMessage;
+      }
+      throw error;
+    }
+    this.#ensureDrain(actor);
+    return item;
+  }
+
   #enqueue(
     actor: ManagedActor,
     source: string,
     payload: unknown,
-    options: {
-      resolve?: (message: FabricActorMessage) => void;
-      reject?: (error: Error) => void;
-      coalesceKey?: string;
-      images?: readonly ImageContent[];
-      ownershipChecked?: boolean;
-    } = {},
+    options: ActorEnqueueOptions = {},
+  ): ActorQueueItem {
+    const previous = structuredClone(actor.budgetUsage);
+    const admission = admitActorActivation(
+      actor.budgetPolicy,
+      actor.budgetUsage,
+      this.#now(),
+    );
+    actor.budgetUsage = admission.usage;
+    if (!admission.ok) {
+      const scope = admission.reason === "lifetime_exhausted" ? "lifetime" : "window";
+      actor.lastError = `Actor admission ${scope} budget exhausted`;
+      actor.updatedAt = this.#now();
+      this.#persistInboxSafely(actor);
+      void this.#publishPresence(actor).catch(() => undefined);
+      throw new Error(`Actor admission ${scope} budget exhausted: ${actor.name}`);
+    }
+    try {
+      return this.#enqueueAdmitted(actor, source, payload, options);
+    } catch (error) {
+      actor.budgetUsage = previous;
+      throw error;
+    }
+  }
+
+  #enqueueAdmitted(
+    actor: ManagedActor,
+    source: string,
+    payload: unknown,
+    options: ActorEnqueueOptions = {},
   ): ActorQueueItem {
     const canManage = options.ownershipChecked
       ? this.#canManageCached(actor.id)
@@ -863,22 +1194,74 @@ export class ActorManager {
     if (options.coalesceKey) {
       const existing = actor.queue.find((item) => item.coalesceKey === options.coalesceKey);
       if (existing) {
-        existing.payload = structuredClone(payload);
-        if (options.images && options.images.length > 0) {
-          existing.images = options.images.map((image) => ({ ...image }));
-        } else {
-          delete existing.images;
-        }
-        existing.createdAt = createdAt;
-        existing.activation = this.#activation(existing.id, source, payload, sequence, createdAt);
-        this.#ensureDrain(actor);
-        return existing;
+        return this.#coalesceQueueItem(
+          actor,
+          existing,
+          source,
+          payload,
+          sequence,
+          createdAt,
+          options.images,
+          options.runContext,
+          options.maxTokens,
+        );
       }
     }
+    let displaced: ActorQueueItem | undefined;
+    let displacedReason: string | undefined;
+    let overflowRecordId: string | undefined;
     if (actor.queue.length >= this.meshConfig.actorQueueLimit) {
-      throw new Error(
-        `Fabric actor queue limit reached for ${actor.name} (${this.meshConfig.actorQueueLimit})`,
-      );
+      if (this.meshConfig.actorOverflowPolicy === "coalesce") {
+        if (options.resolve || options.reject) {
+          throw new Error(
+            `Fabric actor queue limit reached for ${actor.name}; acknowledged requests cannot coalesce`,
+          );
+        }
+        const existing = [...actor.queue].reverse().find((item) => item.source === source);
+        if (!existing) {
+          throw new Error(
+            `Fabric actor queue limit reached for ${actor.name}; no ${source} item can coalesce`,
+          );
+        }
+        return this.#coalesceQueueItem(
+          actor,
+          existing,
+          source,
+          payload,
+          sequence,
+          createdAt,
+          options.images,
+          options.runContext,
+          options.maxTokens,
+        );
+      }
+      if (this.meshConfig.actorOverflowPolicy === "reject") {
+        throw new Error(
+          `Fabric actor queue limit reached for ${actor.name} (${this.meshConfig.actorQueueLimit})`,
+        );
+      }
+      displaced = actor.queue.shift();
+      if (!displaced) {
+        throw new Error(`Fabric actor queue overflow has no pending item: ${actor.name}`);
+      }
+      const deadLettered = this.meshConfig.actorOverflowPolicy === "dead-letter";
+      const reason = deadLettered
+        ? "Actor activation dead-lettered by queue overflow"
+        : "Actor activation dropped by queue overflow";
+      displacedReason = reason;
+      overflowRecordId = `${displaced.id}:overflow`;
+      this.#recordMessage(actor, {
+        id: overflowRecordId,
+        actorId: actor.id,
+        actorName: actor.name,
+        direction: "out",
+        source: displaced.source,
+        createdAt,
+        action: "silent",
+        data: { activationId: displaced.id },
+        ...(deadLettered ? { deadLettered: true } : { rejected: true }),
+        reason,
+      });
     }
     const itemId = randomUUID();
     const item: ActorQueueItem = {
@@ -888,6 +1271,8 @@ export class ActorManager {
       ...(options.images && options.images.length > 0
         ? { images: options.images.map((image) => ({ ...image })) }
         : {}),
+      ...(options.runContext ? { runContext: structuredClone(options.runContext) } : {}),
+      ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
       createdAt,
       activation: this.#activation(itemId, source, payload, sequence, createdAt),
       ...(options.resolve ? { resolve: options.resolve } : {}),
@@ -897,6 +1282,20 @@ export class ActorManager {
     actor.queue.push(item);
     actor.status = "queued";
     actor.updatedAt = Date.now();
+    try {
+      this.#persistInbox(actor);
+    } catch (error) {
+      const index = actor.queue.findIndex((queued) => queued.id === item.id);
+      if (index >= 0) actor.queue.splice(index, 1);
+      if (displaced) actor.queue.unshift(displaced);
+      if (overflowRecordId) {
+        const messageIndex = actor.messages.findIndex((message) => message.id === overflowRecordId);
+        if (messageIndex >= 0) actor.messages.splice(messageIndex, 1);
+      }
+      actor.status = actor.queue.length > 0 ? "queued" : "idle";
+      throw error;
+    }
+    if (displaced && displacedReason) displaced.reject?.(new Error(displacedReason));
     this.#recordMessage(actor, {
       id: item.id,
       actorId: actor.id,
@@ -947,6 +1346,8 @@ export class ActorManager {
       ) {
         const item = actor.queue.shift();
         if (!item) break;
+        actor.inFlight = item;
+        this.#persistInboxSafely(actor);
         actor.status = "running";
         actor.updatedAt = Date.now();
         delete actor.lastError;
@@ -965,15 +1366,61 @@ export class ActorManager {
         let runId: string | undefined;
         const previousRunId = actor.lastRunId;
         let runCompleted = false;
+        let runAttempts = 0;
+        let itemTerminal = false;
+        let retainForRestart = false;
+        let ownershipMoved = false;
         try {
-          const result = await this.agents.run(
-            this.#runRequest(actor, item),
-            abortController.signal,
+          const runRequest = this.#runRequest(actor, item);
+          let result: AgentRunResult;
+          try {
+            result = await retryWithBackoff(
+              async (attempt) => {
+                runAttempts = attempt;
+                const candidate = await this.agents.run(
+                  runRequest,
+                  abortController.signal,
+                );
+                if (!retryableActorRunResult(candidate)) return candidate;
+                if (attempt < this.meshConfig.actorRunMaxAttempts) {
+                  await this.#retainRunLog(actor, candidate.id).catch(() => undefined);
+                  await this.agents.cleanup(candidate.id).catch(() => ({ cleaned: false }));
+                }
+                throw new RetryableActorRunError(candidate);
+              },
+              {
+                maxAttempts: this.meshConfig.actorRunMaxAttempts,
+                baseDelayMs: this.meshConfig.actorRunBaseDelayMs,
+                maxDelayMs: this.meshConfig.actorRunMaxDelayMs,
+                jitterMs: this.meshConfig.actorRunJitterMs,
+                shouldRetry: (error) =>
+                  error instanceof RetryableActorRunError &&
+                  !abortController.signal.aborted &&
+                  !this.#closing &&
+                  this.#canManageCached(actor.id),
+              },
+              this.#retryDependencies,
+            );
+          } catch (error) {
+            if (!(error instanceof RetryableActorRunError)) throw error;
+            result = error.result;
+          }
+          const usageTokens =
+            result.usage.input +
+            result.usage.output +
+            result.usage.cacheRead +
+            result.usage.cacheWrite;
+          actor.budgetUsage = recordActorTokens(
+            actor.budgetPolicy,
+            actor.budgetUsage,
+            usageTokens,
+            this.#now(),
           );
           runId = result.id;
           if (!this.#canManage(actor.id)) {
             throw new Error(`Fabric actor ownership moved during run: ${actor.id}`);
           }
+          await this.#recordOutcome(result, runRequest.runContext!);
           actor.lastRunId = result.id;
           if (actor.runner === "claude" && result.runnerSessionId) {
             actor.runnerSessionId = result.runnerSessionId;
@@ -988,7 +1435,7 @@ export class ActorManager {
               // agents.status(actor.lastRunId) can inspect the full output.
               const reason = result.error || `Actor run ${result.status}`;
               const silent: FabricActorMessage = {
-                id: randomUUID(),
+                id: `${item.id}:out`,
                 actorId: actor.id,
                 actorName: actor.name,
                 direction: "out",
@@ -999,68 +1446,156 @@ export class ActorManager {
                 data: { runError: reason, runId: result.id },
                 runId: result.id,
                 usage: result.usage,
+                runAttempts,
               };
               this.#recordMessage(actor, silent);
+              itemTerminal = true;
+              this.#commitInboxItem(actor, item);
               item.resolve?.(structuredClone(silent));
               continue;
             }
             throw new Error(result.error || `Actor run ${result.status}`);
           }
           const message = this.#outgoingMessage(actor, item, result);
+          message.runAttempts = runAttempts;
           const beforeDelivery = await this.#validity(actor, item);
           if (!this.#canManage(actor.id)) {
             throw new Error(`Fabric actor ownership moved before delivery: ${actor.id}`);
           }
           if (!beforeDelivery.valid) {
             this.#recordStale(actor, item, beforeDelivery.reason, result.id, result.usage);
+            itemTerminal = true;
             continue;
           }
-          this.#recordMessage(actor, message);
-          await this.mesh
-            .publish({
-              topic: "fabric.actor.output",
-              kind: message.action ?? "message",
-              from: { id: actor.id, name: actor.name, kind: "actor", sessionId: this.sessionId },
-              ...(message.text ? { text: message.text } : {}),
-              ...(message.data !== undefined ? { data: message.data } : {}),
-            })
-            .catch(() => undefined);
-          if (
-            (message.action === "message" || message.action === "stop") &&
-            message.text &&
-            actor.delivery !== "mailbox"
-          ) {
-            try {
-              this.onDeliver({
-                actor: this.#publicInfo(actor),
-                message: structuredClone(message),
-                delivery: actor.delivery,
-                triggerTurn: actor.triggerTurn,
-              });
-            } catch { /* skip non-cloneable or undeliverable message */ }
+          const retryOptions = {
+            maxAttempts: this.meshConfig.actorDeliveryMaxAttempts,
+            baseDelayMs: this.meshConfig.actorDeliveryBaseDelayMs,
+            maxDelayMs: this.meshConfig.actorDeliveryMaxDelayMs,
+            jitterMs: this.meshConfig.actorDeliveryJitterMs,
+          };
+          const meshAt = Date.now();
+          let meshAttempts = 0;
+          let meshReceipt: NonNullable<FabricActorMessage["deliveryReceipt"]>["mesh"];
+          try {
+            await retryWithBackoff(
+              async (attempt) => {
+                meshAttempts = attempt;
+                await this.mesh.publish({
+                  id: message.id,
+                  topic: "fabric.actor.output",
+                  kind: message.action ?? "message",
+                  from: { id: actor.id, name: actor.name, kind: "actor", sessionId: this.sessionId },
+                  ...(message.text ? { text: message.text } : {}),
+                  ...(message.data !== undefined ? { data: message.data } : {}),
+                });
+              },
+              retryOptions,
+              this.#retryDependencies,
+            );
+            meshReceipt = { status: "published", attempts: meshAttempts, at: meshAt };
+          } catch (error) {
+            meshReceipt = {
+              status: meshAttempts > 1 ? "dead_lettered" : "failed",
+              attempts: meshAttempts,
+              at: meshAt,
+              error: error instanceof Error ? error.message : String(error),
+            };
           }
-          item.resolve?.(structuredClone(message));
+
+          const mainAt = Date.now();
+          const mainDelivery = actor.delivery;
+          const deliverableToMain =
+            (message.action === "message" || message.action === "stop") &&
+            Boolean(message.text) &&
+            mainDelivery !== "mailbox";
+          let mainReceipt: NonNullable<FabricActorMessage["deliveryReceipt"]>["main"];
+          if (deliverableToMain && this.#beginMainDelivery(actor)) {
+            let mainAttempts = 0;
+            try {
+              await retryWithBackoff(
+                async (attempt) => {
+                  mainAttempts = attempt;
+                  await this.onDeliver({
+                    actor: this.#publicInfo(actor),
+                    message: structuredClone(message),
+                    delivery: mainDelivery,
+                    triggerTurn: actor.triggerTurn,
+                  });
+                },
+                retryOptions,
+                this.#retryDependencies,
+              );
+              mainReceipt = {
+                status: "delivered",
+                mode: mainDelivery,
+                attempts: mainAttempts,
+                at: mainAt,
+              };
+            } catch (error) {
+              mainReceipt = {
+                status: mainAttempts > 1 ? "dead_lettered" : "failed",
+                mode: mainDelivery,
+                attempts: mainAttempts,
+                at: mainAt,
+                error: error instanceof Error ? error.message : String(error),
+              };
+            }
+          } else if (deliverableToMain) {
+            mainReceipt = {
+              status: "circuit_open",
+              mode: mainDelivery,
+              attempts: 0,
+              at: mainAt,
+              error: `Actor delivery circuit is open until ${actor.deliveryCircuit.retryAt ?? "manual reset"}`,
+            };
+          } else {
+            mainReceipt = {
+              status: mainDelivery === "mailbox" ? "mailbox" : "not_requested",
+              mode: mainDelivery,
+              attempts: 1,
+              at: mainAt,
+            };
+          }
+          this.#recordMainDelivery(actor, mainReceipt);
+          message.deliveryReceipt = { mesh: meshReceipt, main: mainReceipt };
+          const deliveryErrors = [meshReceipt.error, mainReceipt.error].filter(
+            (error): error is string => Boolean(error),
+          );
+          if (deliveryErrors.length > 0) actor.lastError = deliveryErrors.join("; ");
+          this.#recordMessage(actor, message);
+          itemTerminal = true;
           if (message.action === "stop") {
             actor.status = "stopped";
             actor.queue.splice(0).forEach((queued) => queued.reject?.(new Error("Actor stopped")));
           }
+          this.#commitInboxItem(actor, item);
+          item.resolve?.(structuredClone(message));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           if (!this.#canManage(actor.id)) {
+            ownershipMoved = true;
             item.reject?.(new Error(message));
+            continue;
+          }
+          if (this.#closing && this.#persistent) {
+            retainForRestart = true;
+            item.reject?.(new Error("Actor suspended with its Fabric session"));
             continue;
           }
           actor.lastError = message;
           const failed: FabricActorMessage = {
-            id: randomUUID(),
+            id: `${item.id}:out`,
             actorId: actor.id,
             actorName: actor.name,
             direction: "out",
             source: item.source,
             createdAt: Date.now(),
             error: message,
+            ...(runAttempts > 0 ? { runAttempts } : {}),
           };
           this.#recordMessage(actor, failed);
+          itemTerminal = true;
+          this.#finishInboxItem(actor, item);
           item.reject?.(new Error(message));
         } finally {
           // Retain a durable copy of the run's event log + status in the
@@ -1079,7 +1614,20 @@ export class ActorManager {
           if (runId && runCompleted) {
             await this.agents.cleanup(runId).catch(() => ({ cleaned: false }));
           }
+          if (
+            !itemTerminal &&
+            this.#closing &&
+            this.#persistent &&
+            !ownershipMoved
+          ) {
+            retainForRestart = true;
+          }
+          if (retainForRestart && !actor.queue.some((queued) => queued.id === item.id)) {
+            actor.queue.unshift(item);
+          }
           delete actor.abortController;
+          if (actor.inFlight?.id === item.id) delete actor.inFlight;
+          if (!ownershipMoved) this.#persistInboxSafely(actor);
           actor.updatedAt = Date.now();
           if (actor.status !== "stopped") actor.status = actor.queue.length > 0 ? "queued" : "idle";
           if (this.#canManage(actor.id)) await this.#publishPresence(actor);
@@ -1093,7 +1641,56 @@ export class ActorManager {
     }
   }
 
+  async #recordOutcome(
+    result: AgentRunResult,
+    runContext: NonNullable<AgentRunRequest["runContext"]>,
+  ): Promise<void> {
+    if (!this.#outcomeSink) return;
+    const finishedAt = result.finishedAt ?? this.#now();
+    await this.#outcomeSink.record({
+      runId: result.id,
+      traceId: result.traceId ?? runContext.traceId,
+      objectiveDigest: runContext.objectiveDigest,
+      outcome: result.status === "completed"
+        ? "succeeded"
+        : result.status === "timed_out"
+          ? "timed_out"
+          : result.status === "stopped"
+            ? "aborted"
+            : "failed",
+      startedAt: result.startedAt,
+      finishedAt,
+      durationMs: Math.max(0, finishedAt - result.startedAt),
+      tokens: result.usage.input + result.usage.output +
+        result.usage.cacheRead + result.usage.cacheWrite,
+      cost: result.usage.cost,
+      gateVerdict: "none",
+      evidenceCount: 0,
+      routes: result.route
+        ? [{
+            requestedModel: result.route.requestedModel,
+            selectedModel: result.route.selectedModel,
+            reason: result.route.reason,
+            quality: result.route.quality,
+          }]
+        : [],
+    }).catch(() => undefined);
+  }
+
   #runRequest(actor: ManagedActor, item: ActorQueueItem): AgentRunRequest {
+    const startedAt = item.createdAt;
+    const runContext = item.runContext ?? {
+      version: 1 as const,
+      runId: item.id,
+      traceId: createHash("sha256").update(`${actor.id}:${item.id}`).digest("hex"),
+      spanId: item.id,
+      objectiveDigest: createHash("sha256")
+        .update(`${actor.id}:${actor.instructions}:${item.source}`)
+        .digest("hex"),
+      startedAt,
+      deadline: startedAt + (actor.timeoutMs ?? this.agents.config.timeoutMs),
+      cancellationOwner: actor.id,
+    };
     return {
       task: [
         `Fabric actor message from ${item.source}:`,
@@ -1116,6 +1713,8 @@ export class ActorManager {
       ...(actor.tools ? { tools: actor.tools } : {}),
       ...(actor.transport ? { transport: actor.transport } : {}),
       ...(actor.timeoutMs ? { timeoutMs: actor.timeoutMs } : {}),
+      ...(item.maxTokens !== undefined ? { maxTokens: item.maxTokens } : {}),
+      runContext,
     };
   }
 
@@ -1154,7 +1753,7 @@ export class ActorManager {
     if (actor.responseMode === "directive") {
       const directive = asDirective(result);
       return {
-        id: randomUUID(),
+        id: `${item.id}:out`,
         actorId: actor.id,
         actorName: actor.name,
         direction: "out",
@@ -1168,7 +1767,7 @@ export class ActorManager {
       };
     }
     return {
-      id: randomUUID(),
+      id: `${item.id}:out`,
       actorId: actor.id,
       actorName: actor.name,
       direction: "out",
@@ -1212,6 +1811,49 @@ export class ActorManager {
     return { kind: "direct", id, source, sequence, createdAt };
   }
 
+  #beginMainDelivery(actor: ManagedActor): boolean {
+    if (actor.deliveryCircuit.state !== "open") return true;
+    const now = this.#now();
+    if (now < (actor.deliveryCircuit.retryAt ?? Number.POSITIVE_INFINITY)) return false;
+    actor.deliveryCircuit = {
+      state: "half_open",
+      failures: actor.deliveryCircuit.failures,
+      ...(actor.deliveryCircuit.openedAt !== undefined
+        ? { openedAt: actor.deliveryCircuit.openedAt }
+        : {}),
+      ...(actor.deliveryCircuit.retryAt !== undefined
+        ? { retryAt: actor.deliveryCircuit.retryAt }
+        : {}),
+    };
+    return true;
+  }
+
+  #recordMainDelivery(
+    actor: ManagedActor,
+    receipt: NonNullable<FabricActorMessage["deliveryReceipt"]>["main"],
+  ): void {
+    if (receipt.status === "delivered") {
+      actor.deliveryCircuit = { state: "closed", failures: 0 };
+      return;
+    }
+    if (receipt.status !== "failed" && receipt.status !== "dead_lettered") return;
+    const failures = actor.deliveryCircuit.failures + 1;
+    if (
+      actor.deliveryCircuit.state === "half_open" ||
+      failures >= this.meshConfig.actorCircuitFailureThreshold
+    ) {
+      const openedAt = this.#now();
+      actor.deliveryCircuit = {
+        state: "open",
+        failures,
+        openedAt,
+        retryAt: openedAt + this.meshConfig.actorCircuitCooldownMs,
+      };
+      return;
+    }
+    actor.deliveryCircuit = { state: "closed", failures };
+  }
+
   async #validity(
     actor: ManagedActor,
     item: ActorQueueItem,
@@ -1243,7 +1885,7 @@ export class ActorManager {
     usage?: AgentRunResult["usage"],
   ): void {
     const message: FabricActorMessage = {
-      id: randomUUID(),
+      id: `${item.id}:out`,
       actorId: actor.id,
       actorName: actor.name,
       direction: "out",
@@ -1256,6 +1898,7 @@ export class ActorManager {
       ...(usage ? { usage } : {}),
     };
     this.#recordMessage(actor, message);
+    this.#finishInboxItem(actor, item);
     item.reject?.(new Error(`Fabric actor activation invalidated: ${reason}`));
   }
 
@@ -1426,6 +2069,171 @@ export class ActorManager {
     }
   }
 
+  #inboxPath(actor: ManagedActor): string {
+    return path.join(path.dirname(actor.sessionFile), "inbox.json");
+  }
+
+  #persistInbox(actor: ManagedActor): void {
+    if (!this.#persistent || !this.meshConfig.enabled || !this.#canManageCached(actor.id)) {
+      return;
+    }
+    const queued = [
+      ...(actor.inFlight ? [actor.inFlight] : []),
+      ...actor.queue,
+    ].map((item) => ({
+      id: item.id,
+      source: item.source,
+      payload: structuredClone(item.payload),
+      createdAt: item.createdAt,
+      activation: structuredClone(item.activation),
+      ...(item.runContext ? { runContext: structuredClone(item.runContext) } : {}),
+      ...(item.maxTokens !== undefined ? { maxTokens: item.maxTokens } : {}),
+      ...(item.coalesceKey ? { coalesceKey: item.coalesceKey } : {}),
+    }));
+    const outbox = actor.messages
+      .filter((message) => message.direction === "out")
+      .slice(-MESSAGE_HISTORY_LIMIT)
+      .map((message) => structuredClone(message));
+    atomicWrite(this.#inboxPath(actor), {
+      format: ACTOR_INBOX_FORMAT,
+      actorId: actor.id,
+      budgetUsage: actor.budgetUsage,
+      queued,
+      outbox,
+    });
+  }
+
+  #persistInboxSafely(actor: ManagedActor): void {
+    try {
+      this.#persistInbox(actor);
+    } catch (error) {
+      actor.lastError = `inbox persistence: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  #loadInbox(actor: ManagedActor): ActorQueueItem[] {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fs.readFileSync(this.#inboxPath(actor), "utf8"));
+    } catch {
+      return [];
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
+    const inbox = parsed as {
+      format?: unknown;
+      actorId?: unknown;
+      budgetUsage?: unknown;
+      queued?: unknown;
+      outbox?: unknown;
+    };
+    if (
+      inbox.format !== ACTOR_INBOX_FORMAT ||
+      inbox.actorId !== actor.id ||
+      !Array.isArray(inbox.queued)
+    ) {
+      return [];
+    }
+    actor.budgetUsage = restoreActorBudgetUsage(inbox.budgetUsage, this.#now());
+    if (Array.isArray(inbox.outbox)) {
+      for (const value of inbox.outbox.slice(-MESSAGE_HISTORY_LIMIT)) {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+        const message = value as Partial<FabricActorMessage>;
+        if (
+          typeof message.id !== "string" ||
+          message.direction !== "out" ||
+          typeof message.source !== "string" ||
+          typeof message.createdAt !== "number"
+        ) {
+          continue;
+        }
+        this.#recordMessage(actor, {
+          ...message,
+          id: message.id,
+          actorId: actor.id,
+          actorName: actor.name,
+          direction: "out",
+          source: message.source,
+          createdAt: message.createdAt,
+        });
+      }
+    }
+    const seen = new Set<string>();
+    const restored: ActorQueueItem[] = [];
+    for (const value of inbox.queued.slice(0, this.meshConfig.actorQueueLimit + 1)) {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+      const record = value as {
+        id?: unknown;
+        source?: unknown;
+        payload?: unknown;
+        createdAt?: unknown;
+        activation?: unknown;
+        runContext?: unknown;
+        maxTokens?: unknown;
+        coalesceKey?: unknown;
+      };
+      if (
+        typeof record.id !== "string" ||
+        !record.id ||
+        seen.has(record.id) ||
+        typeof record.source !== "string" ||
+        typeof record.createdAt !== "number" ||
+        typeof record.activation !== "object" ||
+        record.activation === null ||
+        Array.isArray(record.activation)
+      ) {
+        continue;
+      }
+      const activation = record.activation as Partial<FabricActorActivation>;
+      if (
+        activation.id !== record.id ||
+        activation.source !== record.source ||
+        typeof activation.sequence !== "number" ||
+        typeof activation.createdAt !== "number" ||
+        (activation.kind !== "direct" &&
+          activation.kind !== "hostEvent" &&
+          activation.kind !== "mesh")
+      ) {
+        continue;
+      }
+      seen.add(record.id);
+      restored.push({
+        id: record.id,
+        source: record.source,
+        payload: structuredClone(record.payload),
+        createdAt: record.createdAt,
+        activation: structuredClone(activation) as FabricActorActivation,
+        ...(isFabricRunEnvelopeV1(record.runContext)
+          ? { runContext: structuredClone(record.runContext) }
+          : {}),
+        ...(typeof record.maxTokens === "number" &&
+          Number.isSafeInteger(record.maxTokens) &&
+          record.maxTokens > 0
+          ? { maxTokens: record.maxTokens }
+          : {}),
+        ...(typeof record.coalesceKey === "string"
+          ? { coalesceKey: record.coalesceKey }
+          : {}),
+      });
+    }
+    return restored;
+  }
+
+  #commitInboxItem(actor: ManagedActor, item: ActorQueueItem): void {
+    const inFlight = actor.inFlight?.id === item.id ? actor.inFlight : undefined;
+    if (inFlight) delete actor.inFlight;
+    try {
+      this.#persistInbox(actor);
+    } catch (error) {
+      if (inFlight) actor.inFlight = inFlight;
+      throw error;
+    }
+  }
+
+  #finishInboxItem(actor: ManagedActor, item: ActorQueueItem): void {
+    if (actor.inFlight?.id === item.id) delete actor.inFlight;
+    this.#persistInboxSafely(actor);
+  }
+
   #recordMessage(actor: ManagedActor, message: FabricActorMessage): void {
     const bounded = structuredClone(message);
     const maxTextChars = Math.min(this.meshConfig.eventContextChars, this.meshConfig.maxEventBytes);
@@ -1446,7 +2254,12 @@ export class ActorManager {
         bounded.data = { fabricTruncated: true, preview: String(bounded.data) };
       }
     }
-    actor.messages.push(bounded);
+    const existingIndex = actor.messages.findIndex(
+      (candidate) =>
+        candidate.id === bounded.id && candidate.direction === bounded.direction,
+    );
+    if (existingIndex >= 0) actor.messages[existingIndex] = bounded;
+    else actor.messages.push(bounded);
     if (actor.messages.length > MESSAGE_HISTORY_LIMIT) {
       actor.messages.splice(0, actor.messages.length - MESSAGE_HISTORY_LIMIT);
     }
@@ -1488,6 +2301,7 @@ export class ActorManager {
       events: actor.events,
       topics: actor.topics,
       delivery: actor.delivery,
+      deliveryCircuit: structuredClone(actor.deliveryCircuit),
       responseMode: actor.responseMode,
       triggerTurn: actor.triggerTurn,
       coalesce: actor.coalesce,
@@ -1500,6 +2314,8 @@ export class ActorManager {
       ...(actor.timeoutMs ? { timeoutMs: actor.timeoutMs } : {}),
       ...(typeof actor.extensions === "boolean" ? { extensions: actor.extensions } : {}),
       ...(actor.validWhile ? { validWhile: actor.validWhile } : {}),
+      budgetPolicy: actor.budgetPolicy,
+      budgetUsage: actor.budgetUsage,
       sessionFile: actor.sessionFile,
       messages: actor.messages,
       createdAt: actor.createdAt,
@@ -1683,6 +2499,7 @@ export class ActorManager {
             )
           : [],
         delivery,
+        deliveryCircuit: restoredDeliveryCircuit(record.deliveryCircuit),
         responseMode: record.responseMode === "directive" ? "directive" : "text",
         triggerTurn,
         coalesce: record.coalesce !== false,
@@ -1708,6 +2525,8 @@ export class ActorManager {
         ...(record.validWhile?.version === 1 && typeof record.validWhile.source === "string"
           ? { validWhile: record.validWhile }
           : {}),
+        budgetPolicy: normalizeActorBudgetPolicy(record.budgetPolicy),
+        budgetUsage: restoreActorBudgetUsage(record.budgetUsage, this.#now()),
         latestActivationSequence: 0,
         sessionFile: path.join(this.#actorRoot, record.id, "session.jsonl"),
         queue: [],
@@ -1731,6 +2550,25 @@ export class ActorManager {
           }
         }
       }
+      const restoredQueue = this.#loadInbox(actor);
+      if (restoredQueue.length > 0) {
+        actor.queue.push(...restoredQueue);
+        actor.latestActivationSequence = Math.max(
+          ...restoredQueue.map((item) => item.activation.sequence),
+        );
+        if (actor.status !== "stopped") actor.status = "queued";
+        for (const item of restoredQueue) {
+          this.#recordMessage(actor, {
+            id: item.id,
+            actorId: actor.id,
+            actorName: actor.name,
+            direction: "in",
+            source: item.source,
+            createdAt: item.createdAt,
+            data: structuredClone(item.payload),
+          });
+        }
+      }
       this.#actors.set(actor.id, actor);
       added++;
       void this.#publishPresence(actor).catch(() => undefined);
@@ -1747,6 +2585,7 @@ export class ActorManager {
       events: [...actor.events],
       topics: [...actor.topics],
       delivery: actor.delivery,
+      deliveryCircuit: structuredClone(actor.deliveryCircuit),
       responseMode: actor.responseMode,
       triggerTurn: actor.triggerTurn,
       coalesce: actor.coalesce,
@@ -1755,6 +2594,7 @@ export class ActorManager {
       ...(actor.tools ? { tools: [...actor.tools] } : {}),
       ...(typeof actor.extensions === "boolean" ? { extensions: actor.extensions } : {}),
       ...(actor.validWhile ? { validWhile: structuredClone(actor.validWhile) } : {}),
+      budget: actorBudgetSnapshot(actor.budgetPolicy, actor.budgetUsage, this.#now()),
       queued: actor.queue.length,
       messages: actor.messages.length,
       createdAt: actor.createdAt,
@@ -1789,10 +2629,12 @@ export class ActorManager {
       this.#ownership.set(actor.id, next);
       if (previous && !next) {
         actor.abortController?.abort();
-        for (const item of actor.queue.splice(0)) {
+        for (const item of actor.queue) {
           item.reject?.(new Error("Fabric actor ownership moved to another host"));
         }
-        if (actor.status !== "stopped") actor.status = "idle";
+        if (actor.status !== "stopped") {
+          actor.status = actor.queue.length > 0 || actor.inFlight ? "queued" : "idle";
+        }
       } else if (!previous && next) {
         acquired = true;
       }

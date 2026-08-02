@@ -71,6 +71,12 @@ All calls return promises. Fields ending in `?` are optional; `unknown` marks pr
 | `compact.request(args?)` | `{requested:true,intent:{reason?,instructions?,preserve?,requestedBy,requestedAt}}` |
 | `compact.status()` | `{pending?:CompactIntent,last?:{at,requestedBy,status,summary?,tokensBefore?,estimatedTokensAfter?,error?}}` |
 | `compact.cancel()` | `{cancelled:true}` |
+| `leases.acquire(args)` | `{leases:FabricPathLease[]}`; active foreign leases block `pi.edit/write` before mutation |
+| `leases.release(args)` | `{released:string[]}` for current-run leases |
+| `leases.list()` | active project `FabricPathLease[]` |
+| `outcomes.list(args?)` / `outcomes.status(args)` | bounded prompt-free terminal run records |
+| `outcomes.evaluate(args)` / `outcomes.judge(args)` | updated record with score/verdict only |
+| `outcomes.recommend()` | sample-gated candidate metrics and Wilson confidence bounds |
 
 `memory.recall` structural filters (`ref`, `provider`, `action`, `outcome`) use exact persisted trace fields. With no `query`, `matchMode` is `"structural"`; with a lexical/regex query it is `"combined"`. Use `tools.catalog()`/`tools.search()` only to choose a current action head—catalog descriptions are navigation metadata and never become session evidence.
 
@@ -89,13 +95,55 @@ Refs are namespaced (`pi.grep`, `extensions.<tool>`, `mcp.<server>.<tool>`, `sch
 ## Error recovery: read, describe, retry
 Read the line-numbered error → `await tools.describe({ref})` for the schema → match `inputSchema`, rerun (don't guess). Common mistakes: bare ref (`grep`→`pi.grep`); 2 positional args on `read`/`bash`/`ls` (use an options object — positional is supported only for `grep`/`find`/`write`/`edit`).
 
+## Context-aware consultation
+
+`consult.run(args)` is the one core exception to the user-only advanced-skill rule. Main may call it autonomously when a material decision genuinely benefits from fresh context, but host admission starts at **zero workers** and permits **at most one** Consult attempt in one `fabric_exec` execution. A task being difficult is not enough.
+
+Call it only when all three admission fields are concrete:
+
+- `independence`: each question can be answered without Main's hidden in-flight reasoning;
+- `justification`: `context_capacity`, `independent_verification`, or `structural_diversity`;
+- `couldChange`: the exact Main decision or next action the result can alter.
+
+Choose the smallest reduction mode:
+
+- **Partition**: 2–3 non-overlapping path scopes for separable context. `mode: "auto"` selects it for `context_capacity`. An unscoped request needs host-observed context pressure; explicit non-overlapping scopes may be admitted earlier.
+- **Challenge**: exactly one perspective and a concrete `proposal`. The worker must use the silent stance when no material evidence-backed issue exists. `mode: "auto"` selects it for `independent_verification`.
+- **Compare**: 2–3 structurally distinct perspectives, proven by non-overlapping evidence scopes or distinct model keys. It preserves disagreement and never invents a winner. `mode: "auto"` selects it for `structural_diversity`.
+
+```ts
+const review = await consult.run({
+  objective: "Review the authentication boundary",
+  decision: "Ship the refresh-token design or revise it",
+  mode: "partition",
+  admission: {
+    justification: "context_capacity",
+    independence: "Token and session modules can be inspected independently",
+    couldChange: "The ship decision and which module must be revised",
+  },
+  perspectives: [
+    { id: "tokens", question: "Inspect token rotation", scope: ["src/auth/tokens"] },
+    { id: "sessions", question: "Inspect invalidation", scope: ["src/auth/sessions"] },
+  ],
+});
+return review;
+```
+
+The host fixes every admitted worker to Pi, fresh depth-one execution, `recursive: false`, discovered extensions off, and read-only `read`/`grep`/`find`/`ls`. It loads only a host scope guard, which realpath-checks every child tool path against the project and that perspective before execution. Request fields cannot add tools, writes, shell, network, or another delegation layer. Every accepted non-silent finding also needs a host-resolvable project-relative file address; missing files, invalid lines, scope escapes, traversal, and symlink escapes are discarded. Canonical file snapshots are cached under a cumulative evidence-read budget. Raw worker records do not return.
+
+Treat `status: "not_admitted"` as a decision to continue inline, not a reason to retry or fall back to manual fan-out. Treat `partial` as usable evidence plus explicit missing coverage. `inconclusive` means workers completed but no finding survived evidence validation. Challenge silence is a successful no-issue result. Consult outcome telemetry stores only mode/status/counts/context ratio/tokens/cost, never prompts, findings, or worker prose. Exact types and failure statuses are in `<skill-dir>/references/agents.md`.
+
 ## Orchestration surfaces (opt-in)
 Advanced workflow skills are user-invoked; never load them autonomously. When the user has explicitly invoked an agent or mesh workflow, `/Users/monotykamary/VCS/working-remote/open-source/pi-fabric/skills/fabric-exec/references/agents.md` and `/Users/monotykamary/VCS/working-remote/open-source/pi-fabric/skills/fabric-exec/references/mesh.md` are branch pointers for low-level API detail.
 
 `agents.self()` and `agents.members({scope?,kinds?})` expose one leased directory of intrinsic roots, agents, and actors. `agents.main()` and `agents.peers()` are compatibility views of root participants. **Peer is a reserved Fabric term for another root Pi session, not a child agent.** When the user says “peer,” query `agents.peers()` first; do not infer peer state from `agents.list()` or from `agents.members({ kinds: ["agent"] })`. `agents.list()` defaults to local child agents; use `scope: "lineage" | "project"` for federated agent discovery. Cross-process `steer`, `followUp`, and `stop` resolve `ownerHostId` and return only after the owner acknowledges. `agents.subscribe()` creates a durable source-qualified Pi/run lifecycle route; use it instead of model-authored status polling when another participant boundary should notify Main or an agent. Detached `agents.spawn()` already sends Main a terminal follow-up by default unless the caller later waits.
 
-For an explicit implementation handoff, `agents.handoff({ model, task?, when? })` schedules a visible Pi child at the completed outer `fabric_exec` boundary; later calls in the same program still run, and Main blocks only after the finalized native outer result is ready. `when` is a guest-only pure synchronous predicate over immutable earlier successful-call facts from any resolved Fabric provider and is stripped before the host call. `/fabric prewalk [task]` defaults to in-place Main model switching plus a hidden same-session continuation; child trajectory mode is an opt-in setting. See `/Users/monotykamary/VCS/working-remote/open-source/pi-fabric/skills/fabric-exec/references/agents.md`.
+For an explicit implementation handoff, `agents.handoff({ model, task?, when? })` schedules a visible Pi child at the completed outer `fabric_exec` boundary; later calls in the same program still run, and Main blocks only after the finalized native outer result is ready. `when` is a guest-only pure synchronous predicate over immutable earlier successful-call facts from any resolved Fabric provider and is stripped before the host call. `/fabric prewalk [task]` defaults to in-place Main model switching plus a hidden same-session continuation; child trajectory mode is an opt-in setting. Failed handoffs preserve the task in a blocked state for explicit `/fabric prewalk --retry`; successful hidden continuations are identity-checked and re-arm or restore the configured previous model only after settlement. In-place selection may use the bounded configured fallback chain; trajectory work is never auto-retried. See `/Users/monotykamary/VCS/working-remote/open-source/pi-fabric/skills/fabric-exec/references/agents.md`.
 
-Agent requests and persistent actors accept `runner: "pi" | "claude"`. Pi is the default and is required for `recursive: true`, `rlm.query()`, and actors that must call Fabric or mesh APIs themselves. Claude invokes the official `claude -p` harness; it supports mapped Claude Code tools and host-managed persistent actors, but not recursive/direct Fabric APIs. Use `agents.models({ runner: "claude" })` for runtime-enumerated `claude/<value>` model keys.
+`workflow.context()` returns the safe run/trace/span envelope and reservation snapshot. `workflow.durable.run(...)` executes guest phase closures over the mesh-backed lease/DAG store; persisted records retain only phase metadata, evidence, output digests, and owner run/trace/span. Use `leases.acquire/release` around shared-workspace `pi.edit/write`; leases do not inspect bash.
+
+Agent requests may declare capability requirements/fallbacks, an admission reason/expected artifact, and a host capability profile. Host policy can require admission. Profiles fix tools and inherited recursive risk grants; requests cannot elevate them. `workflow.gate(...)` records ordered evidence; unresolved revise, abort, revision exhaustion, and gate crashes fail closed. Finite `agentBudget`/`tokenBudget` values reserve before agent launch; set explicit `maxTokens` partitions on concurrent calls.
+
+Agent requests and persistent actors accept `runner: "pi" | "claude"`. Pi is the default and is required for `recursive: true`, `rlm.query()`, and actors that must call Fabric or mesh APIs themselves. Claude invokes the official `claude -p` harness; it supports mapped Claude Code tools and host-managed persistent actors, but not recursive/direct Fabric APIs. Use `agents.models({ runner: "claude" })` for runtime-enumerated `claude/<value>` model keys. Actor outputs expose durable delivery receipts; retry a failed channel with `agents.retryDelivery({ id, messageId })` rather than regenerating the actor response.
 
 Omit `timeoutMs` for agents and actors unless requesting longer than the configured `agents.timeoutMs` (60 minutes by default). Per-call values below the configured default are ignored.

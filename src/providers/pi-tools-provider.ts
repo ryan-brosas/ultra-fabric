@@ -25,6 +25,7 @@ import type {
 } from "../protocol.js";
 import { countContentLines } from "../ui/preview-lines.js";
 import { CapturedToolsProvider } from "./captured-tools-provider.js";
+import type { PathLeaseStore } from "../leases/path-leases.js";
 import {
   createPreviewWriteToolDefinition,
   writeContentForPreview,
@@ -174,11 +175,13 @@ export class PiToolsProvider implements FabricProvider {
   readonly #catalog: CapturedToolCatalog | undefined;
   readonly #capturedTools: CapturedToolsProvider | undefined;
   readonly #cwd: string;
+  #pathLeases: PathLeaseStore | undefined;
 
   constructor(
     cwd: string,
     catalog?: CapturedToolCatalog,
     capturedTools?: CapturedToolsProvider,
+    pathLeases?: PathLeaseStore,
   ) {
     this.#cwd = cwd;
     this.#tools = {
@@ -192,6 +195,11 @@ export class PiToolsProvider implements FabricProvider {
     };
     this.#catalog = catalog;
     this.#capturedTools = capturedTools;
+    this.#pathLeases = pathLeases;
+  }
+
+  setPathLeases(pathLeases: PathLeaseStore | undefined): void {
+    this.#pathLeases = pathLeases;
   }
 
   async list(
@@ -253,6 +261,15 @@ export class PiToolsProvider implements FabricProvider {
   ): Promise<unknown> {
     if (!(actionName in this.#tools)) throw new Error(`Unknown Pi tool: ${actionName}`);
     const name = actionName as PiCoreToolName;
+    if (writeTools.has(name) && this.#pathLeases) {
+      const target = args.path;
+      if (typeof target !== "string") throw new Error(`pi.${name} requires a path`);
+      this.#pathLeases.assertCanWrite(
+        context.cwd,
+        context.run?.runId ?? context.parentToolCallId,
+        target,
+      );
+    }
     // A captured extension override (e.g. an extension that registered a "read"
     // tool) already replays the full event lifecycle itself via
     // CapturedToolsProvider, so delegate to it unchanged.
@@ -542,6 +559,7 @@ export class PiToolsProvider implements FabricProvider {
       description: tool.description,
       inputSchema: tool.parameters as unknown as Record<string, unknown>,
       risk: riskForTool(name),
+      ...(writeTools.has(name) ? { effect: "workspace" as const } : {}),
       namespace: "builtin",
     };
   }

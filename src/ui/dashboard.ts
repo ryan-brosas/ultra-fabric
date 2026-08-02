@@ -1047,6 +1047,7 @@ export class FabricDashboard implements Component, Focusable {
       ["Topology", "Main branches into Participants (sessions, agents, actors) and Mesh (namespaced topics and hierarchical state); traffic travels on decaying edges"],
       ["Motion", "r replay/live · space pause/play · ←/→ step · +/- speed · H history · M reduced motion"],
       ["Runs", "[ older · ] newer · f cycle status filter"],
+      ["Commands", "/fabric health runtime summary · /fabric leases inspect or release write leases · /fabric outcomes model report"],
       ...(mainActions.length > 1 ? [["Main", mainActions.join(" · ")]] : []),
       ...(agentActions.length > 1 ? [["Agents", agentActions.join(" · ")]] : []),
       ...(actorActions.length > 0 ? [["Actors", actorActions.join(" · ")]] : []),
@@ -1484,6 +1485,16 @@ export class FabricDashboard implements Component, Focusable {
             largeRun ? "⚠ large run" : undefined,
             `${activeAgents}/${runAgents.length} run agents active`,
             `${snapshot.actors.length} actors`,
+            snapshot.observability
+              ? [
+                  `health ${snapshot.observability.outcomes.verified}/${snapshot.observability.outcomes.records} verified`,
+                  `${snapshot.observability.actorBudgets.rejectedActivations} quota rejects`,
+                  `${snapshot.observability.contextQos.retiredResults} retired`,
+                  snapshot.observability.pathLeases > 0
+                    ? `${snapshot.observability.pathLeases} write lease${snapshot.observability.pathLeases === 1 ? "" : "s"}`
+                    : undefined,
+                ].filter(Boolean).join(" · ")
+              : undefined,
             runTokens > 0 ? `${formatTokens(runTokens)} tok` : undefined,
             elapsed,
             snapshot.runs.length > 1
@@ -2433,6 +2444,9 @@ export class FabricDashboard implements Component, Focusable {
       field("ID", agent.id);
       field("Runner", agent.runner);
       field("Model", agent.model);
+      structuredField("Route", agent.route);
+      field("Capability profile", agent.profile);
+      structuredField("Admission", agent.admission);
       field("Thinking", agent.thinking);
       field("Transport", agent.transport);
       field("Activity", agent.currentTool);
@@ -2467,6 +2481,7 @@ export class FabricDashboard implements Component, Focusable {
       field("Tools", actor.tools?.join(", ") ?? `inherited (${this.actorDefaultTools.join(", ")})`);
       field("Topics", actor.topics.join(", "));
       field("Queue", actor.queued);
+      structuredField("Budget", actor.budget);
       field("Last error", actor.lastError);
       field("Instructions", actor.instructions);
       if (actor.recentMessages.length > 0) {

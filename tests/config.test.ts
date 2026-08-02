@@ -40,7 +40,13 @@ describe("Fabric configuration", () => {
   it("normalizes bounds and approval modes", () => {
     const config = normalizeFabricConfig({
       fullCodeMode: false,
-      executor: { timeoutMs: 1, memoryLimitBytes: Number.MAX_SAFE_INTEGER },
+      executor: {
+        timeoutMs: 1,
+        memoryLimitBytes: Number.MAX_SAFE_INTEGER,
+        maxGateRevisions: 99,
+        maxRunEvidence: 0,
+        maxRunTransitions: 99_999,
+      },
       approvals: { write: "auto", agent: "invalid", model: "anthropic/classifier" },
       agents: { maxConcurrent: 100, maxPerExecution: 5_000, transport: "herdr" },
       capture: {
@@ -54,13 +60,31 @@ describe("Fabric configuration", () => {
         refreshMs: 1,
         eventHistory: 0,
       },
-      mesh: { actorQueueLimit: 0, eventContextChars: 5_000_000 },
+      mesh: {
+        actorQueueLimit: 0,
+        actorRunMaxAttempts: 99,
+        actorRunBaseDelayMs: -1,
+        actorRunMaxDelayMs: 99_999,
+        actorRunJitterMs: 99_999,
+        actorDeliveryMaxAttempts: 99,
+        actorDeliveryBaseDelayMs: -1,
+        actorDeliveryMaxDelayMs: 99_999,
+        actorDeliveryJitterMs: 99_999,
+        actorCircuitFailureThreshold: 0,
+        actorCircuitCooldownMs: Number.MAX_SAFE_INTEGER,
+        eventContextChars: 5_000_000,
+      },
     });
     expect(config.fullCodeMode).toBe(false);
     expect(config.executor.timeoutMs).toBe(1_000);
     expect(config.executor.memoryLimitBytes).toBe(
       Math.min(QUICKJS_MAX_MEMORY_LIMIT_BYTES, MAX_EXECUTOR_MEMORY_LIMIT_BYTES),
     );
+    expect(config.executor).toMatchObject({
+      maxGateRevisions: 10,
+      maxRunEvidence: 1,
+      maxRunTransitions: 10_000,
+    });
     expect(config.approvals.write).toBe("auto");
     expect(config.approvals.agent).toBe("allow");
     expect(config.approvals.model).toBe("anthropic/classifier");
@@ -77,7 +101,30 @@ describe("Fabric configuration", () => {
       eventHistory: 1,
     });
     expect(config.mesh.actorQueueLimit).toBe(1);
+    expect(config.mesh).toMatchObject({
+      actorRunMaxAttempts: 10,
+      actorRunBaseDelayMs: 0,
+      actorRunMaxDelayMs: 60_000,
+      actorRunJitterMs: 60_000,
+      actorDeliveryMaxAttempts: 10,
+      actorDeliveryBaseDelayMs: 0,
+      actorDeliveryMaxDelayMs: 60_000,
+      actorDeliveryJitterMs: 60_000,
+      actorCircuitFailureThreshold: 1,
+      actorCircuitCooldownMs: 24 * 60 * 60 * 1_000,
+    });
     expect(config.mesh.eventContextChars).toBe(1_000_000);
+  });
+
+  it("normalizes actor overflow policy", () => {
+    expect(
+      normalizeFabricConfig({ mesh: { actorOverflowPolicy: "dead-letter" } }).mesh
+        .actorOverflowPolicy,
+    ).toBe("dead-letter");
+    expect(
+      normalizeFabricConfig({ mesh: { actorOverflowPolicy: "discard" } }).mesh
+        .actorOverflowPolicy,
+    ).toBe("reject");
   });
 
   it("normalizes executor runtimes and their memory ceilings", () => {
@@ -94,13 +141,29 @@ describe("Fabric configuration", () => {
   it("normalizes a dedicated prewalk executor model", () => {
     expect(
       normalizeFabricConfig({ prewalk: { model: "anthropic/executor" } }).prewalk,
-    ).toEqual({ mode: "in-place", model: "anthropic/executor", alwaysRearm: false });
+    ).toEqual({
+      mode: "in-place",
+      returnPolicy: "executor",
+      model: "anthropic/executor",
+      triggerRisks: [],
+      triggerEffects: ["workspace"],
+      triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
+      alwaysRearm: false,
+    });
     expect(normalizeFabricConfig({ prewalk: { model: "   " } }).prewalk).toEqual({
       mode: "in-place",
+      returnPolicy: "executor",
+      triggerRisks: [],
+      triggerEffects: ["workspace"],
+      triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       alwaysRearm: false,
     });
     expect(normalizeFabricConfig({ prewalk: { alwaysRearm: true } }).prewalk).toEqual({
       mode: "in-place",
+      returnPolicy: "executor",
+      triggerRisks: [],
+      triggerEffects: ["workspace"],
+      triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       alwaysRearm: true,
     });
     expect(normalizeFabricConfig({ prewalk: { mode: "trajectory" } }).prewalk.mode).toBe(
@@ -109,6 +172,142 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ prewalk: { mode: "child" } }).prewalk.mode).toBe(
       "in-place",
     );
+    expect(
+      normalizeFabricConfig({ prewalk: { returnPolicy: "previous" } }).prewalk,
+    ).toMatchObject({ returnPolicy: "previous" });
+    expect(
+      normalizeFabricConfig({ prewalk: { returnPolicy: "planner" } }).prewalk,
+    ).toMatchObject({ returnPolicy: "executor" });
+    expect(
+      normalizeFabricConfig({
+        prewalk: {
+          fallbackModels: [
+            " anthropic/fallback ",
+            "invalid",
+            "anthropic/fallback",
+            "openai/backup",
+          ],
+        },
+      }).prewalk,
+    ).toMatchObject({
+      fallbackModels: ["anthropic/fallback", "openai/backup"],
+    });
+  });
+
+  it("normalizes bounded outcome learning policy", () => {
+    expect(normalizeFabricConfig({
+      outcomes: { enabled: false, maxRecords: 0, minRecommendationSamples: 1 },
+    }).outcomes).toEqual({
+      enabled: false,
+      maxRecords: 100,
+      minRecommendationSamples: 2,
+    });
+    expect(DEFAULT_FABRIC_CONFIG.outcomes).toEqual({
+      enabled: true,
+      maxRecords: 1_000,
+      minRecommendationSamples: 5,
+    });
+  });
+
+  it("normalizes bounded Ultra Consult policy", () => {
+    expect(normalizeFabricConfig({
+      consult: {
+        enabled: false,
+        maxWorkers: 99,
+        contextPressureThreshold: 2,
+        maxFindingsPerWorker: 0,
+        maxEvidencePerFinding: 99,
+        maxEvidenceFileBytes: 1,
+        maxEvidenceBytesPerConsult: 1,
+        maxTokensPerWorker: 0,
+      },
+    }).consult).toEqual({
+      enabled: false,
+      maxWorkers: 3,
+      contextPressureThreshold: 0.95,
+      maxFindingsPerWorker: 1,
+      maxEvidencePerFinding: 16,
+      maxEvidenceFileBytes: 1_024,
+      maxEvidenceBytesPerConsult: 1_024,
+      maxTokensPerWorker: 256,
+    });
+    expect(DEFAULT_FABRIC_CONFIG.consult).toEqual({
+      enabled: true,
+      maxWorkers: 3,
+      contextPressureThreshold: 0.6,
+      maxFindingsPerWorker: 8,
+      maxEvidencePerFinding: 8,
+      maxEvidenceFileBytes: 2 * 1024 * 1024,
+      maxEvidenceBytesPerConsult: 8 * 1024 * 1024,
+      maxTokensPerWorker: 8_000,
+    });
+  });
+
+  it("normalizes admission and capability profiles", () => {
+    expect(normalizeFabricConfig({
+      agents: {
+        requireAdmissionIntent: true,
+        capabilityProfiles: {
+          inspect: { tools: ["read", "grep", "read", 3], risks: ["read", "bad"] },
+          "bad profile": { tools: ["bash"], risks: ["execute"] },
+        },
+      },
+    }).agents).toMatchObject({
+      requireAdmissionIntent: true,
+      capabilityProfiles: {
+        inspect: { tools: ["read", "grep"], risks: ["read"] },
+      },
+    });
+    expect(DEFAULT_FABRIC_CONFIG.agents).toMatchObject({
+      requireAdmissionIntent: false,
+      capabilityProfiles: {},
+    });
+  });
+
+  it("normalizes bounded agent routing policy", () => {
+    expect(normalizeFabricConfig({
+      agents: {
+        fallbackModels: ["openai/gpt", "bad", "openai/gpt", "anthropic/sonnet"],
+        allowQualityDowngrade: true,
+      },
+    }).agents).toMatchObject({
+      fallbackModels: ["openai/gpt", "anthropic/sonnet"],
+      allowQualityDowngrade: true,
+    });
+    expect(DEFAULT_FABRIC_CONFIG.agents).toMatchObject({
+      fallbackModels: [],
+      allowQualityDowngrade: false,
+    });
+  });
+
+  it("normalizes configurable Prewalk effect triggers", () => {
+    expect(normalizeFabricConfig({
+      prewalk: {
+        triggerRisks: ["write", "bad", "write"],
+        triggerRefs: [" extensions.generated_write ", "bad", "pi.edit"],
+      },
+    }).prewalk).toMatchObject({
+      triggerRisks: ["write"],
+      triggerRefs: ["extensions.generated_write", "pi.edit"],
+    });
+    expect(DEFAULT_FABRIC_CONFIG.prewalk).toMatchObject({
+      triggerRisks: [],
+      triggerEffects: ["workspace"],
+      triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
+    });
+  });
+
+  it("normalizes opt-in gated prewalk revisions", () => {
+    expect(normalizeFabricConfig({}).prewalk).not.toHaveProperty("verificationMode");
+    expect(normalizeFabricConfig({
+      prewalk: { verificationMode: "gated", maxPhaseRevisions: 99 },
+    }).prewalk).toMatchObject({
+      verificationMode: "gated",
+      maxPhaseRevisions: 8,
+    });
+    expect(normalizeFabricConfig({
+      prewalk: { verificationMode: "prompt-only", maxPhaseRevisions: 3 },
+    }).prewalk).not.toHaveProperty("verificationMode");
   });
 
   it("keeps a valid prewalk thinking level and drops invalid or empty ones", () => {
@@ -470,7 +669,14 @@ describe("Fabric configuration", () => {
     );
 
     saveFabricConfig(location, { prewalk: { model: "" } });
-    expect(loadFabricConfig(location).prewalk).toEqual({ mode: "in-place", alwaysRearm: false });
+    expect(loadFabricConfig(location).prewalk).toEqual({
+      mode: "in-place",
+      returnPolicy: "executor",
+      triggerRisks: [],
+      triggerEffects: ["workspace"],
+      triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
+      alwaysRearm: false,
+    });
   });
 
   it("saves array overrides by replacing the array while preserving siblings", () => {

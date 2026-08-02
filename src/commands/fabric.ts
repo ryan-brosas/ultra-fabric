@@ -110,11 +110,15 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
     getArgumentCompletions: (argumentPrefix: string): AutocompleteItem[] | null => {
       const subcommands = [
         "status",
+        "health",
         "dashboard",
         "settings",
         "prewalk",
         "reload",
         "providers",
+        "captured",
+        "leases",
+        "outcomes",
         "agents",
         "actors",
         "messages",
@@ -243,7 +247,16 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           context.ui.notify(
             status.state === "idle"
               ? "Fabric prewalk is idle"
-              : `Fabric prewalk ${status.state} (${status.mode}) → ${status.model}${status.task ? `\nTask: ${status.task}` : ""}`,
+              : [
+                  `Fabric prewalk ${status.state} (${status.mode}) → ${status.model}`,
+                  ...(status.task ? [`Task: ${status.task}`] : []),
+                  ...(status.state === "blocked"
+                    ? [
+                        `Error: ${status.error}`,
+                        "Run /fabric prewalk --retry to resume this task.",
+                      ]
+                    : []),
+                ].join("\n"),
             "info",
           );
           return;
@@ -253,6 +266,29 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
             "Fabric prewalk requires full code mode and Schema enforce mode disabled.",
             "error",
           );
+          return;
+        }
+        if (option === "--retry") {
+          const blocked = state.prewalk.status();
+          if (blocked.state !== "blocked") {
+            context.ui.notify("Fabric prewalk has no blocked task to retry", "warning");
+            return;
+          }
+          if (blocked.mode === "trajectory" && !state.config.agents.enabled) {
+            context.ui.notify(
+              "Trajectory prewalk requires enabled agents. Choose in-place mode or enable agents.",
+              "error",
+            );
+            return;
+          }
+          const retried = state.prewalk.retry(context.sessionManager.getSessionId());
+          if (retried.state !== "armed") {
+            context.ui.notify("Blocked prewalk belongs to another session", "error");
+            return;
+          }
+          context.ui.setStatus("fabric-prewalk", `armed retry → ${retried.model}`);
+          context.ui.notify("Fabric prewalk retry armed with preserved task", "info");
+          if (retried.task) pi.sendUserMessage(retried.task);
           return;
         }
         if (state.config.prewalk.mode === "trajectory" && !state.config.agents.enabled) {
@@ -273,7 +309,17 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           ...(state.config.prewalk.thinking
             ? { thinking: state.config.prewalk.thinking }
             : {}),
+          ...(state.config.prewalk.verificationMode === "gated"
+            ? {
+                verificationMode: "gated" as const,
+                maxPhaseRevisions: state.config.prewalk.maxPhaseRevisions,
+              }
+            : {}),
           alwaysRearm: state.config.prewalk.alwaysRearm,
+          returnPolicy: state.config.prewalk.returnPolicy,
+          ...(state.config.prewalk.fallbackModels
+            ? { fallbackModels: state.config.prewalk.fallbackModels }
+            : {}),
         });
         // Hidden advisory framing, queued for the next prompt (rules before
         // the task when one is submitted below). nextTurn never triggers a
@@ -344,6 +390,132 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
               : "No extension tools captured",
           "info",
         );
+        return;
+      }
+      if (command === "leases") {
+        if (!state.config.mesh.enabled) {
+          context.ui.notify("Path leases require mesh coordination to be enabled", "warning");
+          return;
+        }
+        const releaseAll = argumentsList.includes("--release-all");
+        const releaseIndex = argumentsList.indexOf("--release");
+        try {
+          if (releaseAll || releaseIndex >= 0) {
+            const ids = releaseAll ? undefined : argumentsList.slice(releaseIndex + 1);
+            if (!releaseAll && (!ids || ids.length === 0)) {
+              context.ui.notify("Usage: /fabric leases --release <id...> | --release-all", "warning");
+              return;
+            }
+            const { released } = await state.pathLeases.forceRelease(ids);
+            context.ui.notify(
+              released.length > 0
+                ? `Released ${released.length} path lease(s): ${released.join(", ")}`
+                : "No matching path leases; lease state reset",
+              "info",
+            );
+            return;
+          }
+          const leases = await state.pathLeases.list();
+          context.ui.notify(
+            leases.length > 0
+              ? [
+                  ...leases.map((lease) => {
+                    const remaining = Math.max(0, lease.expiresAt - Date.now());
+                    return `${lease.id.slice(0, 8)} ${lease.scope} ${lease.path} — owner ${lease.ownerRunId} · expires in ${Math.round(remaining / 1_000)}s`;
+                  }),
+                  "Release with /fabric leases --release <id> or --release-all",
+                ].join("\n")
+              : "No active path leases",
+            "info",
+          );
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+      }
+      if (command === "outcomes") {
+        if (!state.config.outcomes.enabled) {
+          context.ui.notify(
+            "Outcome recording is disabled; enable outcomes in /fabric settings",
+            "warning",
+          );
+          return;
+        }
+        try {
+          const report = await state.outcomes.recommend();
+          const summary = state.outcomes.summary();
+          const header = `${summary.records} records · ${summary.succeeded} succeeded · ${summary.verified} verified · ${summary.downgraded} downgraded · ${summary.evaluated} evaluated`;
+          const percent = (value: number): string => `${Math.round(value * 100)}%`;
+          const rows = report.candidates.map((candidate) => {
+            const marker = candidate.model === report.recommendedModel ? "★ " : "  ";
+            const score = candidate.averageScore === undefined
+              ? ""
+              : ` · score ${candidate.averageScore.toFixed(2)}`;
+            return `${marker}${candidate.model}: ${percent(candidate.verifiedRate)} verified [${percent(candidate.verifiedConfidence.low)}-${percent(candidate.verifiedConfidence.high)}] · ${percent(candidate.successRate)} success · ${candidate.samples} samples · ${Math.round(candidate.averageDurationMs)}ms · $${candidate.averageCost.toFixed(4)}${score}`;
+          });
+          const pending = report.excluded.map(
+            (entry) =>
+              `  ${entry.model}: needs ${report.minimumSamples - entry.samples} more sample(s)`,
+          );
+          context.ui.notify(
+            [
+              header,
+              ...(rows.length > 0
+                ? [`ranked by verified-rate lower bound (minimum ${report.minimumSamples} samples)`, ...rows]
+                : [`no model has reached ${report.minimumSamples} samples yet`]),
+              ...(pending.length > 0 ? ["pending:", ...pending] : []),
+              "Advisory only; Fabric never rewrites configured model defaults.",
+            ].join("\n"),
+            "info",
+          );
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+      }
+      if (command === "health") {
+        const config = state.config;
+        const qos = state.contextQosTelemetry;
+        const lines: string[] = [];
+        try {
+          const budgets = state.actors.telemetry();
+          lines.push(
+            `actors: ${budgets.actors} tracked · ${budgets.open} open · ${budgets.rejectedActivations} rejected · ${budgets.queueRejected} queue-rejected`,
+            `dead letters: ${budgets.activationDeadLetters} activation · ${budgets.deliveryDeadLetters} delivery`,
+          );
+        } catch {
+          lines.push("actors: unavailable");
+        }
+        lines.push(
+          qos
+            ? `context QoS: ${qos.passes} passes · ${qos.retiredResults} retired results · ${qos.protectedResults} protected`
+            : "context QoS: no passes yet",
+        );
+        if (config.outcomes.enabled) {
+          try {
+            const summary = state.outcomes.summary();
+            lines.push(
+              `outcomes: ${summary.records} records · ${summary.verified} verified · ${summary.downgraded} downgraded (see /fabric outcomes)`,
+            );
+          } catch {
+            lines.push("outcomes: unavailable");
+          }
+        } else {
+          lines.push("outcomes: disabled");
+        }
+        if (config.mesh.enabled) {
+          try {
+            const leases = await state.pathLeases.list();
+            lines.push(`path leases: ${leases.length} active (see /fabric leases)`);
+          } catch (error) {
+            lines.push(
+              `path leases: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        } else {
+          lines.push("path leases: mesh disabled");
+        }
+        context.ui.notify(lines.join("\n"), "info");
         return;
       }
       if (command === "agents") {
@@ -656,7 +828,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       }
       if (command !== "status") {
         context.ui.notify(
-          "Usage: /fabric [status|dashboard|prewalk [task]|prewalk --off|reload|providers|agents|actors|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>]",
+          "Usage: /fabric [status|health|dashboard|settings|prewalk [task]|prewalk --retry|prewalk --off|reload|providers|captured [query]|leases [--release <id...>|--release-all]|outcomes|agents|actors|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>]",
           "warning",
         );
         return;
@@ -680,12 +852,30 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
             const prewalk = state.prewalk.status();
             return prewalk.state === "idle"
               ? `prewalk: idle · ${config.prewalk.mode} · model ${config.prewalk.model || "Ask each time"} · always re-arm ${config.prewalk.alwaysRearm ? "on" : "off"}`
-              : `prewalk: ${prewalk.state} · ${prewalk.mode} → ${prewalk.model}${prewalk.alwaysRearm ? " · always re-arm" : ""}`;
+              : `prewalk: ${prewalk.state} · ${prewalk.mode} → ${prewalk.model}${prewalk.alwaysRearm ? " · always re-arm" : ""}${prewalk.state === "blocked" ? " · retry available" : ""}`;
           })(),
           config.fullCodeMode && config.capture.enabled
             ? `captured tools: ${capturedTools.size} · model visibility: ${config.capture.hideFromModel ? "hidden" : "visible"}`
             : "captured tools: disabled (native registry preserved)",
           `actors: ${state.actors.list().length} · mesh: ${config.mesh.enabled ? state.mesh.root : "disabled"}`,
+          `admission: ${config.agents.requireAdmissionIntent ? "required" : "optional"} · profiles: ${
+            Object.keys(config.agents.capabilityProfiles).length > 0
+              ? Object.keys(config.agents.capabilityProfiles).join(", ")
+              : "none"
+          } · quality downgrade: ${config.agents.allowQualityDowngrade ? "allowed" : "blocked"}`,
+          `prewalk triggers: effects [${config.prewalk.triggerEffects.join(", ") || "none"}] · risks [${
+            config.prewalk.triggerRisks.join(", ") || "none"
+          }] · refs [${config.prewalk.triggerRefs.join(", ") || "none"}]`,
+          `outcomes: ${
+            config.outcomes.enabled
+              ? `on · max ${config.outcomes.maxRecords} · min samples ${config.outcomes.minRecommendationSamples} (/fabric outcomes)`
+              : "disabled"
+          }`,
+          `context QoS: ${
+            config.compaction.contextQos.enabled
+              ? `on · window ${config.compaction.contextQos.turnWindow} turns`
+              : "disabled"
+          }`,
           `MCP: ${config.mcp.enabled ? "enabled" : "disabled"}`,
           `UI: ${config.ui.enabled ? `${config.ui.widget} widget above chat` : "disabled"}`,
         ].join("\n"),

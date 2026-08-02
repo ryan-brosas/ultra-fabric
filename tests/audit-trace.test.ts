@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import {
@@ -115,6 +116,7 @@ describe("Fabric execution trace V1", () => {
           ref: "demo.echo",
           provider: "demo",
           action: "echo",
+          risk: "read",
           args: {},
           outcome: "succeeded",
         },
@@ -687,6 +689,40 @@ return true;
     expect(cancelledResult.trace.operations[0]).toMatchObject({ outcome: "aborted" });
   });
 
+  it("persists bounded run identity and gate evidence without the raw objective", async () => {
+    const { service, context } = serviceFor();
+    const source = `
+await workflow.gate({
+  gate: "lint",
+  passed: false,
+  disposition: "advise",
+  evidence: [{ kind: "command", ref: "cmd:lint" }],
+  reason: "gate-reason-secret",
+});
+return "run-objective-secret";
+`;
+    const result = await execute(service, context, source);
+    const details = createFabricPersistedExecutionDetails(result);
+
+    expect(details).toMatchObject({
+      run: {
+        version: 1,
+        runId: "trace-test",
+        objectiveDigest: createHash("sha256").update(source).digest("hex"),
+      },
+      gates: [{ gate: "lint", decision: "continue" }],
+      evidence: [{ kind: "command", ref: "cmd:lint" }],
+      transitions: [
+        { sequence: 1, state: "accepted" },
+        { sequence: 2, state: "executing" },
+        { sequence: 3, state: "gate:lint:continue" },
+        { sequence: 4, state: "completed" },
+      ],
+    });
+    expect(JSON.stringify(details)).not.toContain("run-objective-secret");
+    expect(JSON.stringify(details)).not.toContain("gate-reason-secret");
+  });
+
   it("returns a failed zero-call trace for type-check failure without source text", async () => {
     const { service, context } = serviceFor();
     const result = await execute(service, context, "return rawCodeSecretIdentifier;");
@@ -699,6 +735,10 @@ return true;
       phases: [],
       error: "Execution failed",
     });
+    expect(result.transitions?.map((transition) => transition.state)).toEqual([
+      "accepted",
+      "failed",
+    ]);
     expect(JSON.stringify(details)).not.toContain("rawCodeSecretIdentifier");
   });
 

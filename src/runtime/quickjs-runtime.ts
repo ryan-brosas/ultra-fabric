@@ -276,6 +276,8 @@ globalThis.memory = __providerProxy("memory");
 globalThis.state = __providerProxy("state");
 globalThis.schema = __providerProxy("schema");
 globalThis.compact = __providerProxy("compact");
+globalThis.outcomes = __providerProxy("outcomes");
+globalThis.leases = __providerProxy("leases");
 const __createActor = async (args = {}) => {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new TypeError("agents.create expects an options object");
@@ -490,10 +492,82 @@ const __workflowPipeline = async (items, ...stages) =>
       }));
     },
   );
+const __durableWorkflow = Object.freeze({
+  create: (definition) => __call("workflows.create", definition),
+  status: (id) => __call("workflows.status", { id }),
+  list: (limit) => __call("workflows.list", limit === undefined ? {} : { limit }),
+  claim: (id, phaseId) => __call("workflows.claim", { id, ...(phaseId ? { phaseId } : {}) }),
+  complete: (id, args) => __call("workflows.complete", { id, ...args }),
+  fail: (id, args) => __call("workflows.fail", { id, ...args }),
+  resume: (id) => __call("workflows.resume", { id }),
+  cancel: (id, reason) => __call("workflows.cancel", { id, ...(reason ? { reason } : {}) }),
+  async run(definition) {
+    if (!definition || typeof definition !== "object" || !Array.isArray(definition.phases)) {
+      throw new TypeError("workflow.durable.run requires a workflow definition with phases");
+    }
+    const executors = new Map();
+    const retryable = new Map();
+    const phases = definition.phases.map((phase) => {
+      if (!phase || typeof phase !== "object" || typeof phase.run !== "function") {
+        throw new TypeError("Every workflow.durable.run phase requires a run function");
+      }
+      executors.set(phase.id, phase.run);
+      retryable.set(phase.id, phase.retryable !== false);
+      const { run, retryable: _retryable, ...stored } = phase;
+      return stored;
+    });
+    await __call("workflows.create", { ...definition, phases });
+    const results = {};
+    while (true) {
+      const claim = await __call("workflows.claim", { id: definition.id });
+      if (!claim) break;
+      const execute = executors.get(claim.phase.id);
+      if (!execute) {
+        await __call("workflows.fail", {
+          id: definition.id,
+          phaseId: claim.phase.id,
+          leaseToken: claim.leaseToken,
+          error: "No executor function exists for claimed durable phase",
+        });
+        continue;
+      }
+      try {
+        const workflowState = await __call("workflows.status", { id: definition.id });
+        const output = await execute({
+          phase: claim.phase,
+          workflow: workflowState,
+          results: { ...results },
+        });
+        results[claim.phase.id] = output;
+        await __call("workflows.complete", {
+          id: definition.id,
+          phaseId: claim.phase.id,
+          leaseToken: claim.leaseToken,
+          output,
+        });
+      } catch (error) {
+        await __call("workflows.fail", {
+          id: definition.id,
+          phaseId: claim.phase.id,
+          leaseToken: claim.leaseToken,
+          error: error instanceof Error ? error.message : String(error),
+          retryable: retryable.get(claim.phase.id) === true,
+        });
+      }
+    }
+    return {
+      workflow: await __call("workflows.status", { id: definition.id }),
+      results,
+    };
+  },
+});
+
 globalThis.workflow = Object.freeze({
   agent: __workflowAgent,
   parallel: __workflowParallel,
   pipeline: __workflowPipeline,
+  durable: __durableWorkflow,
+  context: () => __call("fabric.$runContext", {}),
   configure: (args) => __call("fabric.$configure", args),
   phase: (nameOrInput, options = {}) => {
     const input =
@@ -503,6 +577,7 @@ globalThis.workflow = Object.freeze({
     return __call("fabric.$phase", input);
   },
   item: (args) => __call("fabric.$item", args),
+  gate: (args) => __call("fabric.$gate", args),
   event: (args) => __call("fabric.$event", args),
   log: (...values) => print(...values),
   budget: Object.freeze({
@@ -517,6 +592,26 @@ globalThis.pipeline = __workflowPipeline;
 globalThis.phase = workflow.phase;
 globalThis.log = workflow.log;
 globalThis.budget = workflow.budget;
+const __consultAll = Promise.all.bind(Promise);
+const __consultRun = async (args) => {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new TypeError("consult.run expects an options object");
+  }
+  const admitted = await __call("fabric.$consultAdmit", { request: args });
+  if (!admitted || admitted.kind !== "admitted") {
+    return __call("fabric.$consultReduce", { request: args, ticket: admitted.ticket });
+  }
+  const calls = [];
+  for (let index = 0; index < admitted.request.perspectives.length; index++) {
+    calls[index] = __call("fabric.$consultWorker", {
+      ticket: admitted.ticket,
+      perspectiveId: admitted.request.perspectives[index].id,
+    });
+  }
+  await __consultAll(calls);
+  return __call("fabric.$consultReduce", { ticket: admitted.ticket });
+};
+globalThis.consult = Object.freeze({ run: __consultRun });
 globalThis.rlm = Object.freeze({
   query: (args) => {
     if (args && args.runner && args.runner !== "pi") {

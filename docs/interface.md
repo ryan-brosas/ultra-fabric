@@ -49,7 +49,7 @@ Fabric owns a general-purpose, theme-aware activity surface for any agent setup:
   - The graph uses status-coloured node shapes, orthogonal connectors, animated traffic, an optional fixed-width selected-node inspector, and directional off-canvas summaries. Traffic follows the same structural branches through the source/target lowest common ancestor instead of drawing direct lines through unrelated subtrees. Large or deeply recursive graphs open around the attention-priority node. Moving between nodes retargets a damped spring camera instead of snapping the viewport; live/replay animation drives renders only while the dashboard is open. Narrow terminals retain the centred graph without the inspector.
   - Retained-run selection remains a lens rather than a separate topology. `[`/`]` changes the highlighted run and its phase context without hiding live actors or remote project participants. Route records remain selectable and aggregate repeated traffic by source, target, topic, and kind; the recent event feed is a bounded live window, not an audit-history replacement.
   - **Inspection and control** are shared across views. Agent detail includes Markdown-rendered task/results, highlighted YAML values, model, current tool, usage, worktree, and attach metadata. Tool-call details show highlighted command/file/edit inputs and Markdown or YAML outputs; persisted bash calls retain their command text. Space peeks at an agent or actor transcript and `t` toggles summary/transcript detail. The initial bounded tail is paged directly from Pi RPC, Pi session, and Claude stream-JSON logs; `k`/Up at the loaded top fetches one older page, `g` loads and jumps to the true beginning, and `G` jumps to the growing tail and resumes follow mode. Assistant text uses native Markdown, while tool calls retain structured arguments/results for the same read/bash/search/edit/write previews used by the parent card. Credential/token redaction applies before rendering. Main and active one-shot agents can be steered or queued a follow-up; one-shot agents can also be safely stopped. Persistent actors accept `s` mailbox messages and expose model (`m`), thinking (`e`), the complete session-bound Pi host-event catalog (`v`), instructions (`i`), mailbox clearing (`c`), and export (`x`) where configured. Remote participants expose only advertised capabilities; control resolves their owner and reports success after acknowledgement. Global templates remain available from Activity for import (`p`), instruction editing (`i`), and deletion (`d`).
-- `/fabric settings` opens an inline settings view that mirrors Pi core's `/settings` (top and bottom borders, fuzzy search, section submenus) and writes changes to `fabric.json`. Trusted projects write to `<project>/.pi/fabric.json`; untrusted sessions write to the global `~/.pi/agent/fabric.json`. Full code mode, capture, executor, approvals, and UI changes apply immediately; mesh, agent, retention, and MCP changes persist and take effect on the next `/fabric reload`. The UI section includes a default-on **Nested tool calls** toggle and a global **Nested tool debounce** (`0`/Off through `1000ms`, default `100ms`); both apply immediately. The Agents section selects the default runner and keeps independent Pi and runtime-enumerated Claude model pickers. List editors for `agents.defaultTools` and `capture.keepVisible` toggle known tools on and off; `keepVisible` candidates include `fabric_exec` plus every captured extension tool.
+- `/fabric settings` opens an inline settings view that mirrors Pi core's `/settings` (top and bottom borders, fuzzy search, section submenus) and writes changes to `fabric.json`. Trusted projects write to `<project>/.pi/fabric.json`; untrusted sessions write to the global `~/.pi/agent/fabric.json`. Full code mode, capture, executor, approvals, Ultra Consult, and UI changes apply immediately; mesh, agent, retention, and MCP changes persist and take effect on the next `/fabric reload`. The UI section includes a default-on **Nested tool calls** toggle and a global **Nested tool debounce** (`0`/Off through `1000ms`, default `100ms`); both apply immediately. The Agents section selects the default runner and keeps independent Pi and runtime-enumerated Claude model pickers. List editors for `agents.defaultTools` and `capture.keepVisible` toggle known tools on and off; `keepVisible` candidates include `fabric_exec` plus every captured extension tool.
 
 ### Keybindings
 
@@ -90,6 +90,9 @@ async invoke(actionName, args, context) {
 
 ```text
 /fabric status
+/fabric health
+/fabric leases [--release <id...>|--release-all]
+/fabric outcomes
 /fabric dashboard
 /fabric settings
 /fabric reload
@@ -101,6 +104,12 @@ async invoke(actionName, args, context) {
 /fabric attach <agent-id>
 /fabric stop <actor-or-agent-id>
 ```
+
+`/fabric status` reports the active policy surface: mode, providers, runner, agent limits, prewalk triggers, admission and capability profiles, outcome recording, and Context QoS. `/fabric health` reports live runtime counters instead: actor quota rejections, dead letters, Context QoS passes, outcome totals, and active write leases.
+
+`/fabric leases` lists active file and tree write leases with their owning run and remaining TTL. Because an active foreign lease rejects `pi.edit`/`pi.write` before mutation, `--release <id...>` and `--release-all` are operator escape hatches that clear leases regardless of owner; `--release-all` also rebuilds unreadable lease state so a corrupt record cannot permanently block writes.
+
+`/fabric outcomes` prints the sample-gated model report: candidates ranked by verified-rate lower bound with Wilson confidence intervals, success rate, samples, mean duration, mean cost, and any deterministic or judge score. Candidates below `outcomes.minRecommendationSamples` are listed as pending. The report is advisory and never rewrites configured model defaults.
 
 Actor slash commands mirror the [global template API](agents.md#global-actor-templates): `/fabric global` lists templates, `/fabric import <name> [as <new>]` stamps one into the project, and `/fabric export <id> [--overwrite]` promotes a project actor. `/fabric log <id>` previews an actor or run transcript; `/fabric export-log <id> [path]` writes the raw `session.jsonl` plus retained `runs/` to disk.
 

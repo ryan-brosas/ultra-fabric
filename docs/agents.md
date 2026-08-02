@@ -11,6 +11,8 @@ Available helpers:
 - `workflow.agent(prompt, options)` or `agent(...)` — one worker. Set `label` on every call.
 - `workflow.parallel(thunks, { concurrency })` or `parallel(...)` — fan-out. Pass functions, not promises.
 - `workflow.pipeline(items, ...stages)` or `pipeline(...)` — per-item sequential stages with cross-item concurrency.
+- `workflow.context()` — reads the safe run/trace/span envelope and current agent/token reservation snapshot; the raw objective is never exposed.
+- `workflow.gate({ gate, passed, disposition, evidence, reason?, error? })` — records ordered verification evidence. Failed `advise` gates continue, `revise` gates must be resolved by a later passing result for the same gate, and `abort` or crashed gates fail the run.
 - `workflow.configure({ name, description })` — names the activity surface.
 - `workflow.phase(name, { id?, description?, total? })` or `phase(...)` — progress groups.
 - `workflow.item(...)` — non-agent work items whose status changes over time.
@@ -18,7 +20,44 @@ Available helpers:
 - `workflow.log(...)` — compact progress notes.
 - `workflow.budget` — token-budget observations.
 
-`fabric_exec` accepts optional `agentBudget` and `tokenBudget` limits; configuration supplies a hard per-execution agent cap. A JSON Schema on an agent request makes the worker return validated structured data through `result.value`; workflow helpers return that value directly and otherwise return the agent's final text. See [`/skill:fabric-workflow`](../skills/fabric-workflow/SKILL.md) for the full pattern.
+Agent calls may provide `requirements` and an ordered `fallbackModels` list. Fabric evaluates Pi registry capability and authentication before launch. Capability-preserving fallbacks are automatic; quality downgrade requires host `agents.allowQualityDowngrade`. The returned handle/result includes `route` with the requested and selected model, reason, quality classification, and considered candidates.
+
+Host policy can require `admission: { reason, expectedArtifact }` before one-shot runs, spawns, or handoffs. Bounded reasons distinguish independent context, separable parallel work, capability gaps, long-running work, and independent verification. `profile` selects a host `agents.capabilityProfiles` entry whose tools and recursive risk grants cannot be elevated by the request.
+
+`fabric_exec` accepts optional `agentBudget` and `tokenBudget` limits. The host reserves agent slots and finite tokens before provider invocation, injects the reservation as the child `maxTokens` ceiling, rejects concurrent over-admission, and reclaims unused tokens after blocking runs settle. Detached spawn and handoff conservatively commit their full reservation. Cost remains append-only because Fabric has no trustworthy pre-run cost ceiling. A JSON Schema on an agent request makes the worker return validated structured data through `result.value`; workflow helpers return that value directly and otherwise return the agent's final text. See [`/skill:fabric-workflow`](../skills/fabric-workflow/SKILL.md) for the full pattern.
+
+## Ultra Consult
+
+Ultra Consult is the bounded context-engineering path between doing everything in Main and invoking a full workflow skill. Main can call `consult.run()` directly inside its ordinary `fabric_exec` program. The host begins with zero workers, admits at most one Consult attempt per parent execution, and launches no more than three fresh workers.
+
+Use it only when a named result can change a named decision:
+
+- **Partition** assigns non-overlapping path scopes to two or three workers. It is appropriate for broad context that can be split without sharing Main's hidden reasoning.
+- **Challenge** gives one worker a concrete proposal and asks only for material evidence-backed objections. No issue is a successful silent result.
+- **Compare** uses non-overlapping evidence scopes or distinct model identities. The reducer preserves disagreement and never asks another model to invent a consensus.
+
+```ts
+return consult.run({
+  objective: "Review the authentication boundary",
+  decision: "Ship the refresh-token design or revise it",
+  mode: "partition",
+  admission: {
+    justification: "context_capacity",
+    independence: "Token rotation and session invalidation are separate modules",
+    couldChange: "The ship decision and revision owner",
+  },
+  perspectives: [
+    { id: "tokens", question: "Inspect rotation", scope: ["src/auth/tokens"] },
+    { id: "sessions", question: "Inspect invalidation", scope: ["src/auth/sessions"] },
+  ],
+});
+```
+
+Workers always use fresh Pi sessions, `recursive: false`, discovered extensions off, and only `read`, `grep`, `find`, and `ls`. Fabric loads one explicit host scope guard that realpath-checks every tool path against the checkout and perspective before the tool executes. The request cannot add shell, network, write tools, or another delegation layer. Every non-silent finding must also resolve to an existing regular file inside the checkout and its perspective scope, with a valid optional line range. Absolute paths, traversal, missing files, out-of-project symlinks, invalid lines, and unsupported claims are rejected.
+
+The reducer returns `success`, `partial`, `inconclusive`, a terminal failure status, or `not_admitted`, plus explicit coverage. It computes consensus only when every requested perspective is accepted and all recommendations are normalized-equal; otherwise it returns ordered disagreements. A declined request is not retried or converted into manual fan-out. Outcome records retain only mode/status, coverage, context ratio, unique evidence count, and aggregate worker tokens/cost. Worker prompts and prose are not persisted.
+
+Configure the admission threshold and ceilings under `/fabric settings` → **Ultra Consult** or the `consult` block in [`fabric.json`](configuration.md).
 
 ## Agents
 
@@ -76,6 +115,7 @@ Inside the guest, `agents.handoff()` resolves to `{ scheduled: true, status: "de
 /fabric prewalk
 /fabric prewalk Implement the token guard and run its tests
 /fabric prewalk --status
+/fabric prewalk --retry
 /fabric prewalk --off
 ```
 
@@ -88,11 +128,13 @@ The default `prewalk.mode` is `"in-place"`:
 3. It queues a hidden follow-up telling Main to continue the existing task, finish remaining implementation, check matching call sites, and run verification.
 4. The terminating outer tool suppresses an automatic turn on the old model; Pi drains the queued follow-up and continues the same Main session on the executor model.
 
-In-place mode does not spawn a child, does not fork the transcript, and does not require `agents.enabled`. Pi's public extension model switch currently records the model in the session and updates Pi's default model setting; the executor therefore remains selected after prewalk. Switching can fail before continuation if the model is unavailable or unauthenticated, in which case the outer result clearly reports the failure and Main remains idle.
+In-place mode does not spawn a child, does not fork the transcript, and does not require `agents.enabled`. Pi's public extension model switch records the model in the session and updates Pi's default model setting. By default the executor remains selected; set `prewalk.returnPolicy` to `"previous"` to snapshot Main's boundary model and restore it after the owned continuation settles. Switching can fail before continuation if the model is unavailable or unauthenticated. In-place mode may try the finite ordered `prewalk.fallbackModels` chain before blocking; it never retries a trajectory child automatically because partial workspace effects cannot be ruled out. The outer result reports the failure and Prewalk enters a blocked state that retains the task, model, and attempt instead of erasing intent. Inspect it with `/fabric prewalk --status`; after fixing authentication or availability, `/fabric prewalk --retry` re-arms and resubmits the preserved task.
 
-Set `prewalk.mode` to `"trajectory"` to opt into the child-based behavior. Fabric forks the exact finalized outer call/result into a Pi child, starts the selected executor in the shared workspace, and waits. When the child finishes, Fabric replaces the boundary result with the executor's report and queues a hidden continuation: Main verifies the implementation with the relevant checks and summarizes instead of going idle, redoing nothing the executor completed. The executor's reasoning effort comes from `prewalk.thinking`, inheriting `agents.thinking` when unset. The parent Fabric card and activity UI show the synthetic `agents.handoff` call, child identity, live status/current tool, nested preview, metrics, and terminal result, so the wait is not silent. Trajectory mode requires enabled agents and remains the behavior of explicit `agents.handoff()`.
+Set `prewalk.mode` to `"trajectory"` to opt into the child-based behavior. Fabric forks the exact finalized outer call/result into a Pi child, starts the selected executor in the shared workspace, and waits. When the child finishes, Fabric replaces the boundary result with the executor's report and queues a hidden continuation: Main verifies the implementation with the relevant checks and summarizes instead of going idle, redoing nothing the executor completed. The executor's reasoning effort comes from `prewalk.thinking`, inheriting `agents.thinking` when unset. The parent Fabric card and activity UI show the synthetic `agents.handoff` call, child identity, live status/current tool, nested preview, metrics, and terminal result, so the wait is not silent. Trajectory mode requires enabled agents and remains the behavior of explicit `agents.handoff()`. A failed trajectory result enters the same blocked state and can be resumed explicitly with `/fabric prewalk --retry`.
 
-Prewalk adds no system-prompt instructions. Its hidden continuation is queued only after a matching mutation boundary; it is not an open-ended per-turn nudge. If a captured task settles without a monitored trigger, prewalk disarms instead of leaking into the next task. An explicit successful `agents.handoff()` takes precedence over automatic prewalk. Both modes require full code mode and are unavailable in Schema enforce mode.
+For a host-enforced verification loop, set `prewalk.verificationMode` to `"gated"`. The hidden verify turn must run checks and report `workflow.gate()`; passing evidence settles, `revise` creates one scoped executor handoff, and missing/aborted/crashed evidence blocks at the configured `maxPhaseRevisions` cap. Omit the field for legacy prompt-only verification.
+
+Prewalk adds no system-prompt instructions. Each hidden continuation carries the handoff's generated identity. The context hook retains only the continuation owned by the current pending/continuing lifecycle and removes stale or legacy Prewalk continuation messages before provider calls. Successful handoffs remain `continuation_pending` until that exact message is accepted, then settle only after Pi reports no follow-up work remains; **Always re-arm** activates after settlement rather than during the same task. If a captured task settles without a monitored trigger, prewalk disarms instead of leaking into the next task. Failed handoffs remain blocked and never retry automatically; retry is an explicit user action. An explicit successful `agents.handoff()` takes precedence over automatic prewalk. Both modes require full code mode and are unavailable in Schema enforce mode.
 
 ### Claude Code runner
 
@@ -145,9 +187,13 @@ LocalTerm already exposes the needed tmux-parity primitives: detached creation, 
 localterm start
 ```
 
-Use `/fabric agents` to list children and `/fabric attach <id>` to display the appropriate attach command. Abort signals propagate to the transport and selected child process. When a program uses orchestration entry points (`agent`/`workflow.agent`, `agents.run`/`agents.wait`/`agents.ask`, `council.run`, `rlm.query`)—including `agents.*` refs invoked through `tools.call()` and refs computed at runtime—Fabric raises the whole-program `executor.timeoutMs` to at least `agents.timeoutMs`, so the parent deadline cannot stop children that are still within their own per-agent budget.
+Use `/fabric agents` to list children and `/fabric attach <id>` to display the appropriate attach command. Abort signals propagate to the transport and selected child process. When a program uses orchestration entry points (`agent`/`workflow.agent`, `agents.run`/`agents.wait`/`agents.ask`, `council.run`, `rlm.query`, `consult.run`)—including `agents.*` refs invoked through `tools.call()` and refs computed at runtime—Fabric raises the whole-program `executor.timeoutMs` to at least `agents.timeoutMs`, so the parent deadline cannot stop children that are still within their own per-agent budget.
 
 Set `worktree: true` to create a dedicated Git worktree and `pi-fabric/<name>-<id>` branch. Worktrees are retained for inspection until `agents.cleanup()` is called. Fabric passes the absolute project and mesh roots into every Pi child, so a recursive child in a worktree remains in the same participant directory instead of creating a second `.pi/fabric/mesh` under that worktree.
+
+## Shared-workspace write leases
+
+`leases.acquire({ paths, ttlMs })` atomically owns file/tree paths for the current run; `leases.release({ ids })` releases only leases owned by that run and `leases.list()` shows active project leases. An overlapping foreign lease rejects nested `pi.edit`/`pi.write` before mutation. No lease preserves compatibility behavior. Bash is intentionally opaque, so use worktrees when shell commands can write.
 
 ## Unified participants and steering
 
@@ -303,6 +349,8 @@ Two response modes are available:
 
 Delivery can remain in `mailbox` or enter the main session as `steer`, `followUp`, or `nextTurn`. `steer` and `followUp` require an explicit `triggerTurn: true | false`: `true` starts Main when it is idle, while `false` is passive and is visibly labeled as not starting Main. `mailbox` and `nextTurn` never start Main and reject `triggerTurn: true`. This explicit policy prevents a delivered actor message from looking like a stalled continuation. Fabric no longer imposes an additional 8,000-character truncation on local actor or agent messages to Main; normal model-context, provider, and cross-mesh event-size limits still apply.
 
+Every completed actor output includes a durable `deliveryReceipt` with independent mesh and Main status, attempt count, timestamp, and error. Accepted queued and in-flight activations are written to the actor's atomic `inbox.json` before acknowledgement and replay at least once under the same activation ID after restart or ownership transfer. Configured one-for-one actor run retry applies only to startup failures with zero turns, tool calls, and token usage; `runAttempts` exposes the outcome, while effectful failures remain terminal. Mesh output publication uses the outbox message ID as an idempotency key. Main delivery retries with configured exponential backoff and jitter; repeated terminal failures open a persisted circuit, suppress delivery during cooldown, and permit one half-open probe. Full inboxes follow the configured reject, source-coalesce, drop-oldest, or dead-letter policy, with explicit terminal records for displaced activation IDs. Use `agents.retryDelivery({ id, messageId })` to retry a still-failed channel explicitly; three failed total attempts dead-letter it.
+
 The actor cannot escalate delivery in its own response, but the owner can update a live actor or global template without losing history:
 
 ```ts
@@ -313,7 +361,9 @@ await agents.setDeliveryPolicy({
 });
 ```
 
-Pass `scope: "global"` to update a reusable template. In the dashboard, press `y` on an actor or template to choose among mailbox, passive/active steer, passive/active follow-up, and next-turn delivery. Use `agents.setModel({ id, model? })` and `agents.setThinking({ id, thinking? })` to migrate a persistent actor for its next activation without replacing its Pi/Claude runner session; omit the override to return to configured defaults. Use `agents.ask()` for a blocking exchange, `agents.tell()` for fire-and-forget mail, `agents.messages()` for history, and `agents.remove()` for cleanup.
+Pass `scope: "global"` to update a reusable template. In the dashboard, press `y` on an actor or template to choose among mailbox, passive/active steer, passive/active follow-up, and next-turn delivery. Use `agents.setModel({ id, model? })` and `agents.setThinking({ id, thinking? })` to migrate a persistent actor for its next activation without replacing its Pi/Claude runner session; omit the override to return to configured defaults. Actor creation accepts `budget: { lifetimeActivations?, windowActivations?, windowMs? }`. Admission is checked centrally for direct messages, host events, and mesh topics; counters survive restart and `agents.actorTelemetry()` reports aggregate activations, observed tokens, and quota rejections. Zero or omission means unlimited.
+
+Use `agents.ask()` for a blocking exchange, `agents.tell()` for fire-and-forget mail, `agents.messages()` for history, and `agents.remove()` for cleanup. Direct ask/tell activations participate in the enclosing run's agent/token reservations and inherit its trace parent; finite reservations inject a per-activation `maxTokens` ceiling.
 
 ## Paged agent logs
 
@@ -363,6 +413,10 @@ return agents.setDeliveryPolicy({
 ```
 
 `agents.setInstructions` also edits a live project actor (`scope: "project"`, the default); the new instruction takes effect on the actor's next queued message. History never crosses the project⇄global boundary — import and export move only the definition. Slash commands mirror the API: `/fabric global` lists templates, `/fabric import <name> [as <new>]` stamps one into the project, and `/fabric export <id> [--overwrite]` promotes a project actor. The dashboard lists global templates alongside live actors and lets you import, export, delete, edit instructions, and change delivery policy without writing code. Legacy persisted actors/templates still load as passive, but new active delivery definitions must state `triggerTurn` explicitly.
+
+## Outcomes and evaluation
+
+When enabled, terminal Fabric executions and ambient actor activations append bounded derived metrics without prompts, result bodies, media, gate reasons, or judge prose. `outcomes.list/status` reads them. `outcomes.evaluate` appends exact, contains, or numeric fixture verdicts. `outcomes.judge` stores only an external model score/verdict. `outcomes.recommend` withholds candidates below `outcomes.minRecommendationSamples`, reports quality/cost/latency plus Wilson confidence bounds, and never changes model defaults automatically.
 
 ## Councils
 

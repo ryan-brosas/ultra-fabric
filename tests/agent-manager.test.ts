@@ -450,6 +450,7 @@ describe("AgentManager", () => {
       runRoot: root,
       fullCodeMode: true,
       mainAgentId: "session:root-main",
+      consultScopeExtensionPath: "/fabric/consult-scope-guard.ts",
     });
     managers.push(manager);
     type ObservedResult = AgentRunResult & {
@@ -457,6 +458,8 @@ describe("AgentManager", () => {
       tools?: string[];
       extensions?: string;
       mainAgentId?: string;
+      consultReadScope?: string[];
+      consultScopeExtensionPath?: string;
     };
 
     const direct = (await manager.run({
@@ -469,6 +472,17 @@ describe("AgentManager", () => {
     expect(direct.extensions).toBe("true");
     expect(direct.mainAgentId).toBe("session:root-main");
 
+    const scoped = (await manager.run({
+      task: "Inspect one Consult scope",
+      transport: "process",
+      tools: ["read", "grep", "find", "ls"],
+      extensions: false,
+      consultReadScope: ["src/auth"],
+    })) as ObservedResult;
+    expect(scoped.extensions).toBe("false");
+    expect(scoped.consultReadScope).toEqual(["src/auth"]);
+    expect(scoped.consultScopeExtensionPath).toBe("/fabric/consult-scope-guard.ts");
+
     const recursive = (await manager.run({
       task: "Delegate recursively",
       transport: "process",
@@ -478,6 +492,42 @@ describe("AgentManager", () => {
     expect(recursive.fullCodeMode).toBe("true");
     expect(recursive.tools).toEqual(["read", "fabric_exec"]);
     expect(recursive.mainAgentId).toBe("session:root-main");
+  });
+
+  it("loads only the Consult scope guard into a real Pi worker", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-consult-worker-"));
+    roots.push(root);
+    fs.mkdirSync(path.join(root, "src", "auth"), { recursive: true });
+    const fakePi = path.resolve("tests/fixtures/fake-pi-rpc.mjs");
+    const scopeGuard = path.resolve("src/consult/scope-guard-extension.ts");
+    fs.chmodSync(fakePi, 0o755);
+    const manager = new AgentManager(root, DEFAULT_FABRIC_CONFIG.agents, {
+      workerPath: path.resolve("src/worker.ts"),
+      piBinary: fakePi,
+      runRoot: path.join(root, "runs"),
+      projectRoot: root,
+      consultScopeExtensionPath: scopeGuard,
+    });
+    managers.push(manager);
+
+    const result = await manager.run({
+      task: "REPORT_CONSULT_SCOPE",
+      transport: "process",
+      runner: "pi",
+      tools: ["read", "grep", "find", "ls"],
+      extensions: false,
+      recursive: false,
+      consultReadScope: ["src/auth"],
+    });
+    const reported = JSON.parse(result.text) as {
+      scope: { version: number; root: string; scopes: string[] };
+      args: string[];
+    };
+    expect(reported.scope).toEqual({ version: 1, root, scopes: ["src/auth"] });
+    expect(reported.args).toContain("--no-extensions");
+    const extensionIndex = reported.args.indexOf("-e");
+    expect(extensionIndex).toBeGreaterThan(-1);
+    expect(reported.args[extensionIndex + 1]).toBe(scopeGuard);
   });
 
   it("validates structured output through the real Fabric worker", async () => {
@@ -538,13 +588,31 @@ describe("AgentManager", () => {
       transport: "process",
       recursive: true,
       timeoutMs: 5_000,
-    });
+      runContext: {
+        version: 1,
+        runId: "parent-run",
+        traceId: "trace-root",
+        spanId: "parent-span",
+        objectiveDigest: "digest",
+        startedAt: 1,
+        deadline: 10_000,
+        cancellationOwner: "parent-run",
+      },
+    } as Parameters<AgentManager["run"]>[0] & { runContext: Record<string, unknown> });
 
     expect(result.status).toBe("completed");
     expect(JSON.parse(result.text)).toEqual({
       mainAgentId: "session:root-main",
       parentRun: result.id,
+      traceId: "trace-root",
+      parentSpanId: result.id,
       agentName: "recursive implementor",
+    });
+    expect(result).toMatchObject({
+      traceId: "trace-root",
+      spanId: result.id,
+      parentRunId: "parent-run",
+      parentSpanId: "parent-span",
     });
   });
 
@@ -847,6 +915,31 @@ describe("AgentManager", () => {
     } finally {
       clearOwnedBudgetEnv();
     }
+  });
+
+  it("honors a host-reserved per-request token ceiling", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-tokens-"));
+    roots.push(root);
+    const fakePi = path.resolve("tests/fixtures/fake-pi-rpc.mjs");
+    fs.chmodSync(fakePi, 0o755);
+    const manager = new AgentManager(process.cwd(), DEFAULT_FABRIC_CONFIG.agents, {
+      workerPath: path.resolve("src/worker.ts"),
+      piBinary: fakePi,
+      runRoot: root,
+      fullCodeMode: false,
+    });
+    managers.push(manager);
+
+    const result = await manager.run({
+      task: "burn reserved tokens",
+      transport: "process",
+      timeoutMs: 5_000,
+      maxTokens: 5,
+    } as Parameters<AgentManager["run"]>[0] & { maxTokens: number });
+
+    expect(result.status).toBe("timed_out");
+    expect(result.error ?? "").toMatch(/token limit/i);
+    expect(result.error ?? "").toMatch(/7 tokens/);
   });
 
   it("terminates a child that exceeds the per-child token limit", async () => {

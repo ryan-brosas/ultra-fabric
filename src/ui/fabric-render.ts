@@ -12,7 +12,7 @@ import { highlightCode, languageFromPath } from "./highlight.js";
 import { headlineArg } from "../core/call-preview.js";
 import { coreToolTitle, renderCoreToolBody } from "./core-tool-render.js";
 import { isFabricNestedToolPreview, type FabricTranscriptEntry } from "./transcript.js";
-import { fabricStringLiterals, fabricWriteBindings, type FabricWriteBinding } from "./fabric-code-parser.js";
+import { fabricStringLiterals, type FabricWriteBinding } from "./fabric-code-parser.js";
 export { fabricWriteBindings, type FabricWriteBinding } from "./fabric-code-parser.js";
 import {
   applyDiffBackground,

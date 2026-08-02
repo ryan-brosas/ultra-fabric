@@ -120,22 +120,6 @@ const plainCustom = (customType: string, data: unknown): SessionEntry => ({
   data,
 }) as SessionEntry;
 
-const bashExec = (command: string, exitCode: number | undefined, output: string): SessionMessageEntry => ({
-  type: "message",
-  id: nextId(),
-  parentId: null,
-  timestamp: iso(clock),
-  message: {
-    role: "bashExecution",
-    command,
-    output,
-    exitCode,
-    cancelled: false,
-    truncated: false,
-    timestamp: tick(),
-  } as SessionMessageEntry["message"],
-});
-
 const compactionEntry = (
   firstKeptEntryId: string,
   summary = "(prior)",
@@ -170,19 +154,36 @@ describe("compaction config", () => {
   it("defaults to the fabric engine and a 65% post-compaction target", () => {
     expect(DEFAULT_FABRIC_CONFIG.compaction.engine).toBe("fabric");
     expect(DEFAULT_FABRIC_CONFIG.compaction.targetContextRatio).toBe(0.65);
+    expect(DEFAULT_FABRIC_CONFIG.compaction.contextQos).toEqual({
+      enabled: true,
+      turnWindow: 2,
+      minResultChars: 4_000,
+    });
   });
 
   it("normalizes the engine escape hatch and bounded occupancy target", () => {
     const configured = normalizeFabricConfig({
       compaction: { engine: "pi", targetContextRatio: 0.7 },
     }).compaction;
-    expect(configured).toEqual({ engine: "pi", targetContextRatio: 0.7, thresholds: {} });
+    expect(configured).toMatchObject({ engine: "pi", targetContextRatio: 0.7, thresholds: {} });
     expect(normalizeFabricConfig({ compaction: { engine: "bogus", targetContextRatio: 2 } }).compaction)
-      .toEqual({ engine: "fabric", targetContextRatio: 0.85, thresholds: {} });
+      .toMatchObject({ engine: "fabric", targetContextRatio: 0.85, thresholds: {} });
     expect(normalizeFabricConfig({ compaction: { targetContextRatio: 0.1 } }).compaction.targetContextRatio)
       .toBe(0.25);
     expect(normalizeFabricConfig({ compaction: { targetContextRatio: "large" } }).compaction.targetContextRatio)
       .toBe(0.65);
+  });
+
+  it("normalizes deterministic context QoS bounds", () => {
+    expect(normalizeFabricConfig({
+      compaction: {
+        contextQos: { enabled: false, turnWindow: 0, minResultChars: 99_999_999 },
+      },
+    }).compaction.contextQos).toEqual({
+      enabled: false,
+      turnWindow: 1,
+      minResultChars: 1_000_000,
+    });
   });
 
   it("normalizes model-linked thresholds", () => {

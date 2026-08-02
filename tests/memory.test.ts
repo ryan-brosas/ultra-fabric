@@ -6,7 +6,6 @@ import {
   assistantText,
   assistantToolCall,
   bashExecution,
-  messageEntry,
   sessionHeader,
   toolResult,
   userMessage,
@@ -33,22 +32,7 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const buildSession = (cwd: string, id: string): { entries: FixtureEntry[]; push: (e: FixtureEntry) => void } => {
-  const entries: FixtureEntry[] = [sessionHeader(id, cwd)];
-  let parent: string | null = null;
-  let counter = 0;
-  const push = (entry: FixtureEntry) => {
-    entries.push(entry);
-    parent = entry.id;
-    void counter++;
-  };
-  void parent;
-  return { entries, push };
-};
-
 const ts = (n: number): string => new Date(1_700_000_000_000 + n * 1_000).toISOString();
-
-const sessionId = (file: string): string => file;
 
 const msg = (
   id: string,
@@ -77,11 +61,9 @@ const invocationContext = (cwd: string): FabricInvocationContext => ({
 
 describe("memory normalize", () => {
   let agentDir: string;
-  let indexDir: string;
 
   beforeEach(() => {
     agentDir = makeTempDir("agent");
-    indexDir = makeTempDir("index");
   });
 
   it("extracts typed entries from a session JSONL", () => {

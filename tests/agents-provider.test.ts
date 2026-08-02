@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActorManager } from "../src/actors/manager.js";
 import type { FabricActorRequest } from "../src/actors/types.js";
 import { GlobalActorRegistry } from "../src/actors/global-registry.js";
@@ -153,7 +153,7 @@ const setup = (
     undefined,
     lifecycle,
   );
-  return { root, actors, globalActors, provider, mainDeliveries };
+  return { root, actors, agents, globalActors, provider, mainDeliveries };
 };
 
 afterEach(async () => {
@@ -526,6 +526,36 @@ describe("AgentsProvider runner support", () => {
     expect(schema.properties).not.toHaveProperty("checkpoint");
   });
 
+  it("propagates the invocation trace into child records", async () => {
+    const { provider } = setup();
+    const tracedContext: FabricInvocationContext = {
+      ...context,
+      run: {
+        version: 1,
+        runId: "fabric-run",
+        traceId: "trace-root",
+        spanId: "fabric-span",
+        objectiveDigest: "digest",
+        startedAt: 1,
+        deadline: 10_000,
+        cancellationOwner: "fabric-run",
+      },
+    };
+
+    const result = await provider.invoke(
+      "run",
+      { task: "return a short result", name: "traced-agent", transport: "process" },
+      tracedContext,
+    );
+
+    expect(result).toMatchObject({
+      traceId: "trace-root",
+      spanId: expect.any(String),
+      parentRunId: "fabric-run",
+      parentSpanId: "fabric-span",
+    });
+  });
+
   it("attaches a structured child-tool preview to blocking agent runs", async () => {
     const { provider } = setup();
     const previews: unknown[] = [];
@@ -607,6 +637,220 @@ describe("AgentsProvider runner support", () => {
       status: "completed",
       owner: "agent",
     });
+  });
+
+  it("propagates direct actor activation lineage into the child run", async () => {
+    const { provider, agents } = setup();
+    const actor = await provider.invoke("create", createRequest, context) as { id: string };
+    const runSpy = vi.spyOn(agents, "run");
+    const tracedContext: FabricInvocationContext = {
+      ...context,
+      run: {
+        version: 1,
+        runId: "fabric-run",
+        traceId: "trace-root",
+        spanId: "fabric-span",
+        objectiveDigest: "digest",
+        startedAt: 1,
+        deadline: 10_000,
+        cancellationOwner: "fabric-run",
+      },
+    };
+
+    const message = await provider.invoke(
+      "ask",
+      { id: actor.id, message: "inspect", maxTokens: 20 },
+      tracedContext,
+    ) as { runId: string };
+
+    expect(runSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxTokens: 20,
+        runContext: expect.objectContaining({ runId: "fabric-run", traceId: "trace-root" }),
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(agents.status(message.runId)).toMatchObject({
+      traceId: "trace-root",
+      spanId: message.runId,
+      parentRunId: "fabric-run",
+      parentSpanId: "fabric-span",
+    });
+  });
+
+  it("preserves actor quotas and reports aggregate admission telemetry", async () => {
+    const { provider } = setup();
+    const actor = await provider.invoke(
+      "create",
+      {
+        ...createRequest,
+        name: "quota-provider",
+        budget: { lifetimeActivations: 1 },
+      },
+      context,
+    ) as { id: string };
+    await provider.invoke("ask", { id: actor.id, message: "first" }, context);
+    await expect(
+      provider.invoke("ask", { id: actor.id, message: "second" }, context),
+    ).rejects.toThrow("Actor admission lifetime budget exhausted");
+
+    await expect(provider.invoke("actorTelemetry", {}, context)).resolves.toMatchObject({
+      actors: 1,
+      open: 0,
+      lifetimeExhausted: 1,
+      windowExhausted: 0,
+      lifetimeActivations: 1,
+      rejectedActivations: 1,
+    });
+  });
+
+  it("propagates host-only Consult read scopes without exposing a request field", async () => {
+    const { provider } = setup();
+    const scopedContext: FabricInvocationContext = {
+      ...context,
+      consultReadScope: { scopes: ["src/auth"] },
+    };
+    await expect(provider.invoke("run", {
+      task: "inspect scoped auth",
+      runner: "pi",
+      tools: ["read", "grep", "find", "ls"],
+      extensions: false,
+      recursive: false,
+    }, scopedContext)).resolves.toMatchObject({
+      extensions: "false",
+      consultReadScope: ["src/auth"],
+    });
+    const descriptor = await provider.describe("run", context);
+    expect(descriptor?.inputSchema.properties).not.toHaveProperty("consultReadScope");
+  });
+
+  it("enforces configured admission intent and compiles a host capability profile", async () => {
+    const { provider, agents } = setup();
+    agents.config.requireAdmissionIntent = true;
+    agents.config.capabilityProfiles.inspect = {
+      tools: ["read", "grep"],
+      risks: ["read"],
+    };
+    try {
+      await expect(provider.invoke("run", { task: "inspect" }, context)).rejects.toThrow(
+        "requires an admission intent",
+      );
+      await expect(provider.invoke("run", {
+        task: "inspect",
+        profile: "inspect",
+        admission: {
+          reason: "independent_context",
+          expectedArtifact: "bounded findings",
+        },
+      }, context)).resolves.toMatchObject({
+        profile: "inspect",
+        tools: ["read", "grep"],
+        admission: {
+          reason: "independent_context",
+          expectedArtifact: "bounded findings",
+        },
+      });
+    } finally {
+      agents.config.requireAdmissionIntent = false;
+      delete agents.config.capabilityProfiles.inspect;
+    }
+  });
+
+  it("routes Pi agents by declared capability before launch", async () => {
+    const { provider } = setup();
+    const models = new Map([
+      ["p/text", {
+        provider: "p", id: "text", input: ["text"], reasoning: true,
+        contextWindow: 100_000, maxTokens: 16_000,
+        cost: { input: 3, output: 15 },
+      }],
+      ["p/vision", {
+        provider: "p", id: "vision", input: ["text", "image"], reasoning: true,
+        contextWindow: 100_000, maxTokens: 16_000,
+        cost: { input: 3, output: 15 },
+      }],
+    ]);
+    const routedContext: FabricInvocationContext = {
+      ...context,
+      extensionContext: {
+        modelRegistry: {
+          find: (provider: string, id: string) => models.get(`${provider}/${id}`),
+          getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
+        },
+      } as unknown as ExtensionContext,
+    };
+
+    const result = await provider.invoke(
+      "run",
+      {
+        task: "inspect image",
+        model: "p/text",
+        fallbackModels: ["p/vision"],
+        requirements: { input: ["text", "image"] },
+      },
+      routedContext,
+    );
+
+    expect(result).toMatchObject({
+      model: "p/vision",
+      route: {
+        version: 1,
+        requestedModel: "p/text",
+        selectedModel: "p/vision",
+        reason: "capability_mismatch",
+        quality: "preserved",
+      },
+    });
+  });
+
+  it("does not let a request elevate quality-downgrade policy", async () => {
+    const { provider, agents } = setup();
+    const models = new Map([
+      ["p/frontier", {
+        provider: "p", id: "frontier", input: ["text"], reasoning: true,
+        contextWindow: 200_000, maxTokens: 32_000,
+        cost: { input: 5, output: 20 },
+      }],
+      ["p/small", {
+        provider: "p", id: "small", input: ["text"], reasoning: true,
+        contextWindow: 100_000, maxTokens: 8_000,
+        cost: { input: 1, output: 4 },
+      }],
+    ]);
+    const routedContext: FabricInvocationContext = {
+      ...context,
+      extensionContext: {
+        modelRegistry: {
+          find: (provider: string, id: string) => models.get(`${provider}/${id}`),
+          getApiKeyAndHeaders: async (model: { id: string }) =>
+            model.id === "frontier"
+              ? { ok: false, error: "missing auth" }
+              : { ok: true, apiKey: "test" },
+        },
+      } as unknown as ExtensionContext,
+    };
+    const request = {
+      task: "fallback",
+      model: "p/frontier",
+      fallbackModels: ["p/small"],
+      allowQualityDowngrade: true,
+    };
+
+    await expect(provider.invoke("run", request, routedContext)).rejects.toThrow(
+      "quality_downgrade_blocked",
+    );
+    agents.config.allowQualityDowngrade = true;
+    try {
+      await expect(provider.invoke("run", request, routedContext)).resolves.toMatchObject({
+        model: "p/small",
+        route: {
+          quality: "downgraded",
+          downgradeReasons: ["smaller_context", "smaller_output"],
+        },
+      });
+    } finally {
+      agents.config.allowQualityDowngrade = false;
+    }
   });
 
   it("attaches the final preview for actors that settle before the first poll", async () => {
@@ -703,7 +947,7 @@ describe("AgentsProvider actor ownership privacy", () => {
     });
 
     await expect(provider.invoke("actors", {}, context)).resolves.toEqual([]);
-    for (const action of ["actorStatus", "messages", "export", "log"] as const) {
+    for (const action of ["actorStatus", "messages", "retryDelivery", "export", "log"] as const) {
       await expect(provider.invoke(action, { id: actor.id }, context)).rejects.toThrow(
         "private data is available only from its owner",
       );
@@ -854,6 +1098,27 @@ describe("AgentsProvider global actors", () => {
       "before_provider_request",
       "session_tree",
     ]);
+  });
+
+  it("routes explicit outbox redelivery through the local actor owner", async () => {
+    const { provider, actors } = setup();
+    const actor = (await provider.invoke("create", createRequest, context)) as { id: string };
+    const retry = vi.spyOn(actors, "retryDelivery").mockResolvedValue({
+      id: "message-1",
+      actorId: actor.id,
+      actorName: "reviewer",
+      direction: "out",
+      source: "direct",
+      createdAt: 1,
+    });
+
+    await provider.invoke(
+      "retryDelivery",
+      { id: actor.id, messageId: "message-1" },
+      context,
+    );
+
+    expect(retry).toHaveBeenCalledWith(actor.id, "message-1");
   });
 
   it("validates and updates delivery policies for project actors and global templates", async () => {

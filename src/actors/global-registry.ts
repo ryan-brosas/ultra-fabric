@@ -4,6 +4,7 @@ import path from "node:path";
 import type { FabricAgentTransport } from "../config.js";
 import { isFabricThinking, type FabricThinking } from "../thinking.js";
 import { resolveActorDeliveryPolicy } from "./delivery-policy.js";
+import { normalizeActorBudgetPolicy } from "./budget.js";
 import { FABRIC_ACTOR_HOST_EVENTS } from "./types.js";
 import type {
   FabricActorDelivery,
@@ -16,7 +17,6 @@ import type {
 const ACTOR_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9 _.-]{0,59}$/;
 const TOPIC_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/;
 const HOST_EVENTS: ReadonlySet<FabricActorHostEvent> = new Set(FABRIC_ACTOR_HOST_EVENTS);
-const DELIVERIES = new Set<FabricActorDelivery>(["mailbox", "steer", "followUp", "nextTurn"]);
 const RESPONSE_MODES = new Set<FabricActorResponseMode>(["text", "directive"]);
 const TRANSPORTS = new Set<FabricAgentTransport>([
   "auto",
@@ -166,6 +166,11 @@ export class GlobalActorRegistry {
         : existing.validWhile
           ? { validWhile: existing.validWhile }
           : {}),
+      ...(patch.budget !== undefined
+        ? { budget: patch.budget }
+        : existing.budget
+          ? { budget: existing.budget }
+          : {}),
     };
     const validated = this.#validate(merged);
     if (validated.name !== existing.name) {
@@ -220,6 +225,7 @@ export class GlobalActorRegistry {
       ...(def.timeoutMs ? { timeoutMs: def.timeoutMs } : {}),
       ...(typeof def.extensions === "boolean" ? { extensions: def.extensions } : {}),
       ...(def.validWhile ? { validWhile: clone(def.validWhile) } : {}),
+      ...(def.budget ? { budget: clone(def.budget) } : {}),
     };
     return request;
   }
@@ -267,6 +273,8 @@ export class GlobalActorRegistry {
       ? clone(def.validWhile)
       : undefined;
     if (def.validWhile && !validWhile) throw new Error("Invalid global actor validWhile predicate");
+    const budget = normalizeActorBudgetPolicy(def.budget);
+    const budgetConfigured = budget.lifetimeActivations > 0 || budget.windowActivations > 0;
     return {
       name,
       instructions,
@@ -284,6 +292,7 @@ export class GlobalActorRegistry {
       ...(timeoutMs ? { timeoutMs } : {}),
       ...(extensions !== undefined ? { extensions } : {}),
       ...(validWhile ? { validWhile } : {}),
+      ...(budgetConfigured ? { budget } : {}),
     };
   }
 
@@ -345,6 +354,8 @@ export class GlobalActorRegistry {
         record.validWhile.source.length <= 16_000
         ? clone(record.validWhile)
         : undefined;
+      const budget = normalizeActorBudgetPolicy(record.budget);
+      const budgetConfigured = budget.lifetimeActivations > 0 || budget.windowActivations > 0;
       const def: GlobalActorDefinition = {
         id: record.id,
         name: record.name,
@@ -365,6 +376,7 @@ export class GlobalActorRegistry {
         ...(timeoutMs ? { timeoutMs } : {}),
         ...(extensions !== undefined ? { extensions } : {}),
         ...(validWhile ? { validWhile } : {}),
+        ...(budgetConfigured ? { budget } : {}),
       };
       this.#actors.set(def.id, def);
     }

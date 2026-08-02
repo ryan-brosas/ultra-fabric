@@ -272,6 +272,12 @@ const main = async (): Promise<void> => {
   else piArguments.push("--no-session");
   if (!options.extensions) piArguments.push("--no-extensions");
   if (options.fabricExtensionPath) piArguments.push("-e", options.fabricExtensionPath);
+  if (options.consultReadScope !== undefined) {
+    if (options.runner !== "pi" || !options.consultScopeExtensionPath) {
+      throw new Error("Ultra Consult read scope requires a Pi guard extension");
+    }
+    piArguments.push("-e", options.consultScopeExtensionPath);
+  }
   if (options.tools.length > 0) piArguments.push("--tools", options.tools.join(","));
   else piArguments.push("--no-tools"); // explicit empty allowlist => no tools, not Pi defaults
   if (options.model) piArguments.push("--model", options.model);
@@ -308,6 +314,8 @@ const main = async (): Promise<void> => {
       PI_FABRIC_DEPTH: String(options.depth),
       PI_FABRIC_PARENT_RUN: options.id,
       PI_FABRIC_AGENT_NAME: options.name,
+      ...(options.traceId ? { PI_FABRIC_TRACE_ID: options.traceId } : {}),
+      ...(options.traceId ? { PI_FABRIC_PARENT_SPAN_ID: options.id } : {}),
       ...(options.mainAgentId ? { PI_FABRIC_MAIN_AGENT_ID: options.mainAgentId } : {}),
       PI_FABRIC_GRANTED_RISKS: options.grantedRisks.join(","),
       PI_FABRIC_FULL_CODE_MODE: String(options.fullCodeMode),
@@ -315,6 +323,15 @@ const main = async (): Promise<void> => {
       ...(options.actorName ? { PI_FABRIC_ACTOR_NAME: options.actorName } : {}),
       ...(options.meshRoot ? { PI_FABRIC_MESH_ROOT: options.meshRoot } : {}),
       ...(options.projectRoot ? { PI_FABRIC_PROJECT_ROOT: options.projectRoot } : {}),
+      ...(options.consultReadScope !== undefined
+        ? {
+            PI_FABRIC_CONSULT_SCOPE_V1: JSON.stringify({
+              version: 1,
+              root: options.projectRoot ?? options.cwd,
+              scopes: options.consultReadScope,
+            }),
+          }
+        : {}),
       ...(options.ownerHostId ? { PI_FABRIC_OWNER_HOST_ID: options.ownerHostId } : {}),
       ...(options.ownerIdentityId
         ? { PI_FABRIC_OWNER_IDENTITY_ID: options.ownerIdentityId }

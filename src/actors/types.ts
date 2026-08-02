@@ -1,6 +1,10 @@
 import type { ExtensionEvent } from "@earendil-works/pi-coding-agent";
 import type { FabricAgentRunner, FabricAgentTransport } from "../config.js";
 import type { FabricThinking } from "../thinking.js";
+import type {
+  FabricActorBudgetInput,
+  FabricActorBudgetSnapshot,
+} from "./budget.js";
 import type { FabricLogLine, AgentRunRecord, AgentUsage } from "../agents/types.js";
 
 export type FabricActorPiHostEvent = Exclude<ExtensionEvent["type"], "project_trust">;
@@ -61,6 +65,14 @@ export const isFabricActorHostEvent = (value: unknown): value is FabricActorHost
 export type FabricActorDelivery = "mailbox" | "steer" | "followUp" | "nextTurn";
 export type FabricActorResponseMode = "text" | "directive";
 export type FabricActorStatus = "idle" | "queued" | "running" | "stopped";
+type FabricActorCircuitState = "closed" | "open" | "half_open";
+
+export interface FabricActorDeliveryCircuit {
+  state: FabricActorCircuitState;
+  failures: number;
+  openedAt?: number;
+  retryAt?: number;
+}
 
 export interface FabricActorValidWhileSource {
   version: 1;
@@ -141,6 +153,8 @@ export interface FabricActorRequest {
   extensions?: boolean;
   /** Serialized guest predicate evaluated before work and before delivery. */
   validWhile?: FabricActorValidWhileSource;
+  /** Host-owned activation quotas. Zero or omission means unlimited. */
+  budget?: FabricActorBudgetInput;
 }
 
 export interface FabricActorInfo {
@@ -159,12 +173,14 @@ export interface FabricActorInfo {
   tools?: string[];
   extensions?: boolean;
   validWhile?: FabricActorValidWhileSource;
+  budget?: FabricActorBudgetSnapshot;
   queued: number;
   messages: number;
   createdAt: number;
   updatedAt: number;
   lastRunId?: string;
   lastError?: string;
+  deliveryCircuit?: FabricActorDeliveryCircuit;
   sessionFile?: string;
   logDir?: string;
 }
@@ -188,6 +204,28 @@ export interface FabricActorLog {
   retainedRuns: string[];
 }
 
+interface FabricActorDeliveryReceipt {
+  mesh: {
+    status: "published" | "failed" | "dead_lettered";
+    attempts: number;
+    at: number;
+    error?: string;
+  };
+  main: {
+    status:
+      | "mailbox"
+      | "not_requested"
+      | "delivered"
+      | "failed"
+      | "dead_lettered"
+      | "circuit_open";
+    mode: FabricActorDelivery;
+    attempts: number;
+    at: number;
+    error?: string;
+  };
+}
+
 export interface FabricActorMessage {
   id: string;
   actorId: string;
@@ -199,10 +237,14 @@ export interface FabricActorMessage {
   data?: unknown;
   action?: "silent" | "message" | "stop";
   runId?: string;
+  runAttempts?: number;
   usage?: AgentUsage;
   error?: string;
   stale?: boolean;
+  rejected?: boolean;
+  deadLettered?: boolean;
   reason?: string;
+  deliveryReceipt?: FabricActorDeliveryReceipt;
 }
 
 export interface FabricActorDirective {

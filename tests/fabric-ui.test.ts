@@ -351,6 +351,41 @@ describe("Fabric dynamic UI", () => {
     }
   });
 
+  it("shows outcome and QoS health in the activity overview", () => {
+    const current = snapshot();
+    current.observability = {
+      contextQos: { passes: 8, retiredResults: 4, retiredChars: 20_000, protectedResults: 6 },
+      actorBudgets: {
+        actors: 1,
+        open: 1,
+        lifetimeExhausted: 0,
+        windowExhausted: 0,
+        lifetimeActivations: 2,
+        lifetimeTokens: 30,
+        rejectedActivations: 2,
+        queueRejected: 1,
+        activationDeadLetters: 1,
+        deliveryDeadLetters: 0,
+      },
+      outcomes: { records: 5, succeeded: 4, verified: 3, downgraded: 1, evaluated: 2 },
+      workflows: 1,
+      pathLeases: 2,
+    };
+    const dashboard = new FabricDashboard(
+      { requestRender: vi.fn() } as unknown as TUI,
+      theme,
+      () => current,
+      vi.fn(),
+    );
+    try {
+      expect(dashboard.render(140).join("\n")).toContain(
+        "health 3/5 verified · 2 quota rejects · 4 retired · 2 write leases",
+      );
+    } finally {
+      dashboard.dispose();
+    }
+  });
+
   it("keeps dashboard and widget agents in creation order", () => {
     const current = snapshot();
     current.actors = [];

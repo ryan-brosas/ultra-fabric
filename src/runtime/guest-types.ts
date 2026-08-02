@@ -12,7 +12,36 @@ interface FabricAction {
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
   risk: "read" | "write" | "execute" | "network" | "agent";
+  effect?: "none" | "workspace" | "state" | "external";
   namespace?: string;
+}
+interface FabricAgentAdmissionIntent {
+  reason: "independent_context" | "separable_parallel" | "capability_gap" | "long_running" | "independent_verification";
+  expectedArtifact: string;
+}
+interface FabricModelRequirements {
+  input?: Array<"text" | "image">;
+  reasoning?: boolean;
+  minContextWindow?: number;
+  minOutputTokens?: number;
+  maxInputCost?: number;
+  maxOutputCost?: number;
+}
+interface FabricModelRouteDecision {
+  version: 1;
+  requestedModel: string;
+  selectedModel: string;
+  kind: "primary" | "fallback";
+  reason: "primary" | "primary_unavailable" | "primary_unauthenticated" | "capability_mismatch";
+  quality: "preserved" | "downgraded";
+  downgradeReasons: string[];
+  requirements: FabricModelRequirements;
+  considered: Array<{
+    model: string;
+    eligible: boolean;
+    selected?: boolean;
+    reasons: string[];
+  }>;
 }
 interface FabricAgentRequest {
   task: string;
@@ -20,9 +49,15 @@ interface FabricAgentRequest {
   runner?: FabricAgentRunner;
   transport?: FabricTransport;
   model?: string;
+  profile?: string;
+  admission?: FabricAgentAdmissionIntent;
+  fallbackModels?: string[];
+  requirements?: FabricModelRequirements;
+  allowQualityDowngrade?: boolean;
   thinking?: FabricThinking;
   tools?: string[];
   timeoutMs?: number;
+  maxTokens?: number;
   extensions?: boolean;
   recursive?: boolean;
   worktree?: boolean;
@@ -38,6 +73,11 @@ interface FabricHandoffFacts {
 type FabricHandoffPredicate = (facts: Readonly<FabricHandoffFacts>) => boolean;
 interface FabricHandoffRequest {
   model: string;
+  profile?: string;
+  admission?: FabricAgentAdmissionIntent;
+  fallbackModels?: string[];
+  requirements?: FabricModelRequirements;
+  allowQualityDowngrade?: boolean;
   task?: string;
   when?: FabricHandoffPredicate;
   name?: string;
@@ -45,6 +85,7 @@ interface FabricHandoffRequest {
   thinking?: FabricThinking;
   tools?: string[];
   timeoutMs?: number;
+  maxTokens?: number;
   extensions?: boolean;
   recursive?: boolean;
   schema?: Record<string, unknown>;
@@ -179,9 +220,16 @@ interface FabricAgentHandle {
   transport: FabricTransport;
   cwd: string;
   model?: string;
+  route?: FabricModelRouteDecision;
+  profile?: string;
+  admission?: FabricAgentAdmissionIntent;
   thinking?: FabricThinking;
   actorId?: string;
   actorName?: string;
+  traceId?: string;
+  spanId?: string;
+  parentRunId?: string;
+  parentSpanId?: string;
   sessionId?: string;
   runnerSessionId?: string;
   attachCommand?: string;
@@ -267,6 +315,7 @@ interface FabricCapabilityActionHead {
   description: string;
   descriptorHash: string;
   risk: "read" | "write" | "execute" | "network" | "agent";
+  effect?: "none" | "workspace" | "state" | "external";
   namespace?: string;
 }
 interface FabricCapabilityProviderHead {
@@ -409,6 +458,11 @@ interface FabricActorRequestBase {
   timeoutMs?: number;
   extensions?: boolean;
   validWhile?: FabricActorValidWhile;
+  budget?: {
+    lifetimeActivations?: number;
+    windowActivations?: number;
+    windowMs?: number;
+  };
 }
 type FabricActorRequest = FabricActorRequestBase & (
   | { delivery?: "mailbox"; triggerTurn?: false }
@@ -431,12 +485,32 @@ interface FabricActorInfo {
   tools?: string[];
   extensions?: boolean;
   validWhile?: { version: 1; source: string };
+  budget?: {
+    policy: { lifetimeActivations: number; windowActivations: number; windowMs: number };
+    usage: {
+      lifetimeActivations: number;
+      lifetimeTokens: number;
+      windowStartedAt: number;
+      windowActivations: number;
+      windowTokens: number;
+      rejectedActivations: number;
+      lastRejectedAt?: number;
+      lastRejection?: "lifetime_exhausted" | "window_exhausted";
+    };
+    admission: "open" | "lifetime_exhausted" | "window_exhausted";
+  };
   queued: number;
   messages: number;
   createdAt: number;
   updatedAt: number;
   lastRunId?: string;
   lastError?: string;
+  deliveryCircuit?: {
+    state: "closed" | "open" | "half_open";
+    failures: number;
+    openedAt?: number;
+    retryAt?: number;
+  };
   sessionFile?: string;
   logDir?: string;
 }
@@ -451,9 +525,27 @@ interface FabricActorMessage {
   data?: unknown;
   action?: "silent" | "message" | "stop";
   runId?: string;
+  runAttempts?: number;
   error?: string;
   stale?: boolean;
+  rejected?: boolean;
+  deadLettered?: boolean;
   reason?: string;
+  deliveryReceipt?: {
+    mesh: {
+      status: "published" | "failed" | "dead_lettered";
+      attempts: number;
+      at: number;
+      error?: string;
+    };
+    main: {
+      status: "mailbox" | "not_requested" | "delivered" | "failed" | "dead_lettered" | "circuit_open";
+      mode: FabricActorDelivery;
+      attempts: number;
+      at: number;
+      error?: string;
+    };
+  };
 }
 interface FabricAgentsApi {
   run(args: FabricAgentRequest): Promise<FabricAgentResult>;
@@ -495,15 +587,28 @@ interface FabricAgentsApi {
     instructions: string;
     scope?: "project" | "global";
   }): Promise<FabricActorInfo>;
-  ask(args: { id: string; message: string; data?: unknown }): Promise<FabricActorMessage>;
-  tell(args: { id: string; message: string; data?: unknown }): Promise<{ queued: true; messageId: string }>;
+  ask(args: { id: string; message: string; data?: unknown; maxTokens?: number }): Promise<FabricActorMessage>;
+  tell(args: { id: string; message: string; data?: unknown; maxTokens?: number }): Promise<{ queued: true; messageId: string }>;
   steer(args: { id: string; message: string; data?: unknown }): Promise<{ queued: true; messageId: string; routed?: "local" | "main" | "mesh"; acknowledged?: boolean }>;
   followUp(args: { id: string; message: string; data?: unknown }): Promise<{ queued: true; messageId: string; routed?: "local" | "main" | "mesh"; acknowledged?: boolean }>;
   setSteeringMode(args: { id: string; mode: "all" | "one-at-a-time" }): Promise<{ queued: true; messageId: string }>;
   setFollowUpMode(args: { id: string; mode: "all" | "one-at-a-time" }): Promise<{ queued: true; messageId: string }>;
   actorStatus(args: { id: string }): Promise<FabricActorInfo>;
   actors(): Promise<FabricActorInfo[]>;
+  actorTelemetry(): Promise<{
+    actors: number;
+    open: number;
+    lifetimeExhausted: number;
+    windowExhausted: number;
+    lifetimeActivations: number;
+    lifetimeTokens: number;
+    rejectedActivations: number;
+    queueRejected: number;
+    activationDeadLetters: number;
+    deliveryDeadLetters: number;
+  }>;
   messages(args: { id: string; limit?: number }): Promise<FabricActorMessage[]>;
+  retryDelivery(args: { id: string; messageId: string }): Promise<FabricActorMessage>;
   remove(args: { id: string }): Promise<{ removed: boolean }>;
   log(args: {
     id: string;
@@ -554,6 +659,90 @@ interface FabricCouncilRunOptions {
 interface FabricCouncilApi {
   run(args: FabricCouncilRunOptions & { synthesize?: true }): Promise<FabricAgentResult>;
   run(args: FabricCouncilRunOptions & { synthesize: false }): Promise<FabricAgentResult[]>;
+}
+interface FabricConsultPerspective {
+  id: string;
+  question: string;
+  scope?: string[];
+  model?: string;
+}
+type FabricConsultMode = "auto" | "partition" | "challenge" | "compare";
+interface FabricConsultRequest {
+  objective: string;
+  decision: string;
+  mode?: FabricConsultMode;
+  proposal?: string;
+  admission: {
+    justification: "context_capacity" | "independent_verification" | "structural_diversity";
+    independence: string;
+    couldChange: string;
+  };
+  perspectives: FabricConsultPerspective[];
+}
+interface FabricConsultEvidence {
+  path: string;
+  line?: number;
+  endLine?: number;
+  claim: string;
+  ref: string;
+}
+interface FabricConsultFinding {
+  perspectiveId: string;
+  summary: string;
+  confidence: "low" | "medium" | "high";
+  evidence: FabricConsultEvidence[];
+}
+interface FabricConsultRecommendation {
+  perspectiveId: string;
+  recommendation: string;
+}
+interface FabricConsultResult {
+  format: 1;
+  status:
+    | "success"
+    | "partial"
+    | "inconclusive"
+    | "failed"
+    | "cancelled"
+    | "timed_out"
+    | "budget_exhausted"
+    | "not_admitted";
+  mode?: Exclude<FabricConsultMode, "auto">;
+  decision?: string;
+  couldChange?: string;
+  context: { tokens: number | null; contextWindow: number; ratio: number | null };
+  admission?: { code: string; message: string };
+  coverage: {
+    requested: number;
+    started: number;
+    completed: number;
+    accepted: number;
+    failed: number;
+    rejected: number;
+    missing: string[];
+  };
+  evidenceCount: number;
+  findings: FabricConsultFinding[];
+  recommendations: FabricConsultRecommendation[];
+  consensus?: string;
+  disagreements: FabricConsultRecommendation[];
+  risks: string[];
+  uncertainty: string[];
+  silent?: boolean;
+  perspectives: Array<{
+    perspectiveId: string;
+    status: "completed" | "failed" | "stopped" | "timed_out" | "budget_exhausted" | "not_started" | "accepted" | "silent" | "rejected";
+    stance?: "support" | "challenge" | "mixed" | "silent";
+    acceptedFindings: number;
+    rejectedEvidence: number;
+    model?: string;
+    error?: string;
+    usage?: { tokens: number; cost: number };
+  }>;
+  usage: { tokens: number; cost: number };
+}
+interface FabricConsultApi {
+  run(args: FabricConsultRequest): Promise<FabricConsultResult>;
 }
 interface FabricMeshIdentity {
   id: string;
@@ -711,6 +900,90 @@ interface FabricStateVerificationResult {
   reportingError?: string;
   evidenceDigest: string;
   resultDigest: string;
+}
+interface FabricOutcomeRecord {
+  format: 1;
+  id: string;
+  runId: string;
+  traceId: string;
+  objectiveDigest: string;
+  outcome: "succeeded" | "failed" | "aborted" | "timed_out";
+  startedAt: number;
+  finishedAt: number;
+  durationMs: number;
+  tokens: number;
+  cost: number;
+  gateVerdict: "none" | "passed" | "revise" | "abort" | "crashed";
+  evidenceCount: number;
+  routes: Array<{ requestedModel: string; selectedModel: string; reason: string; quality: "preserved" | "downgraded" }>;
+  verified: boolean;
+  downgraded: boolean;
+  admissionReasons: string[];
+  consult?: {
+    status: "success" | "partial" | "inconclusive" | "failed" | "cancelled" | "timed_out" | "budget_exhausted" | "not_admitted";
+    mode?: "partition" | "challenge" | "compare";
+    admissionCode?: string;
+    requested: number;
+    started: number;
+    completed: number;
+    accepted: number;
+    failed: number;
+    rejected: number;
+    evidenceCount: number;
+    contextRatio: number | null;
+    workerTokens: number;
+    workerCost: number;
+  };
+  evaluations: Array<{ kind: "deterministic" | "model_judge"; scorer: string; evaluator?: string; score: number; passed: boolean; evaluatedAt?: number }>;
+  recordedAt: number;
+}
+interface FabricPathLease {
+  id: string;
+  ownerRunId: string;
+  path: string;
+  scope: "file" | "tree";
+  acquiredAt: number;
+  expiresAt: number;
+}
+interface FabricLeasesApi {
+  acquire(args: {
+    paths: Array<{ path: string; scope: "file" | "tree" }>;
+    ttlMs: number;
+  }): Promise<{ leases: FabricPathLease[] }>;
+  release(args: { ids: string[] }): Promise<{ released: string[] }>;
+  list(): Promise<FabricPathLease[]>;
+}
+interface FabricOutcomeConfidence {
+  low: number;
+  high: number;
+}
+interface FabricOutcomeCandidate {
+  model: string;
+  samples: number;
+  successRate: number;
+  successConfidence: FabricOutcomeConfidence;
+  verifiedRate: number;
+  verifiedConfidence: FabricOutcomeConfidence;
+  averageDurationMs: number;
+  averageTokens: number;
+  averageCost: number;
+  downgradeRate: number;
+  admissionReasons: Record<string, number>;
+  averageScore?: number;
+}
+interface FabricOutcomeReport {
+  status: "insufficient_samples" | "recommended";
+  minimumSamples: number;
+  recommendedModel?: string;
+  candidates: FabricOutcomeCandidate[];
+  excluded: Array<{ model: string; samples: number; reason: "insufficient_samples" }>;
+}
+interface FabricOutcomesApi {
+  list(args?: { limit?: number }): Promise<FabricOutcomeRecord[]>;
+  status(args: { id: string }): Promise<FabricOutcomeRecord>;
+  evaluate(args: { id: string; scorer: "exact" | "contains" | "numeric"; actual: unknown; expected: unknown; tolerance?: number }): Promise<FabricOutcomeRecord>;
+  judge(args: { id: string; scorer: string; evaluator: string; score: number; passed: boolean }): Promise<FabricOutcomeRecord>;
+  recommend(): Promise<FabricOutcomeReport>;
 }
 interface FabricStateApi {
   transition(args: FabricStateTransitionArgs): Promise<{ event: FabricMeshEvent; head: unknown }>;
@@ -872,7 +1145,112 @@ interface FabricWorkflowItem {
   completed?: number;
   data?: unknown;
 }
+type FabricWorkflowEvidenceKind = "command" | "artifact" | "trace" | "custom";
+interface FabricWorkflowEvidenceRef {
+  kind: FabricWorkflowEvidenceKind;
+  ref: string;
+  digest?: string;
+}
+interface FabricWorkflowGateInput {
+  gate: string;
+  passed: boolean;
+  disposition: "advise" | "revise" | "abort";
+  evidence: FabricWorkflowEvidenceRef[];
+  reason?: string;
+  error?: string;
+}
+interface FabricWorkflowGateResult extends FabricWorkflowGateInput {
+  sequence: number;
+  recordedAt: number;
+  decision: "continue" | "revise" | "abort";
+  revision: number;
+  failure?: "gate_failed" | "gate_crashed" | "revision_limit";
+}
+
+interface FabricWorkflowRunEnvelope {
+  version: 1;
+  runId: string;
+  traceId: string;
+  spanId: string;
+  parentRunId?: string;
+  parentSpanId?: string;
+  objectiveDigest: string;
+  startedAt: number;
+  deadline: number;
+  cancellationOwner: string;
+}
+interface FabricWorkflowRunBudget {
+  agents: { limit: number; spent: number; reserved: number; remaining: number };
+  tokens: { limit: number; spent: number; reserved: number; remaining: number };
+}
+interface FabricWorkflowRunContext {
+  run: FabricWorkflowRunEnvelope;
+  budget: FabricWorkflowRunBudget;
+}
+
+type FabricDurablePhaseStatus = "pending" | "ready" | "running" | "completed" | "failed" | "cancelled";
+interface FabricDurablePhaseDefinition {
+  id: string;
+  deps?: string[];
+  objective?: string;
+  maxAttempts?: number;
+}
+interface FabricDurablePhase extends FabricDurablePhaseDefinition {
+  status: FabricDurablePhaseStatus;
+  attempt: number;
+  objectiveDigest?: string;
+  ownerRunId?: string;
+  ownerTraceId?: string;
+  leaseToken?: string;
+  leaseExpiresAt?: number;
+  evidence?: FabricWorkflowEvidenceRef[];
+  outputDigest?: string;
+  error?: string;
+  startedAt?: number;
+  finishedAt?: number;
+}
+interface FabricDurableWorkflowRecord {
+  format: 1;
+  id: string;
+  name: string;
+  definitionDigest: string;
+  status: "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
+  leaseMs: number;
+  phases: FabricDurablePhase[];
+  createdAt: number;
+  updatedAt: number;
+  cancelledAt?: number;
+  cancelReason?: string;
+}
+interface FabricDurableClaim {
+  workflowId: string;
+  leaseToken: string;
+  leaseExpiresAt: number;
+  phase: FabricDurablePhase;
+}
+interface FabricDurableRunPhase<T = unknown> extends FabricDurablePhaseDefinition {
+  retryable?: boolean;
+  run(context: {
+    phase: FabricDurablePhase;
+    workflow: FabricDurableWorkflowRecord;
+    results: Record<string, unknown>;
+  }): Promise<T> | T;
+}
+interface FabricDurableWorkflowApi {
+  create(definition: { id: string; name: string; phases: FabricDurablePhaseDefinition[]; leaseMs?: number }): Promise<FabricDurableWorkflowRecord>;
+  status(id: string): Promise<FabricDurableWorkflowRecord>;
+  list(limit?: number): Promise<FabricDurableWorkflowRecord[]>;
+  claim(id: string, phaseId?: string): Promise<FabricDurableClaim | undefined>;
+  complete(id: string, input: { phaseId: string; leaseToken: string; evidence?: FabricWorkflowEvidenceRef[]; output?: unknown }): Promise<FabricDurableWorkflowRecord>;
+  fail(id: string, input: { phaseId: string; leaseToken: string; error: string; retryable?: boolean }): Promise<FabricDurableWorkflowRecord>;
+  resume(id: string): Promise<FabricDurableWorkflowRecord>;
+  cancel(id: string, reason?: string): Promise<FabricDurableWorkflowRecord>;
+  run<T = unknown>(definition: { id: string; name: string; phases: FabricDurableRunPhase<T>[]; leaseMs?: number }): Promise<{ workflow: FabricDurableWorkflowRecord; results: Record<string, T> }>;
+}
+
 interface FabricWorkflowApi {
+  context(): Promise<FabricWorkflowRunContext>;
+  durable: FabricDurableWorkflowApi;
   agent<T = string>(prompt: string, options?: FabricWorkflowAgentOptions): Promise<T>;
   parallel<T, R>(items: T[], mapper: (item: T, index: number) => Promise<R> | R, concurrency?: number | { concurrency?: number }): Promise<R[]>;
   parallel<T>(thunks: Array<() => Promise<T> | T>, concurrency?: number | { concurrency?: number }): Promise<T[]>;
@@ -881,6 +1259,7 @@ interface FabricWorkflowApi {
   phase(name: string, options?: FabricWorkflowPhaseOptions): Promise<{ name: string; index: number; id?: string }>;
   phase(input: FabricWorkflowPhaseInput): Promise<{ name: string; index: number; id?: string }>;
   item(item: FabricWorkflowItem): Promise<FabricWorkflowItem>;
+  gate(input: FabricWorkflowGateInput): Promise<FabricWorkflowGateResult>;
   event(event: { message: string; level?: "info" | "success" | "warning" | "error"; data?: unknown }): Promise<void>;
   log(...values: unknown[]): void;
   budget: { total: number; spent(): number; remaining(): number };
@@ -895,7 +1274,10 @@ declare const memory: FabricMemoryApi;
 declare const state: FabricStateApi;
 declare const schema: FabricSchemaApi;
 declare const compact: FabricCompactApi;
+declare const outcomes: FabricOutcomesApi;
+declare const leases: FabricLeasesApi;
 declare const council: FabricCouncilApi;
+declare const consult: FabricConsultApi;
 declare const workflow: FabricWorkflowApi;
 declare function agent<T = string>(prompt: string, options?: FabricWorkflowAgentOptions): Promise<T>;
 declare function parallel<T, R>(items: T[], mapper: (item: T, index: number) => Promise<R> | R, concurrency?: number | { concurrency?: number }): Promise<R[]>;

@@ -101,22 +101,28 @@ describe("FabricSettingsComponent", () => {
     const lines = component.render(80).join("\n");
     const labels = items.map((item) => item.label).join("\n");
 
-    for (const label of [
+    const visible = [
       "Full code mode",
       "Executor",
       "Approvals",
       "MCP",
       "Prewalk",
       "Agents",
+      "Ultra Consult",
       "Capture",
       "UI",
       "Compaction",
-      "Retention",
-      "Mesh",
-    ]) {
+    ];
+    for (const label of [...visible, "Retention", "Mesh"]) {
       expect(labels).toContain(label);
     }
-    expect(items.length).toBe(11);
+    // The list pages: only the first rows render, with the rest reachable
+    // through the position counter.
+    for (const label of visible) {
+      expect(lines).toContain(label);
+    }
+    expect(lines).toContain("(1/13)");
+    expect(items.length).toBe(13);
   });
 
   it("marks submenu rows with a drill-in marker and leaves inline toggles plain", () => {
@@ -161,7 +167,7 @@ describe("FabricSettingsComponent", () => {
   it("exposes the compaction engine", () => {
     const items = buildItems();
     const compaction = items.find((item) => item.id === "compaction");
-    expect(compaction?.currentValue).toBe("fabric");
+    expect(compaction?.currentValue).toBe("fabric · QoS on");
     const lines = compaction!.submenu!("", () => {}).render(80).join("\n");
     expect(lines).toContain("Threshold");
     expect(lines).toContain("Pi default");
@@ -170,6 +176,9 @@ describe("FabricSettingsComponent", () => {
     expect(lines).toContain("fabric");
     expect(lines).toContain("Target occupancy");
     expect(lines).toContain("0.65");
+    expect(lines).toContain("Context QoS");
+    expect(lines).toContain("Protected turns");
+    expect(lines).toContain("Retire after chars");
     const section = compaction!.submenu!("", () => {}) as any;
     const target = section.settingsList.items.find(
       (item: { id: string }) => item.id === "compaction.targetContextRatio",
@@ -235,6 +244,23 @@ describe("FabricSettingsComponent", () => {
     const lines = agents!.submenu!("", () => {}).render(80).join("\n");
     expect(lines).toContain("Recursion budget");
     expect(lines).toContain("Off");
+  });
+
+  it("surfaces bounded Ultra Consult policy", () => {
+    const items = buildItems();
+    const consult = items.find((item) => item.id === "consult");
+    expect(consult?.currentValue).toBe("3 workers · 60%");
+    expect(consult?.submenu).toBeDefined();
+    const lines = consult!.submenu!("", () => {}).render(100).join("\n");
+    expect(lines).toContain("Enabled");
+    expect(lines).toContain("Max workers");
+    expect(lines).toContain("Context pressure");
+    expect(lines).toContain("Max findings");
+    expect(lines).toContain("Evidence per finding");
+    expect(lines).toContain("Evidence file size");
+    expect(lines).toContain("Evidence byte budget");
+    expect(lines).toContain("Worker token limit");
+    expect(lines).toContain("8k");
   });
 
   it("shows the configured budget as a currency value", () => {
@@ -326,6 +352,7 @@ describe("FabricSettingsComponent", () => {
     const lines = agents!.submenu!("", () => {}).render(80).join("\n");
     expect(lines).toContain("Default thinking");
     expect(lines).toContain("Medium");
+    expect(lines).toContain("Allow quality downgrade");
   });
 
   it("shows a configured thinking level in the Agents section", () => {
@@ -431,6 +458,29 @@ describe("FabricSettingsComponent", () => {
     expect(clearedUnsetLine).toContain("✓");
   });
 
+  it("persists the Prewalk model return policy", () => {
+    const applied: Array<{ id: string; value: unknown }> = [];
+    const items = buildFabricSettingsItems(
+      theme,
+      structuredClone(DEFAULT_FABRIC_CONFIG),
+      (id, value) => applied.push({ id, value }),
+      { keepVisibleCandidates: ["fabric_exec"], modelSource: fakeModelSource },
+    );
+    const prewalk = items.find((item) => item.id === "prewalk")!;
+    const section = prewalk.submenu!("", () => {}) as any;
+    const list = section.settingsList as any;
+    const row = list.items.find(
+      (item: { id: string }) => item.id === "prewalk.returnPolicy",
+    );
+    expect(row.currentValue).toBe("executor");
+    list.selectedIndex = list.items.indexOf(row);
+
+    list.activateItem();
+
+    expect(applied.at(-1)).toEqual({ id: "prewalk.returnPolicy", value: "previous" });
+    expect(list.items[list.selectedIndex].currentValue).toBe("previous");
+  });
+
   it("persists a Prewalk thinking selection and clears it back to Agents default", () => {
     const applied: Array<{ id: string; value: unknown }> = [];
     const items = buildFabricSettingsItems(
@@ -468,7 +518,13 @@ describe("FabricSettingsComponent", () => {
   it("exposes a dedicated prewalk executor model picker", () => {
     const config = {
       ...DEFAULT_FABRIC_CONFIG,
-      prewalk: { mode: "in-place" as const, model: "anthropic/claude-sonnet-4-5", alwaysRearm: false },
+      prewalk: {
+        ...DEFAULT_FABRIC_CONFIG.prewalk,
+        mode: "in-place" as const,
+        returnPolicy: "executor" as const,
+        model: "anthropic/claude-sonnet-4-5",
+        alwaysRearm: false,
+      },
     };
     const items = buildFabricSettingsItems(theme, config, () => {}, {
       keepVisibleCandidates: ["fabric_exec"],
@@ -480,6 +536,9 @@ describe("FabricSettingsComponent", () => {
     expect(lines).toContain("Mode");
     expect(lines).toContain("in-place");
     expect(lines).toContain("Always re-arm");
+    expect(lines).toContain("Verification");
+    expect(lines).toContain("legacy");
+    expect(lines).toContain("Max revisions");
     expect(lines).toContain("Executor model ›");
     expect(lines).toContain("anthropic/claude-sonnet-4-5");
   });
@@ -652,9 +711,18 @@ describe("FabricSettingsComponent", () => {
         reloadConfig: vi.fn(() => {
           const saved = JSON.parse(
             fs.readFileSync(path.join(cwd, ".pi", "fabric.json"), "utf8"),
-          ) as { prewalk?: { mode?: "in-place" | "trajectory"; model?: string; alwaysRearm?: boolean } };
+          ) as {
+            prewalk?: {
+              mode?: "in-place" | "trajectory";
+              returnPolicy?: "executor" | "previous";
+              model?: string;
+              alwaysRearm?: boolean;
+            };
+          };
           config.prewalk = {
+            ...config.prewalk,
             mode: saved.prewalk?.mode ?? "in-place",
+            returnPolicy: saved.prewalk?.returnPolicy ?? "executor",
             ...(saved.prewalk?.model ? { model: saved.prewalk.model } : {}),
             alwaysRearm: saved.prewalk?.alwaysRearm === true,
           };

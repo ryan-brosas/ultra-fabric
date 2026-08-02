@@ -23,6 +23,8 @@ export type FabricTraceJsonValue =
   | { [key: string]: FabricTraceJsonValue };
 
 export type FabricExecutionOutcomeV1 = "succeeded" | "failed" | "aborted" | "timed_out";
+export type FabricExecutionRiskV1 = "read" | "write" | "execute" | "network" | "agent";
+export type FabricExecutionEffectV1 = "none" | "workspace" | "state" | "external";
 export type FabricExecutionFailureStageV1 =
   | "resolve"
   | "prepare"
@@ -37,6 +39,8 @@ export interface FabricExecutionTraceOperationV1 {
   ref: string;
   provider?: string;
   action?: string;
+  risk?: FabricExecutionRiskV1;
+  effect?: FabricExecutionEffectV1;
   args: { [key: string]: FabricTraceJsonValue };
   outcome: FabricExecutionOutcomeV1;
   failureStage?: FabricExecutionFailureStageV1;
@@ -79,6 +83,8 @@ interface MutableOperation {
   projectionRef: string;
   provider?: string;
   action?: string;
+  risk?: FabricExecutionRiskV1;
+  effect?: FabricExecutionEffectV1;
   args: Sanitized<{ [key: string]: FabricTraceJsonValue }>;
   outcome?: FabricExecutionOutcomeV1;
   failureStage?: FabricExecutionFailureStageV1;
@@ -379,7 +385,12 @@ export class FabricExecutionTraceOperationHandle {
     private readonly operation: MutableOperation | undefined,
   ) {}
 
-  resolved(provider: string, action: string): void {
+  resolved(
+    provider: string,
+    action: string,
+    risk?: FabricExecutionRiskV1,
+    effect?: FabricExecutionEffectV1,
+  ): void {
     if (!this.operation || this.recorder.sealed) return;
     const boundedProvider = boundedIdentifier(provider);
     const boundedAction = boundedIdentifier(action);
@@ -389,6 +400,8 @@ export class FabricExecutionTraceOperationHandle {
     if (this.operation.action !== boundedAction) {
       this.operation.action = this.recorder.snapshotIdentifier(action);
     }
+    if (risk) this.operation.risk = risk;
+    if (effect) this.operation.effect = effect;
   }
 
   prepared(args: Record<string, unknown>): void {
@@ -516,6 +529,8 @@ export class FabricExecutionTraceRecorder {
         ref: operation.ref,
         ...(operation.provider ? { provider: operation.provider } : {}),
         ...(operation.action ? { action: operation.action } : {}),
+        ...(operation.risk ? { risk: operation.risk } : {}),
+        ...(operation.effect ? { effect: operation.effect } : {}),
         args: operation.args.value,
         outcome: operation.outcome!,
         ...(operation.failureStage ? { failureStage: operation.failureStage } : {}),
@@ -628,6 +643,8 @@ const hasOnlyKeys = (value: Record<string, unknown>, keys: readonly string[]): b
 
 const outcomes = new Set<FabricExecutionOutcomeV1>(["succeeded", "failed", "aborted", "timed_out"]);
 const stages = new Set<FabricExecutionFailureStageV1>(["resolve", "prepare", "validate", "approve", "invoke", "guard"]);
+const risks = new Set<FabricExecutionRiskV1>(["read", "write", "execute", "network", "agent"]);
+const effects = new Set<FabricExecutionEffectV1>(["none", "workspace", "state", "external"]);
 
 const isJsonValue = (value: unknown, ancestors = new Set<object>(), depth = 0): value is FabricTraceJsonValue => {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
@@ -645,12 +662,14 @@ const isFabricExecutionTraceOperationV1Unchecked = (
   value: unknown,
 ): value is FabricExecutionTraceOperationV1 => {
   if (!isRecord(value)) return false;
-  if (!hasOnlyKeys(value, ["type", "sequence", "ref", "provider", "action", "args", "outcome", "failureStage", "error", "result"])) return false;
+  if (!hasOnlyKeys(value, ["type", "sequence", "ref", "provider", "action", "risk", "effect", "args", "outcome", "failureStage", "error", "result"])) return false;
   if (value.type !== "call" || !Number.isSafeInteger(value.sequence) || (value.sequence as number) < 0) return false;
   if (typeof value.ref !== "string" || !isRecord(value.args) || !isJsonValue(value.args)) return false;
   if (!outcomes.has(value.outcome as FabricExecutionOutcomeV1)) return false;
   if (value.provider !== undefined && typeof value.provider !== "string") return false;
   if (value.action !== undefined && typeof value.action !== "string") return false;
+  if (value.risk !== undefined && !risks.has(value.risk as FabricExecutionRiskV1)) return false;
+  if (value.effect !== undefined && !effects.has(value.effect as FabricExecutionEffectV1)) return false;
   if (value.failureStage !== undefined && !stages.has(value.failureStage as FabricExecutionFailureStageV1)) return false;
   if (value.error !== undefined && typeof value.error !== "string") return false;
   return value.result === undefined || isJsonValue(value.result);

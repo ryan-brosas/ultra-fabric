@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { FabricRunEnvelopeV1 } from "./run/context.js";
 
 export const FABRIC_PROVIDER_REGISTER_EVENT = "pi-fabric:provider:register:v1";
 export const FABRIC_PROVIDER_DISCOVER_EVENT = "pi-fabric:provider:discover:v1";
@@ -36,6 +37,7 @@ export const readFabricToolResultProxyDetailsV1 = (
 };
 
 export type FabricRisk = "read" | "write" | "execute" | "network" | "agent";
+export type FabricEffect = "none" | "workspace" | "state" | "external";
 export type FabricActivityEntityKind =
   | "agent"
   | "actor"
@@ -63,6 +65,7 @@ export interface FabricActionDescriptor {
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
   risk: FabricRisk;
+  effect?: FabricEffect;
   namespace?: string;
 }
 
@@ -74,6 +77,7 @@ export interface FabricCapabilityActionHead {
   description: string;
   descriptorHash: string;
   risk: FabricRisk;
+  effect?: FabricEffect;
   namespace?: string;
 }
 
@@ -113,9 +117,12 @@ export interface FabricInvocationContext {
   signal: AbortSignal | undefined;
   parentToolCallId: string;
   nestedToolCallId: string;
+  run?: FabricRunEnvelopeV1;
   extensionContext: ExtensionContext;
   update(message: string): void;
   activity?(update: FabricInvocationActivityUpdate): void;
+  /** Host-only read scope injected for one Ultra Consult worker. */
+  consultReadScope?: { scopes: string[] };
   /** Host-supplied inside fabric_exec so agents.handoff schedules the outer-call boundary. */
   deferHandoff?(args: Record<string, unknown>): Record<string, unknown>;
   // Out-of-band image content blocks a provider (currently only pi.read of an

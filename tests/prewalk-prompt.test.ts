@@ -29,6 +29,21 @@ describe("prewalk prompt isolation", () => {
     expect(guidelines).not.toContain("handoff");
   });
 
+  it("filters hidden continuations by lifecycle ownership in the context hook", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "index.ts"), "utf8");
+    const start = source.indexOf('pi.on("context"');
+    const end = source.indexOf('pi.on("before_agent_start"', start);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const handler = source.slice(start, end);
+    expect(handler).toContain("filterPrewalkContinuationMessages");
+    expect(handler).toContain("state.prewalk.acceptContinuation");
+    expect(handler).toContain("context.sessionManager.getSessionId()");
+    expect(handler).toContain("applyContextQos");
+    expect(handler).toContain("state.noteContextQos");
+  });
+
   it("keeps coding guidance outcome-oriented and context-bounded", () => {
     const toolSource = fs.readFileSync(
       path.join(process.cwd(), "src", "fabric-exec-tool.ts"),
@@ -91,6 +106,10 @@ describe("prewalk prompt isolation", () => {
 
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
-    expect(source.slice(start, end)).toContain("state.prewalk.settleTask");
+    const handler = source.slice(start, end);
+    expect(handler).toContain("state.prewalk.settleContinuation");
+    expect(handler).toContain("settledContinuation.returnModel");
+    expect(handler).toContain("restorePrewalkModel");
+    expect(handler).toContain("state.prewalk.settleTask");
   });
 });

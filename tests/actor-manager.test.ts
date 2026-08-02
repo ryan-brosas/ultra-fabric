@@ -3,10 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActorManager } from "../src/actors/manager.js";
+import type { FabricActorDeliveryRequest } from "../src/actors/types.js";
 import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
 import type { FabricMainAgentDeliveryRequest } from "../src/main-agent.js";
 import { MeshStore, type MeshIdentity } from "../src/mesh/store.js";
 import { AgentManager } from "../src/agents/manager.js";
+import type { AgentRunResult } from "../src/agents/types.js";
 
 const roots: string[] = [];
 const actorManagers: ActorManager[] = [];
@@ -23,6 +25,13 @@ const waitFor = async (predicate: () => boolean, timeoutMs = 2_000): Promise<voi
 const setup = (
   persistent = false,
   canManageActor?: (id: string) => boolean | undefined,
+  onDeliver?: (request: FabricActorDeliveryRequest) => void,
+  deliveryMaxAttempts = 1,
+  runtime: {
+    mesh?: Partial<typeof DEFAULT_FABRIC_CONFIG.mesh>;
+    now?: () => number;
+    outcomeSink?: { record(input: import("../src/outcomes/store.js").FabricOutcomeInput): Promise<unknown> };
+  } = {},
 ) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-actor-test-"));
   roots.push(root);
@@ -38,7 +47,12 @@ const setup = (
     kind: "main",
     sessionId: "test",
   };
-  const meshConfig = { ...DEFAULT_FABRIC_CONFIG.mesh, actorPollMs: 20 };
+  const meshConfig = {
+    ...DEFAULT_FABRIC_CONFIG.mesh,
+    actorPollMs: 20,
+    actorDeliveryMaxAttempts: deliveryMaxAttempts,
+    ...runtime.mesh,
+  };
   const deliveries: string[] = [];
   const actors = new ActorManager(
     "test",
@@ -46,13 +60,19 @@ const setup = (
     mesh,
     meshConfig,
     agents,
-    ({ message }) => {
+    onDeliver ?? (({ message }) => {
       if (message.text) deliveries.push(message.text);
-    },
+    }),
     {
       actorRoot: path.join(root, "actors"),
       persistent,
       ...(canManageActor ? { canManageActor } : {}),
+      retryDependencies: {
+        sleep: async () => undefined,
+        random: () => 0,
+      },
+      ...(runtime.now ? { now: runtime.now } : {}),
+      ...(runtime.outcomeSink ? { outcomeSink: runtime.outcomeSink } : {}),
     },
   );
   actorManagers.push(actors);
@@ -194,6 +214,10 @@ describe("ActorManager", () => {
     const reply = await actors.ask(actor.id, "Inspect auth");
     expect(reply.text).toBe("fake worker complete");
     expect(reply.actorId).toBe(actor.id);
+    expect(reply.deliveryReceipt).toMatchObject({
+      mesh: { status: "published" },
+      main: { status: "mailbox", mode: "mailbox" },
+    });
     await waitFor(() => actors.status(actor.id).status === "idle");
     expect(actors.status(actor.id)).toMatchObject({ status: "idle", messages: 2 });
     expect(agents.list()).toEqual([]);
@@ -201,6 +225,121 @@ describe("ActorManager", () => {
       { direction: "in", source: "direct" },
       { direction: "out", source: "direct", text: "fake worker complete" },
     ]);
+  });
+
+  it("enforces durable actor window and lifetime admission quotas", async () => {
+    let now = 100;
+    const { actors } = setup(false, undefined, undefined, 1, {
+      now: () => now,
+    });
+    const actor = await actors.create({
+      name: "bounded",
+      instructions: "Reply",
+      budget: {
+        lifetimeActivations: 2,
+        windowActivations: 1,
+        windowMs: 1_000,
+      },
+    } as never);
+
+    await actors.ask(actor.id, "first");
+    expect(() => actors.tell(actor.id, "too soon")).toThrow(
+      "Actor admission window budget exhausted",
+    );
+    now = 1_100;
+    await actors.ask(actor.id, "second");
+    now = 2_200;
+    expect(() => actors.tell(actor.id, "lifetime exhausted")).toThrow(
+      "Actor admission lifetime budget exhausted",
+    );
+    const status = actors.status(actor.id);
+    expect(status).toMatchObject({
+      budget: {
+        admission: "lifetime_exhausted",
+        usage: {
+          lifetimeActivations: 2,
+          windowActivations: 0,
+          rejectedActivations: 2,
+        },
+      },
+    });
+    expect(status.budget?.usage.lifetimeTokens).toBeGreaterThan(0);
+  });
+
+  it("records ambient actor outcomes under a synthetic root trace", async () => {
+    const record = vi.fn(async () => undefined);
+    const { actors } = setup(false, undefined, undefined, 1, {
+      outcomeSink: { record },
+    });
+    const actor = await actors.create({
+      name: "observed actor",
+      instructions: "Report",
+    });
+
+    const reply = await actors.ask(actor.id, "observe this activation");
+
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      runId: reply.runId,
+      traceId: expect.any(String),
+      objectiveDigest: expect.any(String),
+      outcome: "succeeded",
+      tokens: 3,
+      gateVerdict: "none",
+      routes: [],
+    }));
+  });
+
+  it("rejects actor queue overflow under the default explicit policy", async () => {
+    const { actors, agents } = setup(false, undefined, undefined, 1, {
+      mesh: { actorQueueLimit: 1, actorOverflowPolicy: "reject" },
+    });
+    const actor = await actors.create({ name: "worker", instructions: "Process work." });
+    actors.tell(actor.id, "HANG in flight");
+    await waitFor(() => agents.list().some((run) => run.status === "running"));
+    actors.tell(actor.id, "queued item");
+
+    expect(() => actors.tell(actor.id, "overflow item")).toThrow(/queue limit reached/);
+    expect(actors.status(actor.id).queued).toBe(1);
+  });
+
+  it("coalesces actor queue overflow by source when configured", async () => {
+    const { actors, agents } = setup(false, undefined, undefined, 1, {
+      mesh: { actorQueueLimit: 1, actorOverflowPolicy: "coalesce" },
+    });
+    const actor = await actors.create({ name: "worker", instructions: "Process work." });
+    actors.tell(actor.id, "HANG in flight");
+    await waitFor(() => agents.list().some((run) => run.status === "running"));
+    const queued = actors.tell(actor.id, "queued item");
+
+    const coalesced = actors.tell(actor.id, "newest item");
+
+    expect(coalesced.messageId).toBe(queued.messageId);
+    expect(actors.status(actor.id).queued).toBe(1);
+  });
+
+  it.each([
+    ["drop-oldest", "rejected"],
+    ["dead-letter", "deadLettered"],
+  ] as const)("records %s actor queue displacement", async (policy, terminalField) => {
+    const { actors, agents } = setup(false, undefined, undefined, 1, {
+      mesh: { actorQueueLimit: 1, actorOverflowPolicy: policy },
+    });
+    const actor = await actors.create({ name: `worker ${policy}`, instructions: "Process work." });
+    actors.tell(actor.id, "HANG in flight");
+    await waitFor(() => agents.list().some((run) => run.status === "running"));
+    const displaced = actors.tell(actor.id, "old queued item");
+
+    const accepted = actors.tell(actor.id, "new queued item");
+
+    expect(accepted.messageId).not.toBe(displaced.messageId);
+    expect(actors.status(actor.id).queued).toBe(1);
+    expect(actors.messages(actor.id)).toContainEqual(
+      expect.objectContaining({
+        direction: "out",
+        [terminalField]: true,
+        data: { activationId: displaced.messageId },
+      }),
+    );
   });
 
   it("delivers schema-validated actor directives through the fixed policy", async () => {
@@ -217,8 +356,256 @@ describe("ActorManager", () => {
     expect(reply).toMatchObject({
       action: "message",
       text: "fake actor advice",
+      deliveryReceipt: {
+        mesh: { status: "published" },
+        main: { status: "delivered", mode: "steer" },
+      },
     });
     expect(deliveries).toEqual(["fake actor advice"]);
+  });
+
+  it("records mesh publication failure independently from mailbox delivery", async () => {
+    const { actors, mesh } = setup();
+    const actor = await actors.create({
+      name: "reviewer",
+      instructions: "Review messages.",
+      responseMode: "text",
+    });
+    vi.spyOn(mesh, "publish").mockRejectedValue(new Error("mesh journal unavailable"));
+
+    const reply = await actors.ask(actor.id, "Review this turn");
+
+    expect(reply.deliveryReceipt).toMatchObject({
+      mesh: { status: "failed", error: "mesh journal unavailable" },
+      main: { status: "mailbox", mode: "mailbox" },
+    });
+    expect(actors.status(actor.id).lastError).toBe("mesh journal unavailable");
+  });
+
+  it("records active delivery failure instead of swallowing it", async () => {
+    const { actors } = setup(false, undefined, () => {
+      throw new Error("Main delivery queue unavailable");
+    });
+    const actor = await actors.create({
+      name: "advisor",
+      instructions: "Advise only when useful.",
+      responseMode: "directive",
+      delivery: "steer",
+      triggerTurn: false,
+    });
+
+    const reply = await actors.ask(actor.id, "Review this turn");
+
+    expect(reply).toMatchObject({
+      action: "message",
+      text: "fake actor advice",
+      deliveryReceipt: {
+        mesh: { status: "published" },
+        main: {
+          status: "failed",
+          mode: "steer",
+          error: "Main delivery queue unavailable",
+        },
+      },
+    });
+    expect(actors.status(actor.id).lastError).toBe("Main delivery queue unavailable");
+    expect(actors.messages(actor.id).at(-1)).toMatchObject({
+      id: reply.id,
+      deliveryReceipt: reply.deliveryReceipt,
+    });
+  });
+
+  it("automatically retries transient delivery with bounded backoff", async () => {
+    let attempts = 0;
+    const { actors } = setup(
+      false,
+      undefined,
+      () => {
+        attempts++;
+        if (attempts === 1) throw new Error("transient Main delivery failure");
+      },
+      3,
+    );
+    const actor = await actors.create({
+      name: "advisor",
+      instructions: "Advise.",
+      responseMode: "directive",
+      delivery: "followUp",
+      triggerTurn: true,
+    });
+
+    const delivered = await actors.ask(actor.id, "Review this turn");
+
+    expect(delivered.deliveryReceipt?.main).toMatchObject({
+      status: "delivered",
+      attempts: 2,
+    });
+    expect(attempts).toBe(2);
+  });
+
+  it("opens, suppresses, and half-opens the actor delivery circuit", async () => {
+    let now = 1_000;
+    let shouldFail = true;
+    let deliveries = 0;
+    const { actors } = setup(
+      false,
+      undefined,
+      () => {
+        deliveries++;
+        if (shouldFail) throw new Error("Main unavailable");
+      },
+      1,
+      {
+        mesh: {
+          actorCircuitFailureThreshold: 1,
+          actorCircuitCooldownMs: 100,
+        } as Partial<typeof DEFAULT_FABRIC_CONFIG.mesh>,
+        now: () => now,
+      },
+    );
+    const actor = await actors.create({
+      name: "advisor",
+      instructions: "Advise.",
+      responseMode: "directive",
+      delivery: "steer",
+      triggerTurn: false,
+    });
+
+    const failed = await actors.ask(actor.id, "first");
+    expect(failed.deliveryReceipt?.main.status).toBe("failed");
+    expect(actors.status(actor.id).deliveryCircuit).toMatchObject({
+      state: "open",
+      failures: 1,
+      retryAt: 1_100,
+    });
+
+    now = 1_050;
+    const suppressed = await actors.ask(actor.id, "second");
+    expect(suppressed.deliveryReceipt?.main).toMatchObject({
+      status: "circuit_open",
+      attempts: 0,
+    });
+    expect(deliveries).toBe(1);
+
+    now = 1_200;
+    shouldFail = false;
+    const recovered = await actors.ask(actor.id, "third");
+    expect(recovered.deliveryReceipt?.main.status).toBe("delivered");
+    expect(actors.status(actor.id).deliveryCircuit).toEqual({
+      state: "closed",
+      failures: 0,
+    });
+    expect(deliveries).toBe(2);
+  });
+
+  it("persists an open delivery circuit across actor ownership reload", async () => {
+    let now = 5_000;
+    const state = setup(
+      true,
+      undefined,
+      () => {
+        throw new Error("Main unavailable");
+      },
+      1,
+      {
+        mesh: {
+          actorCircuitFailureThreshold: 1,
+          actorCircuitCooldownMs: 500,
+        } as Partial<typeof DEFAULT_FABRIC_CONFIG.mesh>,
+        now: () => now,
+      },
+    );
+    const actor = await state.actors.create({
+      name: "persistent advisor",
+      instructions: "Advise.",
+      responseMode: "directive",
+      delivery: "steer",
+      triggerTurn: false,
+    });
+    await state.actors.ask(actor.id, "open circuit");
+    await state.actors.close();
+    actorManagers.splice(actorManagers.indexOf(state.actors), 1);
+
+    now = 5_100;
+    const restored = new ActorManager(
+      "standby",
+      { id: "session:standby", name: "main", kind: "main", sessionId: "standby" },
+      state.mesh,
+      state.meshConfig,
+      state.agents,
+      () => {},
+      {
+        actorRoot: path.join(state.root, "actors"),
+        persistent: true,
+        canManageActor: () => false,
+        now: () => now,
+      },
+    );
+    actorManagers.push(restored);
+
+    expect(restored.status(actor.id).deliveryCircuit).toEqual({
+      state: "open",
+      failures: 1,
+      openedAt: 5_000,
+      retryAt: 5_500,
+    });
+  });
+
+  it("redelivers a failed outbox message under the same id", async () => {
+    let attempts = 0;
+    const { actors } = setup(false, undefined, () => {
+      attempts++;
+      if (attempts === 1) throw new Error("transient Main delivery failure");
+    });
+    const actor = await actors.create({
+      name: "advisor",
+      instructions: "Advise.",
+      responseMode: "directive",
+      delivery: "followUp",
+      triggerTurn: true,
+    });
+    const failed = await actors.ask(actor.id, "Review this turn");
+    expect(failed.deliveryReceipt?.main).toMatchObject({
+      status: "failed",
+      attempts: 1,
+    });
+
+    const delivered = await actors.retryDelivery(actor.id, failed.id);
+
+    expect(delivered).toMatchObject({
+      id: failed.id,
+      deliveryReceipt: {
+        main: { status: "delivered", mode: "followUp", attempts: 2 },
+      },
+    });
+    expect(attempts).toBe(2);
+    expect(actors.status(actor.id).lastError).toBeUndefined();
+  });
+
+  it("dead-letters an outbox channel after its bounded retry budget", async () => {
+    const { actors } = setup(false, undefined, () => {
+      throw new Error("permanent Main delivery failure");
+    });
+    const actor = await actors.create({
+      name: "advisor",
+      instructions: "Advise.",
+      responseMode: "directive",
+      delivery: "steer",
+      triggerTurn: false,
+    });
+    const failed = await actors.ask(actor.id, "Review this turn");
+
+    await actors.retryDelivery(actor.id, failed.id);
+    const deadLetter = await actors.retryDelivery(actor.id, failed.id);
+
+    expect(deadLetter.deliveryReceipt?.main).toMatchObject({
+      status: "dead_lettered",
+      attempts: 3,
+      error: "permanent Main delivery failure",
+    });
+    await expect(actors.retryDelivery(actor.id, failed.id)).rejects.toThrow(
+      /already dead-lettered/,
+    );
   });
 
   it("requires explicit active delivery intent and rejects impossible trigger policies", async () => {
@@ -258,6 +645,80 @@ describe("ActorManager", () => {
     expect(active).toMatchObject({ delivery: "followUp", triggerTurn: true, messages });
     const passive = await actors.setDeliveryPolicy(actor.id, "steer", false);
     expect(passive).toMatchObject({ delivery: "steer", triggerTurn: false, messages });
+  });
+
+  it("retries a zero-effect actor startup failure under the same activation", async () => {
+    const state = setup(false, undefined, undefined, 1, {
+      mesh: {
+        actorRunMaxAttempts: 2,
+        actorRunBaseDelayMs: 0,
+        actorRunMaxDelayMs: 0,
+        actorRunJitterMs: 0,
+      } as Partial<typeof DEFAULT_FABRIC_CONFIG.mesh>,
+    });
+    const actor = await state.actors.create({ name: "worker", instructions: "Process work." });
+    const originalRun = state.agents.run.bind(state.agents);
+    const startupFailure: AgentRunResult = {
+      id: "startup-failure",
+      name: "worker",
+      task: "startup",
+      status: "failed",
+      runner: "pi",
+      transport: "process",
+      cwd: process.cwd(),
+      startedAt: 1,
+      updatedAt: 1,
+      finishedAt: 1,
+      turns: 0,
+      toolCalls: 0,
+      text: "",
+      error: "transport unavailable",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+    };
+    const run = vi
+      .spyOn(state.agents, "run")
+      .mockResolvedValueOnce(startupFailure)
+      .mockImplementation(originalRun);
+
+    const reply = await state.actors.ask(actor.id, "retry startup");
+
+    expect(reply).toMatchObject({ text: "fake worker complete", runAttempts: 2 });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry an actor failure after observable model work", async () => {
+    const state = setup(false, undefined, undefined, 1, {
+      mesh: {
+        actorRunMaxAttempts: 3,
+        actorRunBaseDelayMs: 0,
+        actorRunMaxDelayMs: 0,
+        actorRunJitterMs: 0,
+      } as Partial<typeof DEFAULT_FABRIC_CONFIG.mesh>,
+    });
+    const actor = await state.actors.create({ name: "worker", instructions: "Process work." });
+    const effectfulFailure: AgentRunResult = {
+      id: "effectful-failure",
+      name: "worker",
+      task: "effectful",
+      status: "failed",
+      runner: "pi",
+      transport: "process",
+      cwd: process.cwd(),
+      startedAt: 1,
+      updatedAt: 1,
+      finishedAt: 1,
+      turns: 1,
+      toolCalls: 0,
+      text: "partial",
+      error: "model failed after output",
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0 },
+    };
+    const run = vi.spyOn(state.agents, "run").mockResolvedValue(effectfulFailure);
+
+    await expect(state.actors.ask(actor.id, "do not replay")).rejects.toThrow(
+      "model failed after output",
+    );
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it("stays ambient and retains the failed run when a directive run fails", async () => {
@@ -323,6 +784,200 @@ describe("ActorManager", () => {
       status: "idle",
       events: ["agent_settled"],
     });
+  });
+
+  it("restores actor admission usage before accepting new work", async () => {
+    const state = setup(true, undefined, undefined, 1, { now: () => 100 });
+    const actor = await state.actors.create({
+      name: "quota owner",
+      instructions: "Reply once",
+      budget: { lifetimeActivations: 1 },
+    } as never);
+    await state.actors.ask(actor.id, "consume quota");
+    await state.actors.close();
+    actorManagers.splice(actorManagers.indexOf(state.actors), 1);
+
+    const restored = new ActorManager(
+      "test",
+      state.identity,
+      state.mesh,
+      state.meshConfig,
+      state.agents,
+      () => {},
+      {
+        actorRoot: path.join(state.root, "actors"),
+        persistent: true,
+        now: () => 200,
+      },
+    );
+    actorManagers.push(restored);
+
+    expect(restored.status(actor.id)).toMatchObject({
+      budget: {
+        admission: "lifetime_exhausted",
+        usage: { lifetimeActivations: 1, lifetimeTokens: 3 },
+      },
+    });
+    expect(() => restored.tell(actor.id, "must reject")).toThrow(
+      "Actor admission lifetime budget exhausted",
+    );
+  });
+
+  it("restores accepted queued and in-flight activations with stable ids", async () => {
+    const state = setup(true);
+    const actor = await state.actors.create({
+      name: "durable worker",
+      instructions: "Process every accepted item.",
+    });
+    const inFlight = state.actors.tell(actor.id, "HANG until restart");
+    const queued = state.actors.tell(actor.id, "process after restart");
+    await waitFor(
+      () =>
+        state.actors.status(actor.id).queued === 1 &&
+        state.agents.list().some((run) => run.status === "running"),
+    );
+
+    await state.actors.close();
+    actorManagers.splice(actorManagers.indexOf(state.actors), 1);
+
+    const restored = new ActorManager(
+      "standby",
+      { id: "session:standby", name: "main", kind: "main", sessionId: "standby" },
+      state.mesh,
+      state.meshConfig,
+      state.agents,
+      () => {},
+      {
+        actorRoot: path.join(state.root, "actors"),
+        persistent: true,
+        canManageActor: () => false,
+      },
+    );
+    actorManagers.push(restored);
+
+    expect(restored.status(actor.id)).toMatchObject({
+      status: "queued",
+      queued: 2,
+    });
+    const inbox = JSON.parse(
+      fs.readFileSync(path.join(state.root, "actors", actor.id, "inbox.json"), "utf8"),
+    ) as { queued: Array<{ id: string }> };
+    expect(inbox.queued.map((item) => item.id)).toEqual([
+      inFlight.messageId,
+      queued.messageId,
+    ]);
+  });
+
+  it("replays recovered inbox entries and clears them only after terminal handling", async () => {
+    const state = setup(true);
+    const actor = await state.actors.create({
+      name: "replay worker",
+      instructions: "Process every accepted item.",
+    });
+    const first = state.actors.tell(actor.id, "HANG until restart");
+    const second = state.actors.tell(actor.id, "second accepted item");
+    await waitFor(
+      () =>
+        state.actors.status(actor.id).queued === 1 &&
+        state.agents.list().some((run) => run.status === "running"),
+    );
+    await state.actors.close();
+    actorManagers.splice(actorManagers.indexOf(state.actors), 1);
+
+    const inboxPath = path.join(state.root, "actors", actor.id, "inbox.json");
+    const inbox = JSON.parse(fs.readFileSync(inboxPath, "utf8")) as {
+      queued: Array<{ id: string; payload: { message: string } }>;
+    };
+    inbox.queued[0]!.payload.message = "replay first accepted item";
+    fs.writeFileSync(inboxPath, JSON.stringify(inbox, null, 2));
+
+    const restored = new ActorManager(
+      "test",
+      state.identity,
+      state.mesh,
+      state.meshConfig,
+      state.agents,
+      () => {},
+      { actorRoot: path.join(state.root, "actors"), persistent: true },
+    );
+    actorManagers.push(restored);
+    await waitFor(
+      () =>
+        restored.status(actor.id).status === "idle" &&
+        restored.messages(actor.id).filter((message) => message.direction === "out").length === 2,
+      5_000,
+    );
+
+    expect(
+      restored.messages(actor.id).filter((message) => message.direction === "in").map((message) => message.id),
+    ).toEqual(expect.arrayContaining([first.messageId, second.messageId]));
+    expect(
+      (JSON.parse(fs.readFileSync(inboxPath, "utf8")) as { queued: unknown[] }).queued,
+    ).toEqual([]);
+  });
+
+  it("deduplicates replayed terminal actor output by activation id", async () => {
+    const state = setup(true);
+    const actor = await state.actors.create({
+      name: "idempotent worker",
+      instructions: "Process work.",
+    });
+    const reply = await state.actors.ask(actor.id, "process once");
+    const activationId = reply.id.replace(/:out$/, "");
+    const inboxPath = path.join(state.root, "actors", actor.id, "inbox.json");
+    const durable = JSON.parse(fs.readFileSync(inboxPath, "utf8")) as {
+      queued: unknown[];
+      outbox: Array<{ id: string }>;
+    };
+    expect(durable.queued).toEqual([]);
+    expect(durable.outbox.map((message) => message.id)).toContain(reply.id);
+
+    await state.actors.close();
+    actorManagers.splice(actorManagers.indexOf(state.actors), 1);
+    const replay = JSON.parse(fs.readFileSync(inboxPath, "utf8")) as {
+      format: number;
+      actorId: string;
+      queued: unknown[];
+      outbox: unknown[];
+    };
+    replay.queued = [{
+      id: activationId,
+      source: "direct",
+      payload: { message: "process once" },
+      createdAt: reply.createdAt - 1,
+      activation: {
+        kind: "direct",
+        id: activationId,
+        source: "direct",
+        sequence: 1,
+        createdAt: reply.createdAt - 1,
+      },
+    }];
+    fs.writeFileSync(inboxPath, JSON.stringify(replay, null, 2));
+
+    const restored = new ActorManager(
+      "test",
+      state.identity,
+      state.mesh,
+      state.meshConfig,
+      state.agents,
+      () => {},
+      { actorRoot: path.join(state.root, "actors"), persistent: true },
+    );
+    actorManagers.push(restored);
+    await waitFor(
+      () => restored.status(actor.id).status === "idle" && restored.status(actor.id).queued === 0,
+      5_000,
+    );
+
+    expect(
+      restored.messages(actor.id).filter(
+        (message) => message.direction === "out" && message.id === reply.id,
+      ),
+    ).toHaveLength(1);
+    expect(
+      state.mesh.read({ topic: "fabric.actor.output" }).filter((event) => event.id === reply.id),
+    ).toHaveLength(1);
   });
 
   it("resumes a Claude Code session after a persistent actor is restored", async () => {

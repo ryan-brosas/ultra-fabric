@@ -8,7 +8,8 @@ import type {
   FabricParticipantKind,
   FabricPeerInfo,
 } from "../topology/types.js";
-import type { AgentUsage } from "../agents/types.js";
+import type { AgentAdmissionIntent, AgentUsage } from "../agents/types.js";
+import type { ModelRouteDecision } from "../routing/model-router.js";
 
 export type FabricUiMain = FabricMainAgentInfo;
 export type FabricUiPeer = FabricPeerInfo;
@@ -22,6 +23,9 @@ export interface FabricUiAgent {
   cwd: string;
   task?: string;
   model?: string;
+  route?: ModelRouteDecision;
+  profile?: string;
+  admission?: AgentAdmissionIntent;
   thinking?: string;
   currentTool?: string;
   startedAt?: number;
@@ -82,6 +86,35 @@ export interface FabricDashboardSnapshot {
   globalActors: GlobalActorDefinition[];
   state: FabricUiStateEntry[];
   events: MeshEvent[];
+  observability?: {
+    contextQos: {
+      passes: number;
+      retiredResults: number;
+      retiredChars: number;
+      protectedResults: number;
+    };
+    actorBudgets: {
+      actors: number;
+      open: number;
+      lifetimeExhausted: number;
+      windowExhausted: number;
+      lifetimeActivations: number;
+      lifetimeTokens: number;
+      rejectedActivations: number;
+      queueRejected: number;
+      activationDeadLetters: number;
+      deliveryDeadLetters: number;
+    };
+    outcomes: {
+      records: number;
+      succeeded: number;
+      verified: number;
+      downgraded: number;
+      evaluated: number;
+    };
+    workflows: number;
+    pathLeases: number;
+  };
 }
 
 export const activeStatuses = new Set([

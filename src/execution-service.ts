@@ -31,6 +31,22 @@ import {
 } from "./core/approval-controller.js";
 import { FabricAutoApprovalClassifier } from "./core/auto-approval-classifier.js";
 import {
+  admitConsult,
+  type ConsultAdmissionDecision,
+  type ConsultContextSnapshot,
+} from "./consult/policy.js";
+import { createFileEvidenceResolver } from "./consult/evidence.js";
+import {
+  reduceConsult,
+  type ConsultResult,
+  type ConsultWorkerInput,
+} from "./consult/reducer.js";
+import {
+  consultWorkerFailureStatus,
+  createConsultWorkerRequest,
+  projectConsultWorkerResult,
+} from "./consult/worker.js";
+import {
   codeUsesOrchestration,
   isBlockingOrchestrationRef,
 } from "./runtime/orchestration.js";
@@ -41,6 +57,16 @@ import type {
 } from "./runtime/quickjs-runtime.js";
 import type { NodeProcessRuntime } from "./runtime/node-process-runtime.js";
 import type { FabricTypeError } from "./runtime/type-checker.js";
+import {
+  createFabricRunContext,
+  type FabricEvidenceRef,
+  type FabricGateInput,
+  type FabricGateResult,
+  type FabricRunBudgetSnapshot,
+  type FabricRunEnvelopeV1,
+  type FabricRunTransition,
+} from "./run/context.js";
+import type { FabricConsultOutcome, FabricOutcomeInput } from "./outcomes/store.js";
 
 let runtimeDependencies:
   | Promise<{
@@ -79,6 +105,115 @@ const executionOutcomeFromTermination = (
   }
 };
 
+const fabricGateInput = (value: Record<string, unknown>): FabricGateInput => {
+  const gate = typeof value.gate === "string" ? value.gate.trim() : "";
+  if (!gate || gate.length > 256) {
+    throw new Error("Fabric gate name must be 1-256 characters");
+  }
+  if (typeof value.passed !== "boolean") {
+    throw new Error(`Fabric gate ${gate} requires passed: boolean`);
+  }
+  const disposition = value.disposition;
+  if (disposition !== "advise" && disposition !== "revise" && disposition !== "abort") {
+    throw new Error(`Fabric gate ${gate} has an invalid disposition`);
+  }
+  if (!Array.isArray(value.evidence) || value.evidence.length > 32) {
+    throw new Error(`Fabric gate ${gate} evidence must be an array of at most 32 refs`);
+  }
+  const evidence = value.evidence.map<FabricEvidenceRef>((entry) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error(`Fabric gate ${gate} contains an invalid evidence ref`);
+    }
+    const candidate = entry as Record<string, unknown>;
+    const kind = candidate.kind;
+    if (
+      (kind !== "command" &&
+        kind !== "artifact" &&
+        kind !== "trace" &&
+        kind !== "custom") ||
+      typeof candidate.ref !== "string" ||
+      !candidate.ref.trim() ||
+      candidate.ref.length > 2_048 ||
+      (candidate.digest !== undefined &&
+        (typeof candidate.digest !== "string" || candidate.digest.length > 256))
+    ) {
+      throw new Error(`Fabric gate ${gate} contains an invalid evidence ref`);
+    }
+    return {
+      kind,
+      ref: candidate.ref,
+      ...(typeof candidate.digest === "string" ? { digest: candidate.digest } : {}),
+    };
+  });
+  if (value.passed && evidence.length === 0) {
+    throw new Error(`Fabric gate ${gate} passing result requires acceptance evidence`);
+  }
+  if (typeof value.reason === "string" && value.reason.length > 4_096) {
+    throw new Error(`Fabric gate ${gate} reason exceeds 4096 characters`);
+  }
+  if (typeof value.error === "string" && value.error.length > 4_096) {
+    throw new Error(`Fabric gate ${gate} error exceeds 4096 characters`);
+  }
+  return {
+    gate,
+    passed: value.passed,
+    disposition,
+    evidence,
+    ...(typeof value.reason === "string" ? { reason: value.reason } : {}),
+    ...(typeof value.error === "string" ? { error: value.error } : {}),
+  };
+};
+
+const consultContextSnapshot = (context: ExtensionContext): ConsultContextSnapshot => {
+  let usage: ReturnType<ExtensionContext["getContextUsage"]>;
+  try {
+    usage = typeof context.getContextUsage === "function"
+      ? context.getContextUsage()
+      : undefined;
+  } catch {
+    usage = undefined;
+  }
+  const tokens = usage?.tokens !== null && usage?.tokens !== undefined &&
+    Number.isFinite(usage.tokens) ? Math.max(0, Math.floor(usage.tokens)) : null;
+  const contextWindow = usage && Number.isFinite(usage.contextWindow)
+    ? Math.max(0, Math.floor(usage.contextWindow))
+    : 0;
+  const ratio = usage?.percent !== null && usage?.percent !== undefined &&
+    Number.isFinite(usage.percent)
+    ? Math.max(0, Math.min(1, usage.percent / 100))
+    : tokens !== null && contextWindow > 0
+      ? Math.max(0, Math.min(1, tokens / contextWindow))
+      : null;
+  return { tokens, contextWindow, ratio };
+};
+
+const consultOutcomeSummary = (result: ConsultResult): FabricConsultOutcome => ({
+  status: result.status,
+  ...(result.mode ? { mode: result.mode } : {}),
+  ...(result.admission?.code ? { admissionCode: result.admission.code } : {}),
+  requested: result.coverage.requested,
+  started: result.coverage.started,
+  completed: result.coverage.completed,
+  accepted: result.coverage.accepted,
+  failed: result.coverage.failed,
+  rejected: result.coverage.rejected,
+  evidenceCount: result.evidenceCount,
+  contextRatio: result.context.ratio,
+  workerTokens: result.usage.tokens,
+  workerCost: result.usage.cost,
+});
+
+const fabricGateFailureMessage = (result: FabricGateResult): string | undefined => {
+  if (result.decision !== "abort") return undefined;
+  if (result.failure === "gate_crashed") {
+    return `Fabric gate crashed: ${result.gate}: ${result.error ?? "unknown error"}`;
+  }
+  if (result.failure === "revision_limit") {
+    return `Fabric gate revision limit exhausted: ${result.gate}`;
+  }
+  return `Fabric gate aborted: ${result.gate}${result.reason ? `: ${result.reason}` : ""}`;
+};
+
 const aggregateUsage = (usages: Usage[]): Usage => ({
   input: usages.reduce((total, usage) => total + usage.input, 0),
   output: usages.reduce((total, usage) => total + usage.output, 0),
@@ -112,6 +247,12 @@ export interface FabricExecutionResult {
   error?: string;
   handoffRequest?: Record<string, unknown>;
   usage?: Usage;
+  run?: FabricRunEnvelopeV1;
+  evidence?: FabricEvidenceRef[];
+  gates?: FabricGateResult[];
+  transitions?: FabricRunTransition[];
+  budget?: FabricRunBudgetSnapshot;
+  consult?: FabricConsultOutcome;
 }
 
 interface FabricExecutionPartial {
@@ -136,6 +277,90 @@ export interface FabricExecutionOptions {
   onPartial(snapshot: FabricExecutionPartial): void;
 }
 
+const outcomeRoute = (value: unknown): FabricOutcomeInput["routes"][number] | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const routeValue =
+    typeof record.route === "object" && record.route !== null && !Array.isArray(record.route)
+      ? record.route
+      : typeof record.agent === "object" && record.agent !== null && !Array.isArray(record.agent)
+        ? (record.agent as Record<string, unknown>).route
+        : undefined;
+  if (typeof routeValue !== "object" || routeValue === null || Array.isArray(routeValue)) {
+    return undefined;
+  }
+  const route = routeValue as Record<string, unknown>;
+  if (
+    typeof route.requestedModel !== "string" ||
+    typeof route.selectedModel !== "string" ||
+    typeof route.reason !== "string" ||
+    (route.quality !== "preserved" && route.quality !== "downgraded")
+  ) {
+    return undefined;
+  }
+  return {
+    requestedModel: route.requestedModel,
+    selectedModel: route.selectedModel,
+    reason: route.reason,
+    quality: route.quality,
+  };
+};
+
+const outcomeUsage = (
+  result: FabricExecutionResult,
+): { tokens: number; cost: number } => {
+  const values: Array<{ identity: string; value: unknown }> = [
+    ...(result.usage ? [{ identity: "execution", value: result.usage }] : []),
+    ...result.audits.map((audit) => {
+      if (typeof audit.result !== "object" || audit.result === null || Array.isArray(audit.result)) {
+        return { identity: `audit:${audit.nestedToolCallId}`, value: undefined };
+      }
+      const record = audit.result as Record<string, unknown>;
+      return {
+        identity: typeof record.id === "string"
+          ? `run:${record.id}`
+          : `audit:${audit.nestedToolCallId}`,
+        value: record.usage,
+      };
+    }),
+  ];
+  const seen = new Set<string>();
+  let tokens = 0;
+  let cost = 0;
+  for (const entry of values) {
+    if (seen.has(entry.identity)) continue;
+    seen.add(entry.identity);
+    if (typeof entry.value !== "object" || entry.value === null || Array.isArray(entry.value)) {
+      continue;
+    }
+    const usage = entry.value as Record<string, unknown>;
+    const total = typeof usage.totalTokens === "number"
+      ? usage.totalTokens
+      : [usage.input, usage.output, usage.cacheRead, usage.cacheWrite]
+          .reduce<number>((sum, amount) =>
+            sum + (typeof amount === "number" && Number.isFinite(amount) ? Math.max(0, amount) : 0),
+          0);
+    tokens += Math.max(0, total);
+    if (typeof usage.cost === "number" && Number.isFinite(usage.cost)) {
+      cost += Math.max(0, usage.cost);
+    } else if (
+      typeof usage.cost === "object" && usage.cost !== null && !Array.isArray(usage.cost) &&
+      typeof (usage.cost as Record<string, unknown>).total === "number"
+    ) {
+      cost += Math.max(0, (usage.cost as { total: number }).total);
+    }
+  }
+  return { tokens, cost };
+};
+
+const outcomeGateVerdict = (gates: readonly FabricGateResult[]): FabricOutcomeInput["gateVerdict"] => {
+  if (gates.some((gate) => gate.failure === "gate_crashed")) return "crashed";
+  if (gates.some((gate) => gate.decision === "abort")) return "abort";
+  if (gates.some((gate) => gate.decision === "revise")) return "revise";
+  if (gates.some((gate) => gate.passed)) return "passed";
+  return "none";
+};
+
 export class FabricExecutionService {
   #runtime: QuickJsRuntime | NodeProcessRuntime | undefined;
   #runtimeKind: FabricConfig["executor"]["runtime"] | undefined;
@@ -146,10 +371,96 @@ export class FabricExecutionService {
     readonly authorizer?: FabricExecutionAuthorizer,
     readonly autoApprovalClassifier = new FabricAutoApprovalClassifier(),
     readonly sessionApprovals = new FabricSessionApprovals(),
+    readonly outcomeSink?: { record(input: FabricOutcomeInput): Promise<unknown> },
   ) {}
+
+  async #recordOutcome(result: FabricExecutionResult): Promise<FabricExecutionResult> {
+    if (!this.outcomeSink || !result.run) return result;
+    const usage = outcomeUsage(result);
+    const routes = result.audits
+      .map((audit) => outcomeRoute(audit.result))
+      .filter((route): route is FabricOutcomeInput["routes"][number] => route !== undefined)
+      .filter((route, index, all) =>
+        all.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(route)) === index
+      );
+    await this.outcomeSink.record({
+      runId: result.run.runId,
+      traceId: result.run.traceId,
+      objectiveDigest: result.run.objectiveDigest,
+      outcome: result.trace.outcome,
+      startedAt: result.run.startedAt,
+      finishedAt: result.run.startedAt + result.elapsedMs,
+      durationMs: result.elapsedMs,
+      tokens: usage.tokens,
+      cost: usage.cost,
+      gateVerdict: outcomeGateVerdict(result.gates ?? []),
+      evidenceCount: result.evidence?.length ?? 0,
+      routes,
+      ...(result.consult ? { consult: result.consult } : {}),
+      admissionReasons: [...new Set(result.audits.flatMap((audit) => {
+        if (typeof audit.result !== "object" || audit.result === null || Array.isArray(audit.result)) {
+          return [];
+        }
+        const admission = (audit.result as Record<string, unknown>).admission;
+        if (typeof admission !== "object" || admission === null || Array.isArray(admission)) {
+          return [];
+        }
+        const reason = (admission as Record<string, unknown>).reason;
+        return typeof reason === "string" ? [reason] : [];
+      }))],
+    }).catch(() => undefined);
+    return result;
+  }
 
   async execute(options: FabricExecutionOptions): Promise<FabricExecutionResult> {
     const startedAt = performance.now();
+    const orchestrationTimeoutMs = Math.max(
+      this.config.executor.timeoutMs,
+      this.config.agents.timeoutMs,
+    );
+    const effectiveTimeoutMs = codeUsesOrchestration(options.code)
+      ? orchestrationTimeoutMs
+      : this.config.executor.timeoutMs;
+    const run = createFabricRunContext({
+      runId: options.parentToolCallId,
+      ...(process.env.PI_FABRIC_TRACE_ID
+        ? { traceId: process.env.PI_FABRIC_TRACE_ID }
+        : {}),
+      ...(process.env.PI_FABRIC_PARENT_RUN
+        ? { parentRunId: process.env.PI_FABRIC_PARENT_RUN }
+        : {}),
+      ...(process.env.PI_FABRIC_PARENT_SPAN_ID
+        ? { parentSpanId: process.env.PI_FABRIC_PARENT_SPAN_ID }
+        : {}),
+      objective: options.code,
+      timeoutMs: effectiveTimeoutMs,
+      ...(options.signal ? { signal: options.signal } : {}),
+      maxAgents: Math.max(
+        1,
+        Math.min(
+          options.maxAgentCalls ?? this.config.agents.maxPerExecution,
+          this.config.agents.maxPerExecution,
+        ),
+      ),
+      maxTokens: options.tokenBudget ?? Number.MAX_SAFE_INTEGER,
+      maxEvidence: this.config.executor.maxRunEvidence,
+      maxTransitions: this.config.executor.maxRunTransitions,
+      maxGateRevisions: this.config.executor.maxGateRevisions,
+    });
+    let consultOutcome: FabricConsultOutcome | undefined;
+    let consultAttempted = false;
+    let consultSequence = 0;
+    const consultAdmissions = new Map<string, ConsultAdmissionDecision>();
+    const consultWorkers = new Map<string, Map<string, ConsultWorkerInput>>();
+    run.transitions.record("accepted", run.envelope.startedAt);
+    const runDetails = () => ({
+      run: run.envelope,
+      evidence: run.evidence.list(),
+      gates: run.gates.list(),
+      transitions: run.transitions.list(),
+      budget: run.budget.snapshot(),
+      ...(consultOutcome ? { consult: { ...consultOutcome } } : {}),
+    });
     const traceRecorder = new FabricExecutionTraceRecorder();
     this.activity?.start(options.parentToolCallId, options.display);
     const dependencies = await loadRuntimeDependencies();
@@ -160,8 +471,10 @@ export class FabricExecutionService {
       dependencies.guestTypeDeclarations(effectiveFullCodeMode),
     );
     if (checked.errors.length > 0) {
+      run.transitions.recordTerminal("failed");
+      run.settle("failed");
       this.activity?.finish(options.parentToolCallId, false, "Type checking failed");
-      return {
+      return this.#recordOutcome({
         success: false,
         value: undefined,
         logs: [],
@@ -170,7 +483,8 @@ export class FabricExecutionService {
         trace: traceRecorder.seal("failed", [], "Type checking failed"),
         elapsedMs: performance.now() - startedAt,
         typeErrors: checked.errors,
-      };
+        ...runDetails(),
+      });
     }
 
     const classifierUsages: Usage[] = [];
@@ -198,26 +512,87 @@ export class FabricExecutionService {
       string,
       { kind: "parallel" | "pipeline"; operation: FabricExecutionTraceOperationHandle }
     >();
-    let agentCalls = 0;
     let handoffRequest: Record<string, unknown> | undefined;
-    const maxAgentCalls = Math.max(
-      1,
-      Math.min(
-        options.maxAgentCalls ?? this.config.agents.maxPerExecution,
-        this.config.agents.maxPerExecution,
-      ),
-    );
-    const guardAgentCall = (ref: string): void => {
-      if (
-        ref !== "agents.run" &&
-        ref !== "agents.handoff" &&
-        ref !== "agents.spawn" &&
-        ref !== "agents.create"
-      ) return;
-      agentCalls++;
-      if (agentCalls > maxAgentCalls) {
-        throw new Error(`Fabric agent budget exhausted (${maxAgentCalls} per execution)`);
+    const tokenBudgetEnabled = options.tokenBudget !== undefined;
+    const agentRefs = new Set([
+      "agents.run",
+      "agents.handoff",
+      "agents.spawn",
+      "agents.create",
+      "agents.ask",
+      "agents.tell",
+    ]);
+    const tokenBoundRefs = new Set([
+      "agents.run",
+      "agents.handoff",
+      "agents.spawn",
+      "agents.ask",
+      "agents.tell",
+    ]);
+    const blockingTokenRefs = new Set(["agents.run", "agents.ask"]);
+    const reserveAgentCall = (
+      ref: string,
+      args: Record<string, unknown>,
+    ): { id: string; tokens: number; args: Record<string, unknown> } | undefined => {
+      if (!agentRefs.has(ref)) return undefined;
+      const remaining = run.budget.snapshot().tokens.remaining;
+      let tokens = 0;
+      if (tokenBudgetEnabled && tokenBoundRefs.has(ref)) {
+        const requested =
+          typeof args.maxTokens === "number" && Number.isFinite(args.maxTokens)
+            ? Math.max(1, Math.floor(args.maxTokens))
+            : this.config.agents.maxTokensPerChild > 0
+              ? this.config.agents.maxTokensPerChild
+              : remaining;
+        tokens = Math.min(requested, remaining);
+        if (tokens < 1) {
+          throw new Error(`Fabric token budget exhausted (${run.budget.snapshot().tokens.limit} per execution)`);
+        }
       }
+      const reserved = run.budget.reserveAgent({ tokens });
+      if (!reserved.ok) {
+        if (reserved.reason === "agent_limit") {
+          throw new Error(`Fabric agent budget exhausted (${reserved.limit} per execution)`);
+        }
+        throw new Error(`Fabric token budget exhausted (${reserved.limit} per execution)`);
+      }
+      return {
+        ...reserved.reservation,
+        args: tokenBudgetEnabled && tokenBoundRefs.has(ref)
+          ? { ...args, maxTokens: reserved.reservation.tokens }
+          : args,
+      };
+    };
+    const resultTokens = (value: unknown): number => {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return 0;
+      const usage = (value as { usage?: unknown }).usage;
+      if (typeof usage !== "object" || usage === null || Array.isArray(usage)) return 0;
+      const record = usage as Record<string, unknown>;
+      return [record.input, record.output, record.cacheRead, record.cacheWrite].reduce<number>(
+        (total, amount) =>
+          total +
+          (typeof amount === "number" && Number.isFinite(amount)
+            ? Math.max(0, amount)
+            : 0),
+        0,
+      );
+    };
+    const settleAgentCall = (
+      ref: string,
+      reservation: { id: string; tokens: number } | undefined,
+      value: unknown,
+      failed = false,
+    ): void => {
+      if (!reservation) return;
+      let actualTokens = 0;
+      if (failed) {
+        if (ref === "agents.ask") actualTokens = reservation.tokens;
+      } else if (blockingTokenRefs.has(ref)) {
+        actualTokens = resultTokens(value);
+      } else if (tokenBoundRefs.has(ref)) {
+        actualTokens = reservation.tokens;
+      }
+      run.budget.settle(reservation.id, { actualTokens });
     };
     const fullCodeProvider = (value: string): "pi" | "extensions" | undefined => {
       const separator = value.indexOf(".");
@@ -288,22 +663,21 @@ export class FabricExecutionService {
     };
     const baseContext = {
       cwd: options.context.cwd,
+      get run() {
+        return run.envelope;
+      },
       signal: options.signal,
       parentToolCallId: options.parentToolCallId,
       nestedToolCallId: `${options.parentToolCallId}_metadata`,
       extensionContext: options.context,
       update,
     };
-    // Start known orchestration programs with the longer deadline. Calls
-    // reached through generic or computed refs are classified again at the
-    // host bridge and can extend the active sandbox deadline before they run.
-    const orchestrationTimeoutMs = Math.max(
-      this.config.executor.timeoutMs,
-      this.config.agents.timeoutMs,
-    );
-    const effectiveTimeoutMs = codeUsesOrchestration(options.code)
-      ? orchestrationTimeoutMs
-      : this.config.executor.timeoutMs;
+    // Calls reached through generic or computed refs can extend the active
+    // sandbox deadline before they run.
+    const extendRunDeadline = (minimumTimeoutMs: number): number => {
+      run.extendDeadline(Date.now() + minimumTimeoutMs);
+      return minimumTimeoutMs;
+    };
     const minimumTimeoutMsForHostCall = (
       ref: string,
       args: Record<string, unknown>,
@@ -327,9 +701,11 @@ export class FabricExecutionService {
               ? milliseconds
               : 0;
         if (requested > 0) {
-          return Math.max(
-            this.config.executor.timeoutMs,
-            Math.min(Math.floor(requested) + 5_000, MAX_AGENT_TIMEOUT_MS),
+          return extendRunDeadline(
+            Math.max(
+              this.config.executor.timeoutMs,
+              Math.min(Math.floor(requested) + 5_000, MAX_AGENT_TIMEOUT_MS),
+            ),
           );
         }
       }
@@ -343,7 +719,7 @@ export class FabricExecutionService {
               Math.min(Math.floor(targetArgs.timeoutMs), MAX_AGENT_TIMEOUT_MS),
             )
           : 0;
-      return Math.max(orchestrationTimeoutMs, requestedTimeoutMs);
+      return extendRunDeadline(Math.max(orchestrationTimeoutMs, requestedTimeoutMs));
     };
     const traceAttempt = async <T>(
       ref: string,
@@ -370,9 +746,12 @@ export class FabricExecutionService {
       callContext: typeof baseContext & { signal: AbortSignal },
     ): Promise<unknown> => {
       const traceOperation = traceRecorder.issueCall(ref, args);
+      let reservation:
+        | { id: string; tokens: number; args: Record<string, unknown> }
+        | undefined;
       try {
         guardFullCodeRef(ref);
-        guardAgentCall(ref);
+        reservation = reserveAgentCall(ref, args);
       } catch (error) {
         traceOperation.fail(
           "guard",
@@ -381,46 +760,54 @@ export class FabricExecutionService {
         );
         throw error;
       }
-      return this.registry.invoke(ref, args, {
-        ...callContext,
-        ...(ref === "agents.handoff"
-          ? {
-              deferHandoff(request: Record<string, unknown>) {
-                if (handoffRequest) {
-                  throw new Error(
-                    "Only one agents.handoff request is allowed per fabric_exec invocation",
-                  );
-                }
-                handoffRequest = structuredClone(request);
-                return {
-                  scheduled: true,
-                  status: "deferred",
-                  boundary: "fabric_exec_end",
-                };
-              },
+      try {
+        const value = await this.registry.invoke(ref, reservation?.args ?? args, {
+          ...callContext,
+          ...(ref === "agents.handoff"
+            ? {
+                deferHandoff(request: Record<string, unknown>) {
+                  if (handoffRequest) {
+                    throw new Error(
+                      "Only one agents.handoff request is allowed per fabric_exec invocation",
+                    );
+                  }
+                  handoffRequest = structuredClone(request);
+                  return {
+                    scheduled: true,
+                    status: "deferred",
+                    boundary: "fabric_exec_end",
+                  };
+                },
+              }
+            : {}),
+          ...(this.authorizer
+            ? {
+                authorize: (action) =>
+                  this.authorizer!.authorize(action.ref, options.parentToolCallId),
+              }
+            : {}),
+          approve: async (action, preparedArgs) => {
+            if (action.ref === "schema.commit") {
+              await approval.approve({ ...action, risk: "write" }, preparedArgs);
+              await approval.approve({ ...action, risk: "execute" }, preparedArgs);
+              return;
             }
-          : {}),
-        ...(this.authorizer
-          ? {
-              authorize: (action) =>
-                this.authorizer!.authorize(action.ref, options.parentToolCallId),
-            }
-          : {}),
-        approve: async (action, preparedArgs) => {
-          if (action.ref === "schema.commit") {
-            await approval.approve({ ...action, risk: "write" }, preparedArgs);
-            await approval.approve({ ...action, risk: "execute" }, preparedArgs);
-            return;
-          }
-          await approval.approve(action, preparedArgs);
-        },
-        audits,
-        maxResultChars: this.config.executor.maxNestedResultChars,
-        traceOperation,
-        observeInvocation,
-      });
+            await approval.approve(action, preparedArgs);
+          },
+          audits,
+          maxResultChars: this.config.executor.maxNestedResultChars,
+          traceOperation,
+          observeInvocation,
+        });
+        settleAgentCall(ref, reservation, value);
+        return value;
+      } catch (error) {
+        settleAgentCall(ref, reservation, undefined, true);
+        throw error;
+      }
     };
     let sandboxResult: FabricSandboxResult;
+    run.transitions.record("executing");
     try {
       const runtimeKind = this.config.executor.runtime;
       if (!this.#runtime || this.#runtimeKind !== runtimeKind) {
@@ -576,6 +963,191 @@ export class FabricExecutionService {
                 runtimeSignal,
                 () => update(String(args.message ?? "Working")),
               );
+            case "fabric.$runContext":
+              return traceAttempt(
+                "fabric.workflow.context",
+                args,
+                runtimeSignal,
+                () => ({
+                  run: run.envelope,
+                  budget: run.budget.snapshot(),
+                }),
+              );
+            case "fabric.$consultAdmit":
+              return traceAttempt(
+                "fabric.consult.admit",
+                {},
+                runtimeSignal,
+                () => {
+                  const budget = run.budget.snapshot();
+                  const context = consultContextSnapshot(options.context);
+                  let decision: ConsultAdmissionDecision;
+                  if (consultAttempted) {
+                    decision = {
+                      kind: "not_admitted",
+                      code: "already_attempted",
+                      message: "Only one Ultra Consult attempt is allowed per parent execution",
+                      context,
+                    };
+                  } else {
+                    const candidate = admitConsult(
+                      args.request,
+                      context,
+                      {
+                        enabled: this.config.consult.enabled && this.config.agents.enabled,
+                        maxWorkers: this.config.consult.maxWorkers,
+                        contextPressureThreshold: this.config.consult.contextPressureThreshold,
+                      },
+                    );
+                    decision = candidate.kind === "admitted" &&
+                        budget.agents.remaining < candidate.request.perspectives.length
+                      ? {
+                          kind: "not_admitted",
+                          code: "agent_budget_exhausted",
+                          message: "The parent execution has insufficient agent slots for Ultra Consult",
+                          context,
+                        }
+                      : candidate;
+                  }
+                  consultAttempted = true;
+                  const ticket = `consult-${++consultSequence}`;
+                  consultAdmissions.set(ticket, decision);
+                  if (decision.kind === "admitted") {
+                    consultWorkers.set(ticket, new Map());
+                    run.transitions.record("consult_admitted", Date.now(), {
+                      mode: decision.mode,
+                      workers: decision.request.perspectives.length,
+                      context: decision.context,
+                    });
+                    update(`Ultra Consult admitted ${decision.request.perspectives.length} ${decision.mode} worker(s)`);
+                  } else {
+                    run.transitions.record("consult_not_admitted", Date.now(), {
+                      code: decision.code,
+                      context: decision.context,
+                    });
+                    update(`Ultra Consult stayed inline: ${decision.code}`);
+                  }
+                  return { ...decision, ticket };
+                },
+              );
+            case "fabric.$consultWorker":
+              return traceAttempt(
+                "fabric.consult.worker",
+                {
+                  ticket: typeof args.ticket === "string" ? args.ticket : "",
+                  perspectiveId: typeof args.perspectiveId === "string" ? args.perspectiveId : "",
+                },
+                runtimeSignal,
+                async () => {
+                  const ticket = typeof args.ticket === "string" ? args.ticket : "";
+                  const perspectiveId = typeof args.perspectiveId === "string"
+                    ? args.perspectiveId
+                    : "";
+                  const admission = consultAdmissions.get(ticket);
+                  const workers = consultWorkers.get(ticket);
+                  if (admission?.kind !== "admitted" || !workers) {
+                    throw new Error("Unknown or non-admitted Ultra Consult ticket");
+                  }
+                  const perspective = admission.request.perspectives.find(
+                    (candidate) => candidate.id === perspectiveId,
+                  );
+                  if (!perspective) throw new Error("Unknown Ultra Consult perspective");
+                  const existing = workers.get(perspectiveId);
+                  if (existing) {
+                    return { perspectiveId, status: existing.status };
+                  }
+                  workers.set(perspectiveId, { perspectiveId, status: "not_started" });
+                  try {
+                    const workerContext = {
+                      ...callContext,
+                      consultReadScope: { scopes: [...perspective.scope] },
+                    };
+                    const value = await invokeAction(
+                      "agents.run",
+                      createConsultWorkerRequest(admission, perspective, this.config.consult),
+                      workerContext,
+                    );
+                    const worker = projectConsultWorkerResult(perspective.id, value);
+                    workers.set(perspective.id, worker);
+                    return { perspectiveId, status: worker.status };
+                  } catch (error) {
+                    const worker: ConsultWorkerInput = {
+                      perspectiveId,
+                      status: consultWorkerFailureStatus(error),
+                      error: error instanceof Error ? error.message.slice(0, 2_048) : String(error).slice(0, 2_048),
+                      ...(perspective.model ? { model: perspective.model } : {}),
+                    };
+                    workers.set(perspectiveId, worker);
+                    return { perspectiveId, status: worker.status };
+                  }
+                },
+              );
+            case "fabric.$consultReduce":
+              return traceAttempt(
+                "fabric.consult.reduce",
+                {},
+                runtimeSignal,
+                async () => {
+                  const ticket = typeof args.ticket === "string" ? args.ticket : "";
+                  const ticketed = ticket ? consultAdmissions.get(ticket) : undefined;
+                  const budget = run.budget.snapshot();
+                  const admission = ticketed ?? admitConsult(
+                    args.request,
+                    consultContextSnapshot(options.context),
+                    {
+                      enabled: this.config.consult.enabled && this.config.agents.enabled,
+                      maxWorkers: Math.min(
+                        this.config.consult.maxWorkers,
+                        Math.max(1, budget.agents.spent + budget.agents.remaining),
+                      ),
+                      contextPressureThreshold: this.config.consult.contextPressureThreshold,
+                    },
+                  );
+                  let result: ConsultResult;
+                  try {
+                    result = await reduceConsult(
+                      admission,
+                      ticket ? [...(consultWorkers.get(ticket)?.values() ?? [])] : [],
+                      {
+                        maxFindingsPerWorker: this.config.consult.maxFindingsPerWorker,
+                        maxEvidencePerFinding: this.config.consult.maxEvidencePerFinding,
+                      },
+                      createFileEvidenceResolver(options.context.cwd, {
+                        maxFileBytes: this.config.consult.maxEvidenceFileBytes,
+                        maxTotalBytes: this.config.consult.maxEvidenceBytesPerConsult,
+                      }),
+                    );
+                  } finally {
+                    if (ticket) {
+                      consultAdmissions.delete(ticket);
+                      consultWorkers.delete(ticket);
+                    }
+                  }
+                  if (ticket === "consult-1" || (!ticket && !consultOutcome)) {
+                    consultOutcome = consultOutcomeSummary(result);
+                  }
+                  if (admission.kind === "admitted") {
+                    const recorded = new Set<string>();
+                    for (const finding of result.findings) {
+                      for (const evidence of finding.evidence) {
+                        if (recorded.has(evidence.ref)) continue;
+                        recorded.add(evidence.ref);
+                        run.evidence.record({ kind: "artifact", ref: evidence.ref });
+                      }
+                    }
+                    run.transitions.record("consult_completed", Date.now(), {
+                      mode: admission.mode,
+                      status: result.status,
+                      coverage: result.coverage,
+                      evidenceCount: result.evidenceCount,
+                      context: result.context,
+                      usage: result.usage,
+                    });
+                    update(`Ultra Consult ${result.status}: ${result.coverage.accepted}/${result.coverage.requested} perspective(s) accepted`);
+                  }
+                  return result;
+                },
+              );
             case "fabric.$configure":
               return traceAttempt(
                 "fabric.workflow.configure",
@@ -617,6 +1189,40 @@ export class FabricExecutionService {
                   };
                 },
               );
+            case "fabric.$gate":
+              return traceAttempt(
+                "fabric.workflow.gate",
+                args,
+                runtimeSignal,
+                (setStage) => {
+                  const gate = typeof args.gate === "string" && args.gate.trim()
+                    ? args.gate.trim()
+                    : "invalid";
+                  try {
+                    setStage("validate");
+                    const input = fabricGateInput(args);
+                    for (const evidence of input.evidence) {
+                      const recorded = run.evidence.record(evidence);
+                      if (!recorded.ok) {
+                        throw new Error(`Fabric run evidence limit exhausted (${recorded.limit})`);
+                      }
+                    }
+                    const result = run.gates.record(input);
+                    run.transitions.record(`gate:${result.gate}:${result.decision}`);
+                    const gateError = fabricGateFailureMessage(result);
+                    if (gateError) throw new Error(gateError);
+                    setStage("invoke");
+                    return result;
+                  } catch (error) {
+                    run.gates.crash(
+                      gate,
+                      error instanceof Error ? error.message : String(error),
+                    );
+                    throw error;
+                  }
+                },
+              );
+
             case "fabric.$item":
               return traceAttempt(
                 "fabric.workflow.item",
@@ -680,29 +1286,57 @@ export class FabricExecutionService {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const outcome = executionOutcomeFromError(error, options.signal);
+      run.transitions.recordTerminal(outcome);
+      run.settle(outcome);
       this.activity?.finish(options.parentToolCallId, false, message);
+      await this.#recordOutcome({
+        success: false,
+        value: undefined,
+        logs: [],
+        audits,
+        phases,
+        trace: traceRecorder.seal(outcome, phases, message),
+        elapsedMs: performance.now() - startedAt,
+        error: message,
+        ...runDetails(),
+      });
       throw error;
     } finally {
       await this.registry.endInvocation(options.parentToolCallId);
       flushEmit();
     }
 
-    const runOutcome = executionOutcomeFromTermination(sandboxResult.terminationReason);
+    const runtimeOutcome = executionOutcomeFromTermination(sandboxResult.terminationReason);
+    const pendingRevisions = run.gates.pending();
+    const terminalGate = run.gates.terminal();
+    const terminalGateError = terminalGate
+      ? fabricGateFailureMessage(terminalGate)
+      : undefined;
+    const gateRevisionError =
+      !terminalGateError && runtimeOutcome === "succeeded" && pendingRevisions.length > 0
+        ? `Fabric gate revision required: ${pendingRevisions.join(", ")}`
+        : undefined;
+    const runOutcome = terminalGateError || gateRevisionError ? "failed" : runtimeOutcome;
     const succeeded = runOutcome === "succeeded";
-    this.activity?.finish(options.parentToolCallId, succeeded, sandboxResult.error);
-    return {
+    run.transitions.recordTerminal(succeeded ? "completed" : runOutcome);
+    run.settle(runOutcome);
+    const runError = terminalGateError ?? gateRevisionError ?? sandboxResult.error;
+    this.activity?.finish(options.parentToolCallId, succeeded, runError);
+    return this.#recordOutcome({
       success: succeeded,
-      value: sandboxResult.value,
+      value: terminalGateError || gateRevisionError ? undefined : sandboxResult.value,
       logs: sandboxResult.logs,
       audits,
       phases,
-      trace: traceRecorder.seal(runOutcome, phases, sandboxResult.error),
+      trace: traceRecorder.seal(runOutcome, phases, runError),
       elapsedMs: performance.now() - startedAt,
-      ...(sandboxResult.error ? { error: sandboxResult.error } : {}),
+      ...runDetails(),
+      ...(runError ? { error: runError } : {}),
       ...(handoffRequest ? { handoffRequest } : {}),
       ...(classifierUsages.length > 0
         ? { usage: aggregateUsage(classifierUsages) }
         : {}),
-    };
+    });
   }
 }

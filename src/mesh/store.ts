@@ -199,6 +199,7 @@ export class MeshStore {
   }
 
   async publish(input: {
+    id?: string;
     topic: string;
     kind?: string;
     from: MeshIdentity;
@@ -207,17 +208,36 @@ export class MeshStore {
     data?: unknown;
   }): Promise<MeshEvent> {
     this.#validateTopic(input.topic);
+    if (input.id !== undefined && (!input.id.trim() || input.id.length > 256)) {
+      throw new Error("Mesh event id must be 1-256 characters");
+    }
     if (input.to !== undefined && !input.to.trim()) throw new Error("Mesh recipient is empty");
     const eventData = input.data === undefined ? undefined : jsonClone(input.data);
+    const kind = input.kind?.trim() || "message";
+    const from = jsonClone(input.from);
     return this.#withLock(() => {
       this.#repairEventLog();
+      if (input.id) {
+        const existing = this.#findEventById(input.id);
+        if (existing) {
+          const sameIntent =
+            existing.topic === input.topic &&
+            existing.kind === kind &&
+            JSON.stringify(existing.from) === JSON.stringify(from) &&
+            existing.to === input.to &&
+            existing.text === input.text &&
+            JSON.stringify(existing.data) === JSON.stringify(eventData);
+          if (!sameIntent) throw new Error(`Mesh event id collision: ${input.id}`);
+          return existing;
+        }
+      }
       const sequence = Math.max(this.#readSequence(), this.#readLastEventSequence()) + 1;
       const event: MeshEvent = {
-        id: randomUUID(),
+        id: input.id ?? randomUUID(),
         sequence,
         topic: input.topic,
-        kind: input.kind?.trim() || "message",
-        from: jsonClone(input.from),
+        kind,
+        from,
         ...(input.to ? { to: input.to } : {}),
         ...(input.text !== undefined ? { text: input.text } : {}),
         ...(eventData !== undefined ? { data: eventData } : {}),
@@ -333,6 +353,31 @@ export class MeshStore {
       throw error;
     } finally {
       if (descriptor !== undefined) fs.closeSync(descriptor);
+    }
+  }
+
+  #findEventById(id: string): MeshEvent | undefined {
+    let before: number | undefined;
+    while (true) {
+      const page = readJsonlPage(
+        this.#eventsPath,
+        this.maxReadEvents,
+        before,
+        Math.max(this.maxEventBytes + 1, EVENT_READ_PAGE_BYTES),
+      );
+      for (let index = page.lines.length - 1; index >= 0; index--) {
+        const parsed = page.lines[index]?.parsed;
+        if (
+          typeof parsed === "object" &&
+          parsed !== null &&
+          !Array.isArray(parsed) &&
+          (parsed as { id?: unknown }).id === id
+        ) {
+          return parsed as MeshEvent;
+        }
+      }
+      if (!page.hasMore || page.before === undefined || page.before === before) return undefined;
+      before = page.before;
     }
   }
 

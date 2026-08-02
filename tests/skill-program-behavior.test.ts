@@ -33,6 +33,31 @@ function runSkill(name: string, context: Context): Promise<Record<string, unknow
 }
 
 const workflow = {
+  context: async () => ({
+    run: {
+      version: 1,
+      runId: "skill-test",
+      traceId: "trace-test",
+      spanId: "span-test",
+      objectiveDigest: "digest",
+      startedAt: 1,
+      deadline: 2,
+      cancellationOwner: "skill-test",
+    },
+    budget: {
+      agents: { limit: 100, spent: 0, reserved: 0, remaining: 100 },
+      tokens: {
+        limit: Number.MAX_SAFE_INTEGER,
+        spent: 0,
+        reserved: 0,
+        remaining: Number.MAX_SAFE_INTEGER,
+      },
+    },
+  }),
+  gate: async (input: Record<string, unknown>) => ({
+    ...input,
+    decision: input.passed === false && input.disposition === "revise" ? "revise" : "continue",
+  }),
   configure: async () => undefined,
   event: async () => undefined,
 };
@@ -201,13 +226,18 @@ describe("expensive skill program behavior", () => {
 
   it("preserves successful Workflow items and carries the objective through every phase", async () => {
     const prompts: string[] = [];
+    const admissions: string[] = [];
     const result = await runSkill("fabric-workflow", {
       π: { task: "audit authentication" },
       workflow,
       phase,
       parallel,
-      agent: async (prompt: string, options: { label: string }) => {
+      agent: async (
+        prompt: string,
+        options: { label: string; admission?: { reason: string } },
+      ) => {
         prompts.push(prompt);
+        if (options.admission) admissions.push(options.admission.reason);
         if (options.label === "inventory") return { items: ["a", "b", "c"] };
         if (options.label === "analyze b") throw new Error("worker failed");
         if (options.label === "verify synthesis") return "verified result";
@@ -222,6 +252,13 @@ describe("expensive skill program behavior", () => {
     });
     expect(result).not.toHaveProperty("fallback");
     expect(prompts.every((prompt) => prompt.includes("audit authentication"))).toBe(true);
+    expect(admissions).toEqual([
+      "independent_context",
+      "separable_parallel",
+      "separable_parallel",
+      "separable_parallel",
+      "independent_verification",
+    ]);
   });
 
   it("verifies even a single Workflow finding", async () => {

@@ -25,6 +25,9 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
     "memoryLimitBytes": 67108864,
     "maxOutputChars": 100000,
     "maxNestedResultChars": 2000000,
+    "maxGateRevisions": 2,
+    "maxRunEvidence": 256,
+    "maxRunTransitions": 512,
     "resultFormat": "auto"
   },
   "approvals": {
@@ -57,12 +60,19 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
   },
   "prewalk": {
     "mode": "in-place",
-    "alwaysRearm": false
+    "alwaysRearm": false,
+    "triggerRisks": [],
+    "triggerEffects": ["workspace"],
+    "triggerRefs": ["pi.edit", "pi.write", "schema.commit"]
   },
   "agents": {
     "enabled": true,
     "runner": "pi",
     "transport": "process",
+    "fallbackModels": [],
+    "allowQualityDowngrade": false,
+    "requireAdmissionIntent": false,
+    "capabilityProfiles": {},
     "claude": {
       "binary": "claude"
     },
@@ -78,6 +88,16 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
     "budgetUsd": 0,
     "maxTokensPerChild": 0
   },
+  "consult": {
+    "enabled": true,
+    "maxWorkers": 3,
+    "contextPressureThreshold": 0.6,
+    "maxFindingsPerWorker": 8,
+    "maxEvidencePerFinding": 8,
+    "maxEvidenceFileBytes": 2097152,
+    "maxEvidenceBytesPerConsult": 8388608,
+    "maxTokensPerWorker": 8000
+  },
   "ui": {
     "enabled": true,
     "widget": "auto",
@@ -91,6 +111,11 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
   "compaction": {
     "engine": "fabric"
   },
+  "outcomes": {
+    "enabled": true,
+    "maxRecords": 1000,
+    "minRecommendationSamples": 5
+  },
   "retention": {
     "orphanedTempRunMs": 21600000,
     "oneShotRunMs": 86400000,
@@ -103,12 +128,26 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
     "maxReadEvents": 500,
     "actorPollMs": 250,
     "actorQueueLimit": 32,
-    "eventContextChars": 40000
+    "actorOverflowPolicy": "reject",
+    "actorRunMaxAttempts": 1,
+    "actorRunBaseDelayMs": 250,
+    "actorRunMaxDelayMs": 5000,
+    "actorRunJitterMs": 100,
+    "actorDeliveryMaxAttempts": 3,
+    "actorDeliveryBaseDelayMs": 100,
+    "actorDeliveryMaxDelayMs": 2000,
+    "actorDeliveryJitterMs": 50,
+    "actorCircuitFailureThreshold": 3,
+    "actorCircuitCooldownMs": 30000,
+    "eventContextChars": 40000,
+    "actorContextEntries": 14
   }
 }
 ```
 
 ## Prewalk executor
+
+Prewalk trigger matching is host-owned. `prewalk.triggerEffects` defaults to `["workspace"]`; `prewalk.triggerRefs` preserves `pi.edit`, `pi.write`, and `schema.commit`. Optional `prewalk.triggerRisks` is broad and defaults empty because write-risk state bookkeeping is not necessarily a workspace mutation. A successful audit triggers when any configured set matches. Captured/external mutations participate when they declare `effect: "workspace"` or are named explicitly. Bash stays opaque unless explicitly named.
 
 `prewalk.model` is the optional Pi `provider/model` selected by `/fabric prewalk`. `prewalk.mode` chooses how execution continues:
 
@@ -119,18 +158,30 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
 {
   "prewalk": {
     "mode": "in-place",
+    "returnPolicy": "previous",
     "model": "anthropic/claude-haiku-4-5",
+    "fallbackModels": ["openai/gpt-5-mini", "google/gemini-2.5-flash"],
     "thinking": "high",
     "alwaysRearm": true
   }
 }
 ```
 
+`prewalk.fallbackModels` is an optional ordered list of at most eight unique Pi `provider/model` keys. In-place mode tries that finite chain only when the primary model is unavailable, unauthenticated, or fails during selection, before any continuation starts. The selected fallback is visible in the result and lifecycle. Trajectory mode never retries another child automatically because a failed child may already have changed the workspace.
+
 `prewalk.thinking` is the optional reasoning effort (`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`) for the trajectory child executor, clamped to each model's supported levels. When unset, the executor inherits `agents.thinking`; in-place mode keeps Main's session level.
 
-`prewalk.alwaysRearm` defaults to `false`. When enabled, prewalk returns to an armed, taskless state after each continuation or settled task. The settings UI labels an unset model **Ask each time**; non-interactive sessions must configure a model. In-place mode does not require child agents. Trajectory mode requires `agents.enabled` and exposes child spawn, progress, nested tools, metrics, and completion in Main's Fabric activity UI.
+`prewalk.alwaysRearm` defaults to `false`. When enabled, prewalk returns to an armed, taskless state after the matching hidden continuation reaches `agent_settled` or after a triggerless task settles; it does not re-arm inside the continuation's own work. A failed in-place switch or trajectory handoff enters a blocked state that preserves its task and attempt; it never retries automatically. Use `/fabric prewalk --status` to inspect the failure and `/fabric prewalk --retry` after correcting it. The settings UI labels an unset model **Ask each time**; non-interactive sessions must configure a model. In-place mode does not require child agents. Trajectory mode requires `agents.enabled` and exposes child spawn, progress, nested tools, metrics, and completion in Main's Fabric activity UI.
 
-Pi's public `setModel` extension API persists the in-place executor as the active session model and updates Pi's default model setting. Fabric does not silently restore the planner model after the task.
+Set `prewalk.verificationMode` to `"gated"` to require an identity-owned verification continuation to finish through `workflow.gate()`. A passing evidence gate settles the task; `revise` returns only scoped failure evidence to the executor; abort, crash, missing evidence, or exceeding `prewalk.maxPhaseRevisions` blocks without losing task intent. The compatibility default remains prompt-only verification when the field is omitted. `maxPhaseRevisions` defaults to 2 and is bounded to 0–8.
+
+`prewalk.returnPolicy` controls in-place model ownership. `"executor"` (default) keeps the executor selected. `"previous"` snapshots Main's current provider/model at the handoff boundary and restores it only after the identity-owned continuation reaches `agent_settled`; trajectory mode never changes Main's model. An unavailable or unauthenticated return model is reported visibly and the completed task is not rerun.
+
+## Run context and gates
+
+Every `fabric_exec` creates one bounded run envelope with run, trace, span, optional parent, objective digest, deadline, and cancellation-owner identity. The envelope crosses provider and child-agent boundaries; recursive Pi children and direct actor ask/tell activations inherit the same trace. Host calls that legitimately extend the sandbox timeout also extend the immutable envelope snapshot monotonically before provider invocation. `executor.maxRunEvidence` bounds evidence refs; `executor.maxRunTransitions` bounds both typed transitions and ordered gate results, with terminal entries replacing the last non-terminal entry when necessary. `executor.maxGateRevisions` bounds failed `revise` dispositions; an unresolved revision prevents successful settlement, while a crashed gate aborts as infrastructure failure.
+
+A finite per-call `tokenBudget` is admission-enforced rather than merely observed. Concurrent agent calls reserve before invocation and each child receives a hard `maxTokens` ceiling. Sequential calls reclaim unused reserved tokens. The existing `agents.budgetUsd` ledger remains settlement-based because model cost has no defensible hard pre-run estimate.
 
 ## Result formatting
 
@@ -266,7 +317,15 @@ Cleanup runs during active Fabric sessions and when a new top-level run manager 
 
 `agents.runner` selects the default harness (`"pi"` or `"claude"`). `agents.model` is the optional Pi `provider/id` override; `agents.claude.model` is the optional canonical Claude runtime key. `agents.claude.binary` defaults to `claude` and can be an absolute path or wrapper; `PI_FABRIC_CLAUDE_BINARY` overrides it for the current process. `/fabric settings` enumerates Claude models from that binary in the background and stores the two runner defaults independently.
 
+`agents.fallbackModels` is an ordered list of at most eight Pi `provider/id` alternatives. A run or handoff opts into host routing by supplying `requirements` and/or `fallbackModels`. Requirements can constrain `input` (`text`/`image`), reasoning support, minimum context/output limits, and maximum input/output cost rates. Fabric checks model-registry availability and authentication before launch. Capability-preserving routes are automatic. A route that loses context, output ceiling, reasoning, or modalities is blocked unless host config sets `agents.allowQualityDowngrade: true`. A request may narrow that policy with `allowQualityDowngrade: false` but cannot elevate it. Handles and results include a typed route decision with bounded rejection reasons.
+
 Fabric worker processes are JavaScript modules launched by a JS runtime. When Pi runs as a generic Node.js or Bun runtime (`process.execPath` is `node`/`bun`), that runtime is reused. When Pi ships as a Bun-compiled single-file binary (`process.execPath` is the `pi` executable, not node/bun), Fabric resolves a runtime from `PI_FABRIC_NODE_BINARY`, otherwise from the first `node` or `bun` on `PATH`, and only the resolved runtime launches workers — never the bundled binary itself. `PI_FABRIC_NODE_BINARY` overrides this for the current process. The Node-process executor (`executor.runtime: "node-process"`) always requires Node.js specifically, since its `--eval`/`--input-type=module` flags are Node-only.
+
+Admission and capability controls:
+
+- `requireAdmissionIntent` — when true, every one-shot run/spawn/handoff must declare `admission.reason` and `expectedArtifact`. The bounded reasons are independent context, separable parallel work, capability gap, long-running work, and independent verification.
+- `capabilityProfiles` — named host profiles with fixed `tools` and recursive `risks`. A request supplies only the profile name; it cannot elevate that profile. Recursive workers receive the profile grants through the existing inherited-risk boundary.
+- `fallbackModels` / `allowQualityDowngrade` — ordered capability-aware routing and host-only downgrade permission.
 
 Other agent settings:
 
@@ -282,6 +341,27 @@ Other agent settings:
 - `notifyOnComplete` — send a follow-up completion message for a detached `agents.spawn()`.
 
 See [agents, actors & mesh](agents.md) for the runner and transport details.
+
+## Ultra Consult
+
+`consult.run()` is enabled by default but host admission starts at zero workers. It is a core context-management primitive, not a permission bypass: every admitted child consumes the normal execution agent/token reservation, is fixed to the Pi runner, receives only read/grep/find/ls, has extensions and recursion disabled, and cannot mutate the workspace.
+
+- `enabled` — disables admission entirely when false.
+- `maxWorkers` — one-call worker ceiling, clamped to 1–3 and further limited by the parent execution's remaining agent budget.
+- `contextPressureThreshold` — occupancy ratio for unscoped `context_capacity` requests, clamped to 0.25–0.95. Explicit non-overlapping path partitions can be admitted before the threshold.
+- `maxFindingsPerWorker` — accepted structured findings per worker, clamped to 1–16.
+- `maxEvidencePerFinding` — candidate file addresses per finding, clamped to 1–16.
+- `maxEvidenceFileBytes` — maximum bytes read from one file when validating cited line ranges, clamped to 1 KiB–16 MiB.
+- `maxEvidenceBytesPerConsult` — cumulative descriptor-read ceiling across unique evidence files in one Consult, clamped to 1 KiB–64 MiB. Repeated citations reuse the cached file snapshot.
+- `maxTokensPerWorker` — per-child ceiling before any smaller execution-wide token reservation is applied, clamped to 256–1,000,000.
+
+One parent `fabric_exec` may attempt Consult once. A declined admission returns `status: "not_admitted"` with a machine-readable code and starts no child. Settings apply live; the **Ultra Consult** page in `/fabric settings` exposes every field.
+
+## Outcomes and path leases
+
+`outcomes.enabled` records derived terminal metrics in project mesh state. `maxRecords` bounds capacity and `minRecommendationSamples` prevents route recommendations from appearing early. Records contain identity digests, verdict, duration, usage, routes, admission reasons, optional prompt-free Consult coverage/context/cost metrics, and scores, never prompts, result bodies, Consult findings, media, gate reasons, or judge prose.
+
+`leases.acquire`, `leases.release`, and `leases.list` are runtime APIs rather than static config. Active file/tree leases are owned by the current run and block foreign `pi.edit`/`pi.write` calls before mutation. They do not inspect shell commands; use worktrees for untrusted or opaque writers.
 
 ## MCP
 
@@ -309,6 +389,12 @@ Mesh data defaults to `<project>/.pi/fabric/mesh`. Set `mesh.root` to a relative
 
 - `"project"` (default) keeps a shared actor registry at `.pi/fabric/mesh/actors/`, so actors survive `/new`. The participant directory chooses each live execution owner; other sessions keep passive views and reload on takeover. Registry writes are lock-serialized and merge only locally owned actor records.
 - `"session"` isolates actors per Pi session (under `.pi/fabric/mesh/actors/<sessionId>/`). Use this when you run concurrent Pi sessions in one project and want each to own its own actors.
+
+Each persistent actor writes accepted queued and in-flight activations to its atomic `inbox.json` before acknowledging them. Interrupted in-flight work re-enters the queue under the same ID. `mesh.actorQueueLimit` bounds pending activations. `mesh.actorOverflowPolicy` is `"reject"` (default), `"coalesce"` by source, `"drop-oldest"`, or `"dead-letter"`; displaced work gets an explicit terminal mailbox record rather than silent loss.
+
+Zero-effect actor startup failures can retry one-for-one under `mesh.actorRunMaxAttempts` (default 1) with `actorRunBaseDelayMs`, `actorRunMaxDelayMs`, and `actorRunJitterMs`. Fabric retries only when the failed run reports zero turns, zero tool calls, and zero token usage; any observable model/tool activity remains terminal to avoid replaying possible effects. The resulting outbox message records `runAttempts`.
+
+Actor output delivery uses `mesh.actorDeliveryMaxAttempts` with exponential delay from `actorDeliveryBaseDelayMs`, capped by `actorDeliveryMaxDelayMs`, plus up to `actorDeliveryJitterMs` jitter. Mesh publication is deduplicated by the actor outbox message ID. Exhausted channels become dead letters. After `actorCircuitFailureThreshold` terminal Main-delivery failures, the persisted circuit opens for `actorCircuitCooldownMs`; one half-open probe then closes or reopens it.
 
 `mesh.eventContextChars` bounds the sanitized JSON context attached to each host-event activation. Images are extracted before this bound, represented by redacted descriptors in actor mailboxes and the registry, and forwarded out of band to the actor runner automatically; the configured character bound does not truncate their base64.
 

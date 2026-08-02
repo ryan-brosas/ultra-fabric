@@ -533,7 +533,7 @@ const createSimpleDiff = (before: string, after: string): string => {
   let changed = false;
   let firstChangedLine = 1;
   const context = 3;
-  const contextLines = (lines: string[], oldStart: number, newStart: number): string[] =>
+  const contextLines = (lines: string[], newStart: number): string[] =>
     lines.map((line, offset) => ` ${newStart + offset} ${line}`);
   for (let index = 0; index < changes.length; index++) {
     const change = changes[index]!;
@@ -543,14 +543,14 @@ const createSimpleDiff = (before: string, after: string): string => {
       const later = hasChangeAfter[index] ?? false;
       if (!changed && later) {
         const start = Math.max(0, lines.length - context);
-        out.push(...contextLines(lines.slice(start), oldLine + start, newLine + start));
+        out.push(...contextLines(lines.slice(start), newLine + start));
       } else if (changed) {
         if (later && lines.length > context * 2) {
-          out.push(...contextLines(lines.slice(0, context), oldLine, newLine));
+          out.push(...contextLines(lines.slice(0, context), newLine));
           out.push("...");
-          out.push(...contextLines(lines.slice(-context), oldLine + lines.length - context, newLine + lines.length - context));
+          out.push(...contextLines(lines.slice(-context), newLine + lines.length - context));
         } else {
-          out.push(...contextLines(lines.slice(0, later ? lines.length : context), oldLine, newLine));
+          out.push(...contextLines(lines.slice(0, later ? lines.length : context), newLine));
         }
       }
       oldLine += lines.length;

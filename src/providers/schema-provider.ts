@@ -161,6 +161,7 @@ const descriptors: FabricActionDescriptor[] = [
       additionalProperties: false,
     },
     risk: "execute",
+    effect: "workspace",
     namespace: "schema",
   },
   {

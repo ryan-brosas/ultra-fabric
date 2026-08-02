@@ -29,6 +29,8 @@ export const parseWorkerOptions = (
   const model = optional(args, "model");
   const thinking = optional(args, "thinking");
   const fabricExtensionPath = optional(args, "fabric-extension");
+  const consultScopeExtensionPath = optional(args, "consult-scope-extension");
+  const consultReadScope = optional(args, "consult-read-scope");
   const schemaFile = optional(args, "schema-file");
   const imagesFile = optional(args, "images-file");
   const systemPrompt = optional(args, "system-prompt");
@@ -46,6 +48,9 @@ export const parseWorkerOptions = (
   const maxTokens = optional(args, "max-tokens");
   const runnerSessionId = optional(args, "runner-session-id");
   const mainAgentId = optional(args, "main-agent-id");
+  const traceId = optional(args, "trace-id");
+  const parentRunId = optional(args, "parent-run-id");
+  const parentSpanId = optional(args, "parent-span-id");
   const runner = required(args, "runner");
   if (runner !== "pi" && runner !== "claude") {
     throw new Error(`Unsupported Fabric agent runner: ${runner}`);
@@ -67,11 +72,16 @@ export const parseWorkerOptions = (
     depth: Number(required(args, "depth")),
     fullCodeMode: required(args, "full-code-mode") === "true",
     ...(mainAgentId ? { mainAgentId } : {}),
+    ...(traceId ? { traceId } : {}),
+    ...(parentRunId ? { parentRunId } : {}),
+    ...(parentSpanId ? { parentSpanId } : {}),
     extensions: required(args, "extensions") === "true",
     tools: JSON.parse(required(args, "tools")) as string[],
     grantedRisks: JSON.parse(required(args, "granted-risks")) as string[],
     transport: required(args, "transport") as AgentWorkerOptions["transport"],
     ...(fabricExtensionPath ? { fabricExtensionPath } : {}),
+    ...(consultScopeExtensionPath ? { consultScopeExtensionPath } : {}),
+    ...(consultReadScope ? { consultReadScope: JSON.parse(consultReadScope) as string[] } : {}),
     ...(model ? { model } : {}),
     ...(thinking ? { thinking } : {}),
     ...(systemPrompt ? { systemPrompt } : {}),

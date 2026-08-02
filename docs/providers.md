@@ -38,7 +38,7 @@ export default function extension(pi: ExtensionAPI) {
 }
 ```
 
-Providers own their schemas, state, and execution semantics. Pi Fabric validates arguments, enforces the declared risk policy, records nested-call audits, and propagates cancellation. A provider can enrich the generic [activity surface](interface.md#data-driven-activity) without registering a TUI component:
+Providers own their schemas, state, and execution semantics. Descriptors may declare `effect: "workspace" | "state" | "external" | "none"` independently of approval `risk`; Prewalk can match workspace effects without treating state bookkeeping as code mutation. Pi Fabric validates arguments, enforces the declared risk policy, records nested-call audits, and propagates cancellation. A provider can enrich the generic [activity surface](interface.md#data-driven-activity) without registering a TUI component:
 
 ```ts
 async invoke(actionName, args, context) {
@@ -48,6 +48,16 @@ async invoke(actionName, args, context) {
   return job.result;
 }
 ```
+
+## Built-in control providers
+
+Ultra Fabric adds three project-mesh providers:
+
+- `workflows` stores durable phase graphs and identity-owned leases.
+- `leases` stores cooperative file/tree write ownership and is enforced by `pi.edit`/`pi.write`.
+- `outcomes` stores bounded derived run metrics, fixture/model-judge verdicts, and sample-gated recommendations.
+
+They use the same provider validation, risk approval, trace, timeout, and cancellation path as external providers. Their stored values deliberately omit code, prompts, result bodies, media, and unrestricted error prose.
 
 ## Nested `tool_result` proxy
 

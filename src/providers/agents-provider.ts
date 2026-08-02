@@ -49,6 +49,11 @@ import type {
 } from "../agents/types.js";
 import { isFabricThinking } from "../thinking.js";
 import { AgentTranscriptReader, recentTranscriptTools } from "../ui/transcript.js";
+import {
+  routeModel,
+  type ModelRouteCandidate,
+  type ModelRouteRequirements,
+} from "../routing/model-router.js";
 
 const runProperties = {
   task: { type: "string", description: "A self-contained task for the child agent" },
@@ -66,6 +71,44 @@ const runProperties = {
     type: "string",
     description: "Pi provider/id key or Claude claude/<runtime-value> key from agents.models().",
   },
+  profile: {
+    type: "string",
+    description: "Host-configured capability profile that fixes child tools and recursive risk grants.",
+  },
+  admission: {
+    type: "object",
+    properties: {
+      reason: {
+        type: "string",
+        enum: ["independent_context", "separable_parallel", "capability_gap", "long_running", "independent_verification"],
+      },
+      expectedArtifact: { type: "string", minLength: 1, maxLength: 512 },
+    },
+    required: ["reason", "expectedArtifact"],
+    additionalProperties: false,
+  },
+  fallbackModels: {
+    type: "array",
+    maxItems: 8,
+    items: { type: "string" },
+    description: "Ordered Pi provider/id alternatives considered before launch.",
+  },
+  requirements: {
+    type: "object",
+    properties: {
+      input: { type: "array", items: { type: "string", enum: ["text", "image"] } },
+      reasoning: { type: "boolean" },
+      minContextWindow: { type: "number", minimum: 1 },
+      minOutputTokens: { type: "number", minimum: 1 },
+      maxInputCost: { type: "number", minimum: 0 },
+      maxOutputCost: { type: "number", minimum: 0 },
+    },
+    additionalProperties: false,
+  },
+  allowQualityDowngrade: {
+    type: "boolean",
+    description: "May only narrow the host agents.allowQualityDowngrade policy; it cannot elevate it.",
+  },
   thinking: {
     type: "string",
     enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
@@ -75,6 +118,11 @@ const runProperties = {
     type: "number",
     description:
       "Optional longer wall-clock limit in milliseconds. Omit to use agents.timeoutMs (60 minutes by default); values below the configured default are ignored.",
+  },
+  maxTokens: {
+    type: "number",
+    minimum: 1,
+    description: "Hard per-child token ceiling, injected automatically by a finite Fabric run reservation.",
   },
   extensions: { type: "boolean" },
   recursive: { type: "boolean" },
@@ -102,9 +150,15 @@ const handoffSchema = {
       ...runProperties.model,
       description: "Explicit Pi provider/id target that will continue the inherited trajectory",
     },
+    fallbackModels: runProperties.fallbackModels,
+    requirements: runProperties.requirements,
+    allowQualityDowngrade: runProperties.allowQualityDowngrade,
+    profile: runProperties.profile,
+    admission: runProperties.admission,
     thinking: runProperties.thinking,
     tools: runProperties.tools,
     timeoutMs: runProperties.timeoutMs,
+    maxTokens: runProperties.maxTokens,
     extensions: runProperties.extensions,
     recursive: runProperties.recursive,
     schema: runProperties.schema,
@@ -313,6 +367,15 @@ const descriptors: FabricActionDescriptor[] = [
         transport: runProperties.transport,
         timeoutMs: runProperties.timeoutMs,
         extensions: runProperties.extensions,
+        budget: {
+          type: "object",
+          properties: {
+            lifetimeActivations: { type: "number", minimum: 0 },
+            windowActivations: { type: "number", minimum: 0 },
+            windowMs: { type: "number", minimum: 1000 },
+          },
+          additionalProperties: false,
+        },
         validWhile: {
           type: "object",
           properties: { version: { const: 1 }, source: { type: "string" } },
@@ -350,7 +413,12 @@ const descriptors: FabricActionDescriptor[] = [
     description: "Send a message to a persistent actor and wait for its next response",
     inputSchema: {
       type: "object",
-      properties: { id: { type: "string" }, message: { type: "string" }, data: {} },
+      properties: {
+        id: { type: "string" },
+        message: { type: "string" },
+        data: {},
+        maxTokens: runProperties.maxTokens,
+      },
       required: ["id", "message"],
       additionalProperties: false,
     },
@@ -361,7 +429,12 @@ const descriptors: FabricActionDescriptor[] = [
     description: "Queue a message for a persistent actor without waiting",
     inputSchema: {
       type: "object",
-      properties: { id: { type: "string" }, message: { type: "string" }, data: {} },
+      properties: {
+        id: { type: "string" },
+        message: { type: "string" },
+        data: {},
+        maxTokens: runProperties.maxTokens,
+      },
       required: ["id", "message"],
       additionalProperties: false,
     },
@@ -457,6 +530,12 @@ const descriptors: FabricActionDescriptor[] = [
     risk: "read",
   },
   {
+    name: "actorTelemetry",
+    description: "Read aggregate actor activation, token, and quota-rejection telemetry",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    risk: "read",
+  },
+  {
     name: "messages",
     description: "Read a persistent actor's bounded inbox and outbox history",
     inputSchema: {
@@ -466,6 +545,21 @@ const descriptors: FabricActionDescriptor[] = [
       additionalProperties: false,
     },
     risk: "read",
+  },
+  {
+    name: "retryDelivery",
+    description:
+      "Retry failed mesh/Main delivery for one actor outbox message under its stable message id. Exhaustion dead-letters the failed channel.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        messageId: { type: "string" },
+      },
+      required: ["id", "messageId"],
+      additionalProperties: false,
+    },
+    risk: "agent",
   },
   {
     name: "setModel",
@@ -672,7 +766,33 @@ const runRequest = (
       ? args.transport
       : undefined;
   const thinking = isFabricThinking(args.thinking) ? args.thinking : undefined;
-  const tools = stringArray(args.tools);
+  const profileName = typeof args.profile === "string" && args.profile.trim()
+    ? args.profile.trim()
+    : undefined;
+  const profile = profileName ? manager.config.capabilityProfiles[profileName] : undefined;
+  if (profileName && !profile) throw new Error(`Unknown Fabric agent capability profile: ${profileName}`);
+  const rawAdmission =
+    typeof args.admission === "object" && args.admission !== null && !Array.isArray(args.admission)
+      ? args.admission as Record<string, unknown>
+      : undefined;
+  const reason = rawAdmission?.reason;
+  const expectedArtifact = typeof rawAdmission?.expectedArtifact === "string"
+    ? rawAdmission.expectedArtifact.trim().slice(0, 512)
+    : "";
+  const validReason =
+    reason === "independent_context" || reason === "separable_parallel" ||
+    reason === "capability_gap" || reason === "long_running" ||
+    reason === "independent_verification";
+  if (args.admission !== undefined && (!rawAdmission || !validReason || !expectedArtifact)) {
+    throw new Error("Fabric agent admission requires a valid reason and expectedArtifact");
+  }
+  if (manager.config.requireAdmissionIntent && (!validReason || !expectedArtifact)) {
+    throw new Error("Fabric agent launch requires an admission intent");
+  }
+  const admission: AgentRunRequest["admission"] = validReason && expectedArtifact
+    ? { reason, expectedArtifact }
+    : undefined;
+  const tools = profile ? [...profile.tools] : stringArray(args.tools);
   const timeoutMs = longerTimeoutOverride(args.timeoutMs, manager);
   const runner = args.runner === "pi" || args.runner === "claude" ? args.runner : manager.config.runner;
   const inheritedModel =
@@ -689,16 +809,126 @@ const runRequest = (
       : inheritedModel
         ? { model: inheritedModel }
         : {}),
+    ...(profileName ? { profile: profileName } : {}),
+    ...(admission ? { admission } : {}),
+    ...(profile ? { grantedRisks: [...profile.risks] } : {}),
     ...(thinking ? { thinking } : {}),
     ...(tools ? { tools } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(typeof args.maxTokens === "number" && Number.isFinite(args.maxTokens)
+      ? { maxTokens: Math.max(1, Math.floor(args.maxTokens)) }
+      : {}),
     ...(typeof args.extensions === "boolean" ? { extensions: args.extensions } : {}),
     ...(typeof args.recursive === "boolean" ? { recursive: args.recursive } : {}),
     ...(typeof args.worktree === "boolean" ? { worktree: args.worktree } : {}),
+    ...(context.run ? { runContext: context.run } : {}),
     ...(typeof args.schema === "object" && args.schema !== null && !Array.isArray(args.schema)
       ? { schema: args.schema as Record<string, unknown> }
       : {}),
+    ...(context.consultReadScope
+      ? { consultReadScope: [...context.consultReadScope.scopes] }
+      : {}),
   };
+};
+
+const routeRequirements = (value: unknown): ModelRouteRequirements => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const input = value as Record<string, unknown>;
+  const modalities = Array.isArray(input.input)
+    ? input.input.filter((kind): kind is "text" | "image" => kind === "text" || kind === "image")
+    : undefined;
+  const finite = (candidate: unknown): number | undefined =>
+    typeof candidate === "number" && Number.isFinite(candidate) && candidate >= 0
+      ? candidate
+      : undefined;
+  const minContextWindow = finite(input.minContextWindow);
+  const minOutputTokens = finite(input.minOutputTokens);
+  const maxInputCost = finite(input.maxInputCost);
+  const maxOutputCost = finite(input.maxOutputCost);
+  return {
+    ...(modalities && modalities.length > 0 ? { input: [...new Set(modalities)] } : {}),
+    ...(input.reasoning === true ? { reasoning: true } : {}),
+    ...(minContextWindow !== undefined ? { minContextWindow } : {}),
+    ...(minOutputTokens !== undefined ? { minOutputTokens } : {}),
+    ...(maxInputCost !== undefined ? { maxInputCost } : {}),
+    ...(maxOutputCost !== undefined ? { maxOutputCost } : {}),
+  };
+};
+
+const routedRunRequest = async (
+  args: Record<string, unknown>,
+  context: FabricInvocationContext,
+  manager: AgentManager,
+): Promise<AgentRunRequest> => {
+  const request = runRequest(args, context, manager);
+  const configuredFallbacks = Array.isArray(args.fallbackModels)
+    ? args.fallbackModels
+    : manager.config.fallbackModels;
+  const fallbackModels = [...new Set(
+    configuredFallbacks
+      .filter((value): value is string =>
+        typeof value === "string" && /^[^/\s]+\/\S+$/.test(value.trim())
+      )
+      .map((value) => value.trim()),
+  )].slice(0, 8);
+  const routingRequested =
+    fallbackModels.length > 0 ||
+    (typeof args.requirements === "object" && args.requirements !== null);
+  if (!routingRequested) return request;
+  if ((request.runner ?? manager.config.runner) !== "pi") {
+    throw new Error("Capability routing is supported only for Pi provider/id models");
+  }
+  const requestedModel =
+    request.model ?? manager.config.model ??
+    (context.extensionContext.model
+      ? `${context.extensionContext.model.provider}/${context.extensionContext.model.id}`
+      : undefined);
+  if (!requestedModel) throw new Error("Capability routing requires a primary Pi model");
+  const keys = [...new Set([requestedModel, ...fallbackModels])];
+  const registry = context.extensionContext.modelRegistry;
+  const candidates: ModelRouteCandidate[] = [];
+  for (const key of keys) {
+    const separator = key.indexOf("/");
+    const model = separator > 0
+      ? registry.find(key.slice(0, separator), key.slice(separator + 1))
+      : undefined;
+    if (!model) {
+      candidates.push({
+        key, available: false, authenticated: false, input: [], reasoning: false,
+        contextWindow: 0, maxTokens: 0, inputCost: 0, outputCost: 0,
+      });
+      continue;
+    }
+    let authenticated = false;
+    try {
+      const auth = await registry.getApiKeyAndHeaders(model);
+      authenticated = auth.ok;
+    } catch {
+      authenticated = false;
+    }
+    candidates.push({
+      key,
+      available: true,
+      authenticated,
+      input: model.input.filter((kind): kind is "text" | "image" =>
+        kind === "text" || kind === "image"
+      ),
+      reasoning: model.reasoning,
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
+      inputCost: model.cost.input,
+      outputCost: model.cost.output,
+    });
+  }
+  const route = routeModel({
+    requestedModel,
+    fallbackModels,
+    requirements: routeRequirements(args.requirements),
+    candidates,
+    allowQualityDowngrade:
+      manager.config.allowQualityDowngrade && args.allowQualityDowngrade !== false,
+  });
+  return { ...request, model: route.selectedModel, route };
 };
 
 const handoffTask = (args: Record<string, unknown>): string => {
@@ -725,6 +955,7 @@ const compactHandoffResult = (
     runner: result.runner,
     transport: result.transport,
     ...(result.model ? { model: result.model } : {}),
+    ...(result.route ? { route: result.route } : {}),
     ...(result.thinking ? { thinking: result.thinking } : {}),
     turns: result.turns,
     toolCalls: result.toolCalls,
@@ -748,6 +979,10 @@ const actorRequest = (
   const topics = stringArray(args.topics);
   const tools = stringArray(args.tools);
   const timeoutMs = longerTimeoutOverride(args.timeoutMs, manager);
+  const budget = typeof args.budget === "object" && args.budget !== null &&
+    !Array.isArray(args.budget)
+    ? args.budget as Record<string, unknown>
+    : undefined;
   const validWhile = typeof args.validWhile === "object" && args.validWhile !== null &&
     !Array.isArray(args.validWhile) &&
     (args.validWhile as { version?: unknown }).version === 1 &&
@@ -794,6 +1029,19 @@ const actorRequest = (
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(typeof args.extensions === "boolean" ? { extensions: args.extensions } : {}),
     ...(validWhile ? { validWhile } : {}),
+    ...(budget
+      ? {
+          budget: {
+            ...(typeof budget.lifetimeActivations === "number"
+              ? { lifetimeActivations: budget.lifetimeActivations }
+              : {}),
+            ...(typeof budget.windowActivations === "number"
+              ? { windowActivations: budget.windowActivations }
+              : {}),
+            ...(typeof budget.windowMs === "number" ? { windowMs: budget.windowMs } : {}),
+          },
+        }
+      : {}),
   };
 };
 
@@ -1036,7 +1284,7 @@ export class AgentsProvider implements FabricProvider {
   ): Promise<Record<string, unknown>> {
     const model = typeof args.model === "string" ? args.model.trim() : "";
     if (!model) throw new Error("agents.handoff requires an explicit Pi target model");
-    const request = runRequest(
+    const request = await routedRunRequest(
       {
         ...args,
         task: handoffTask(args),
@@ -1060,7 +1308,7 @@ export class AgentsProvider implements FabricProvider {
       name: handle.name,
     });
     context.update(
-      `Trajectory handed off to ${handle.name} (${model}); caller is waiting for implementation`,
+      `Trajectory handed off to ${handle.name} (${request.model ?? model}); caller is waiting for implementation`,
     );
     const completed = await waitWithProgress(
       this.manager,
@@ -1085,7 +1333,7 @@ export class AgentsProvider implements FabricProvider {
     switch (actionName) {
       case "run": {
         const handle = await this.manager.spawn(
-          runRequest(args, context, this.manager),
+          await routedRunRequest(args, context, this.manager),
           context.signal,
         );
         this.participants.scheduleRefresh();
@@ -1110,7 +1358,7 @@ export class AgentsProvider implements FabricProvider {
         return this.handoff(args, context);
       case "spawn": {
         const handle = await this.manager.spawn(
-          runRequest(args, context, this.manager),
+          await routedRunRequest(args, context, this.manager),
           context.signal,
         );
         this.manager.detachSignal(handle.id);
@@ -1268,7 +1516,16 @@ export class AgentsProvider implements FabricProvider {
           this.#transcripts,
           actor.id,
           actor.name,
-          this.actorManager.ask(actor.id, String(args.message), args.data, context.signal),
+          this.actorManager.ask(
+            actor.id,
+            String(args.message),
+            args.data,
+            context.signal,
+            {
+              ...(context.run ? { runContext: context.run } : {}),
+              ...(typeof args.maxTokens === "number" ? { maxTokens: args.maxTokens } : {}),
+            },
+          ),
           context,
           this.nestedToolsEnabled,
         );
@@ -1276,7 +1533,10 @@ export class AgentsProvider implements FabricProvider {
       case "tell": {
         const actor = this.actorManager.status(String(args.id));
         context.activity?.({ type: "entity", id: actor.id, kind: "actor", name: actor.name });
-        return this.actorManager.tell(actor.id, String(args.message), args.data);
+        return this.actorManager.tell(actor.id, String(args.message), args.data, {
+          ...(context.run ? { runContext: context.run } : {}),
+          ...(typeof args.maxTokens === "number" ? { maxTokens: args.maxTokens } : {}),
+        });
       }
       case "steer":
         return this.routeMessage(
@@ -1312,6 +1572,8 @@ export class AgentsProvider implements FabricProvider {
       }
       case "actorStatus":
         return this.#localActor(String(args.id));
+      case "actorTelemetry":
+        return this.actorManager.telemetry();
       case "actors":
         return args.scope === "global"
           ? this.globalActors.list()
@@ -1324,6 +1586,10 @@ export class AgentsProvider implements FabricProvider {
           actor.id,
           typeof args.limit === "number" ? args.limit : 50,
         );
+      }
+      case "retryDelivery": {
+        const actor = this.#localActor(String(args.id));
+        return this.actorManager.retryDelivery(actor.id, String(args.messageId));
       }
       case "setModel":
         return this.actorManager.setModel(

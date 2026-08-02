@@ -1,6 +1,6 @@
 # Fabric execution trace V1
 
-Final `fabric_exec` result details are a bounded durable envelope containing only `success` and `trace`. Rich `audits`, logs, values, type errors, elapsed time, media, and raw runtime/provider errors remain in memory only and are not copied into final session JSONL details. Live partial updates may still carry richer audits for the active UI.
+Final `fabric_exec` result details are a bounded durable envelope containing `success`, `trace`, and optional typed run identity, evidence, gates, transitions, and reservation summary. Rich `audits`, logs, values, type errors, elapsed time, media, raw objectives, and raw runtime/provider errors remain in memory only and are not copied into final session JSONL details. Live partial updates may still carry richer audits for the active UI.
 
 The complete serialized final details object is at most 512 KiB. Consumers use current traces structurally. The chat renderer has one compatibility exception: it may match a pre-change bash digest against string literals or named strings already visible in the outer `fabric_exec` arguments so old previews can show the original command.
 
@@ -10,6 +10,11 @@ The complete serialized final details object is at most 512 KiB. Consumers use c
 interface FabricPersistedExecutionDetailsV1 {
   success: boolean;
   trace: FabricExecutionTraceV1;
+  run?: FabricRunEnvelopeV1;
+  evidence?: FabricEvidenceRef[];
+  gates?: FabricGateResult[];
+  transitions?: FabricRunTransition[];
+  budget?: FabricRunBudgetSnapshot;
 }
 
 interface FabricExecutionTraceV1 {
@@ -28,7 +33,7 @@ interface FabricExecutionTraceV1 {
 }
 ```
 
-The trace contains no run or call timestamps, elapsed durations, random call IDs, source code, media payloads, or arbitrary argument/result content. Runtime and call errors are fixed stage/outcome messages rather than provider, validator, approval, or guest exception prose.
+The operation trace contains no call timestamps, elapsed durations, random call IDs, source code, media payloads, or arbitrary argument/result content. The sibling run envelope retains bounded start/deadline identity and only the SHA-256 objective digest, never objective text. Provider audits carry the same run/trace/span identity, while child records add parent run/span identity so recursive execution remains one trace. Runtime and call errors are fixed stage/outcome messages rather than provider, validator, approval, or guest exception prose.
 
 `phases` is occurrence-ordered. Repeated transitions are retained, so `A → B → A` is represented as `["A", "B", "A"]`.
 
@@ -41,6 +46,8 @@ interface FabricExecutionTraceOperationV1 {
   ref: string;
   provider?: string;
   action?: string;
+  risk?: "read" | "write" | "execute" | "network" | "agent";
+  effect?: "none" | "workspace" | "state" | "external";
   args: Record<string, JsonValue>;
   outcome: "succeeded" | "failed" | "aborted" | "timed_out";
   failureStage?: "resolve" | "prepare" | "validate" | "approve" | "invoke" | "guard";
@@ -80,6 +87,8 @@ Discovery operations record `succeeded`, `failed`, `aborted`, or `timed_out` wit
 
 Declarative workflow calls remain transient activity updates for the live UI and are also durable occurrence records:
 
+- `fabric.workflow.context`: no arguments; the safe envelope and reservation result remain in the sibling run metadata rather than the operation result
+- `fabric.workflow.gate`: operation arguments/results omitted; ordered gate and evidence projections remain in sibling run metadata, while arbitrary `reason`/`error` prose remains live-only
 - `fabric.workflow.configure`: `name`; description omitted
 - `fabric.workflow.phase`: `name`, identifier-shaped `id`, numeric `total`; description omitted
 - `fabric.workflow.item`: identifier-shaped `id`, `status`, `phase`, and `kind`, plus numeric `total` and `completed`; label, detail, current value, and data omitted
@@ -96,7 +105,11 @@ Guest span IDs are deterministic execution-local bridge correlation values. They
 
 Only plain local paths are retained. URL paths are omitted, including credentials and query/fragment data. Plain path query/fragment suffixes are removed. Sensitive-key normalization, media/base64 rejection, JSON safety, depth/node limits, and UTF-8 truncation remain defense in depth after projection; they are not the primary secrecy mechanism.
 
-Identifiers (`ref`, `provider`, `action`), outcomes, failure stage, operation sequence, and occurrence-ordered phase labels remain durable. These fields, retained local paths/mesh addresses, and bash command text are not secret containers; callers must not intentionally place credentials in identifiers, local filenames, topics, keys, phase names, or commands.
+Identifiers (`ref`, `provider`, `action`), the resolved declared `risk` and optional `effect`, outcomes, failure stage, operation sequence, and occurrence-ordered phase labels remain durable. These fields, retained local paths/mesh addresses, and bash command text are not secret containers; callers must not intentionally place credentials in identifiers, local filenames, topics, keys, phase names, or commands.
+
+## Derived outcomes
+
+The outcome ledger is separate from final session details. It derives terminal run identity digest, duration, token/cost totals, gate verdict, evidence count, route downgrade, admission reasons, and score verdicts. It never copies prompt/result bodies, media, gate reasons, errors, or judge prose. Ambient actors synthesize a root trace when no parent run exists; durable workflow claims retain owner run/trace/span on the active phase.
 
 ## Reading and rendering traces
 

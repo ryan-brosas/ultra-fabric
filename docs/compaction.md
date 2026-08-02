@@ -15,6 +15,24 @@ Fabric targets 65% of the model's advertised context window after compaction by 
 
 Use `{ "compaction": { "engine": "pi" } }` to disable the Fabric engine.
 
+## Pre-threshold Context QoS
+
+Before every model request, Context QoS deterministically retires the body of an old successful `read`, `grep`, `find`, or `ls` result only when a newer result has the same typed tool name and canonical arguments. It never removes a message, so tool-call/result pairing remains intact. The most-recent user turns, errors, mutation results, non-text content, and typed Fabric traces/gates/evidence remain exact. Retirement markers carry the newer call id and original character count; the host accumulates pass, retired-result, retired-character, and protected-result counters.
+
+```json
+{
+  "compaction": {
+    "contextQos": {
+      "enabled": true,
+      "turnWindow": 2,
+      "minResultChars": 4000
+    }
+  }
+}
+```
+
+This pass is independent of the compaction engine. Set `enabled` to `false` for byte-for-byte legacy request context.
+
 `/fabric settings` also exposes a **Threshold** for the active model. Thresholds
 are context-window occupancy ratios and are stored by canonical
 `provider/model` key, so switching models selects that model's own value.

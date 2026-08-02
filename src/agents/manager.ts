@@ -49,9 +49,7 @@ import {
   clearOwnedBudgetEnv,
   initBudgetLedger,
   readBudgetLedger,
-  readBudgetLedgerDetailed,
 } from "./budget-ledger.js";
-import type { BudgetLedgerDetail } from "./budget-ledger.js";
 import type { BudgetLedgerState } from "./budget-ledger.js";
 import { readJsonlPage } from "../log-tail.js";
 import {
@@ -121,9 +119,16 @@ interface ManagedAgent {
   abortSignal: AbortSignal | undefined;
   abortHandler: (() => void) | undefined;
   model?: string;
+  route?: AgentRunRequest["route"];
+  profile?: AgentRunRequest["profile"];
+  admission?: AgentRunRequest["admission"];
   thinking?: AgentRunRequest["thinking"];
   actorId?: string;
   actorName?: string;
+  traceId?: string;
+  spanId?: string;
+  parentRunId?: string;
+  parentSpanId?: string;
   runnerSessionId?: string;
   branch?: string;
   worktree?: string;
@@ -296,9 +301,16 @@ const failedRecord = (
     error,
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
     ...(managed.model ? { model: managed.model } : {}),
+    ...(managed.route ? { route: structuredClone(managed.route) } : {}),
+    ...(managed.profile ? { profile: managed.profile } : {}),
+    ...(managed.admission ? { admission: structuredClone(managed.admission) } : {}),
     ...(managed.thinking ? { thinking: managed.thinking } : {}),
     ...(managed.actorId ? { actorId: managed.actorId } : {}),
     ...(managed.actorName ? { actorName: managed.actorName } : {}),
+    ...(managed.traceId ? { traceId: managed.traceId } : {}),
+    ...(managed.spanId ? { spanId: managed.spanId } : {}),
+    ...(managed.parentRunId ? { parentRunId: managed.parentRunId } : {}),
+    ...(managed.parentSpanId ? { parentSpanId: managed.parentSpanId } : {}),
     ...(managed.runnerSessionId ? { runnerSessionId: managed.runnerSessionId } : {}),
     ...(managed.transport.sessionId ? { sessionId: managed.transport.sessionId } : {}),
     ...(managed.transport.attachCommand ? { attachCommand: managed.transport.attachCommand } : {}),
@@ -316,6 +328,7 @@ export class AgentManager {
   readonly #retention: FabricRetentionConfig;
   readonly #workerPath: string;
   readonly #fabricExtensionPath: string;
+  readonly #consultScopeExtensionPath: string;
   readonly #piBinary: string;
   readonly #claudeBinary: string;
   readonly #currentDepth: number;
@@ -349,6 +362,7 @@ export class AgentManager {
     options: {
       workerPath?: string;
       fabricExtensionPath?: string;
+      consultScopeExtensionPath?: string;
       piBinary?: string;
       claudeBinary?: string;
       runRoot?: string;
@@ -373,6 +387,11 @@ export class AgentManager {
       options.workerPath ?? fileURLToPath(new URL("../worker.js", import.meta.url));
     this.#fabricExtensionPath =
       options.fabricExtensionPath ?? fileURLToPath(new URL("../index.js", import.meta.url));
+    const consultScopeModule = import.meta.url.endsWith(".ts")
+      ? "../consult/scope-guard-extension.ts"
+      : "../consult/scope-guard-extension.js";
+    this.#consultScopeExtensionPath = options.consultScopeExtensionPath ??
+      fileURLToPath(new URL(consultScopeModule, import.meta.url));
     this.#piBinary = options.piBinary ?? process.env.PI_FABRIC_PI_BINARY ?? "pi";
     this.#claudeBinary =
       options.claudeBinary ?? process.env.PI_FABRIC_CLAUDE_BINARY ?? config.claude.binary;
@@ -448,9 +467,24 @@ export class AgentManager {
       throw new Error(`Fabric agent depth limit reached (${this.config.maxDepth})`);
     }
     if (!request.task.trim()) throw new Error("Agent task must not be empty");
+    if (
+      request.maxTokens !== undefined &&
+      (!Number.isSafeInteger(request.maxTokens) || request.maxTokens < 1)
+    ) {
+      throw new Error("Agent maxTokens must be a positive integer");
+    }
     const runner = request.runner ?? this.config.runner;
     if (runner !== "pi" && runner !== "claude") {
       throw new Error(`Unsupported Fabric agent runner: ${String(runner)}`);
+    }
+    if (request.consultReadScope !== undefined && runner !== "pi") {
+      throw new Error("Ultra Consult read scopes require the Pi runner");
+    }
+    if (request.consultReadScope !== undefined && (
+      !Array.isArray(request.consultReadScope) || request.consultReadScope.length > 32 ||
+      request.consultReadScope.some((scope) => typeof scope !== "string")
+    )) {
+      throw new Error("Ultra Consult read scope is malformed");
     }
     if (runner === "claude" && request.recursive) {
       throw new Error(
@@ -570,19 +604,39 @@ export class AgentManager {
         "--tools",
         JSON.stringify(tools),
         "--granted-risks",
-        JSON.stringify(recursive ? ["agent"] : []),
-        ...(this.config.maxTokensPerChild > 0
-          ? ["--max-tokens", String(this.config.maxTokensPerChild)]
+        JSON.stringify(
+          recursive
+            ? [...new Set(["agent", ...(request.grantedRisks ?? [])])]
+            : [],
+        ),
+        ...(request.maxTokens !== undefined || this.config.maxTokensPerChild > 0
+          ? ["--max-tokens", String(request.maxTokens ?? this.config.maxTokensPerChild)]
           : []),
         "--transport",
         adapter.kind,
         ...(recursive ? ["--fabric-extension", this.#fabricExtensionPath] : []),
+        ...(request.consultReadScope !== undefined
+          ? [
+              "--consult-scope-extension", this.#consultScopeExtensionPath,
+              "--consult-read-scope", JSON.stringify(request.consultReadScope),
+            ]
+          : []),
         ...(model ? ["--model", model] : []),
         ...(thinking ? ["--thinking", thinking] : []),
         ...(request.systemPrompt ? ["--system-prompt", request.systemPrompt] : []),
         ...(sessionFile ? ["--session-file", sessionFile] : []),
         ...(request.actorId ? ["--actor-id", request.actorId] : []),
         ...(request.actorName ? ["--actor-name", request.actorName] : []),
+        ...(request.runContext
+          ? [
+              "--trace-id",
+              request.runContext.traceId,
+              "--parent-run-id",
+              request.runContext.runId,
+              "--parent-span-id",
+              request.runContext.spanId,
+            ]
+          : []),
         ...(request.meshRoot ?? this.#meshRoot
           ? ["--mesh-root", request.meshRoot ?? this.#meshRoot!]
           : []),
@@ -640,9 +694,20 @@ export class AgentManager {
         abortSignal: signal,
         abortHandler: undefined,
         ...(model ? { model } : {}),
+        ...(request.route ? { route: structuredClone(request.route) } : {}),
+        ...(request.profile ? { profile: request.profile } : {}),
+        ...(request.admission ? { admission: structuredClone(request.admission) } : {}),
         ...(thinking ? { thinking } : {}),
         ...(request.actorId ? { actorId: request.actorId } : {}),
         ...(request.actorName ? { actorName: request.actorName } : {}),
+        ...(request.runContext
+          ? {
+              traceId: request.runContext.traceId,
+              spanId: id,
+              parentRunId: request.runContext.runId,
+              parentSpanId: request.runContext.spanId,
+            }
+          : {}),
         ...(request.runnerSessionId ? { runnerSessionId: request.runnerSessionId } : {}),
         ...(branch ? { branch } : {}),
         ...(worktree ? { worktree } : {}),
@@ -1313,9 +1378,16 @@ export class AgentManager {
       transport: managed.transport.kind,
       cwd: managed.cwd,
       ...(managed.model ? { model: managed.model } : {}),
+      ...(managed.route ? { route: structuredClone(managed.route) } : {}),
+      ...(managed.profile ? { profile: managed.profile } : {}),
+      ...(managed.admission ? { admission: structuredClone(managed.admission) } : {}),
       ...(managed.thinking ? { thinking: managed.thinking } : {}),
       ...(managed.actorId ? { actorId: managed.actorId } : {}),
       ...(managed.actorName ? { actorName: managed.actorName } : {}),
+      ...(managed.traceId ? { traceId: managed.traceId } : {}),
+      ...(managed.spanId ? { spanId: managed.spanId } : {}),
+      ...(managed.parentRunId ? { parentRunId: managed.parentRunId } : {}),
+      ...(managed.parentSpanId ? { parentSpanId: managed.parentSpanId } : {}),
       ...(managed.recursive ? { recursive: true } : {}),
       ...(managed.runnerSessionId ? { runnerSessionId: managed.runnerSessionId } : {}),
       ...(managed.transport.sessionId ? { sessionId: managed.transport.sessionId } : {}),
@@ -1366,9 +1438,16 @@ export class AgentManager {
       ...(nestedAgents.length > 0 ? { nestedAgents } : {}),
       ...(budget ? { budget } : {}),
       ...(managed.model ? { model: managed.model } : {}),
+      ...(managed.route ? { route: structuredClone(managed.route) } : {}),
+      ...(managed.profile ? { profile: managed.profile } : {}),
+      ...(managed.admission ? { admission: structuredClone(managed.admission) } : {}),
       ...(managed.thinking ? { thinking: managed.thinking } : {}),
       ...(managed.actorId ? { actorId: managed.actorId } : {}),
       ...(managed.actorName ? { actorName: managed.actorName } : {}),
+      ...(managed.traceId ? { traceId: managed.traceId } : {}),
+      ...(managed.spanId ? { spanId: managed.spanId } : {}),
+      ...(managed.parentRunId ? { parentRunId: managed.parentRunId } : {}),
+      ...(managed.parentSpanId ? { parentSpanId: managed.parentSpanId } : {}),
       ...(managed.recursive ? { recursive: true } : {}),
       ...(managed.runnerSessionId ? { runnerSessionId: managed.runnerSessionId } : {}),
       ...(managed.transport.sessionId ? { sessionId: managed.transport.sessionId } : {}),

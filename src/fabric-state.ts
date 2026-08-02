@@ -9,6 +9,7 @@ import { actorDeliveryNotice } from "./actors/delivery-policy.js";
 import { prepareFabricActorHostPayload } from "./actors/host-event-payload.js";
 import type { FabricActorHostEvent, FabricActorInfo } from "./actors/types.js";
 import { CapturedToolCatalog } from "./capture/catalog.js";
+import type { ContextQosReport } from "./context/qos.js";
 import {
   loadFabricConfig,
   type FabricConfig,
@@ -57,6 +58,12 @@ import { MeshProvider } from "./providers/mesh-provider.js";
 import { PiToolsProvider } from "./providers/pi-tools-provider.js";
 import { SchemaProvider } from "./providers/schema-provider.js";
 import { StateProvider } from "./providers/state-provider.js";
+import { WorkflowsProvider } from "./providers/workflows-provider.js";
+import { DurableWorkflowStore } from "./workflows/durable.js";
+import { OutcomesProvider } from "./providers/outcomes-provider.js";
+import { FabricOutcomeStore } from "./outcomes/store.js";
+import { PathLeaseStore } from "./leases/path-leases.js";
+import { LeasesProvider } from "./providers/leases-provider.js";
 import { SchemaController } from "./schema/controller.js";
 import { StateStore } from "./state/store.js";
 import {
@@ -70,6 +77,32 @@ const BACKGROUND_COMPLETION_MAX_CHARS = 8_000;
 
 const escapeXmlText = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+const hasActorDelivery = (entries: unknown[], messageId: string): boolean =>
+  entries.some((entry) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+    const candidate = entry as {
+      type?: unknown;
+      customType?: unknown;
+      details?: unknown;
+    };
+    if (
+      candidate.type !== "custom_message" ||
+      candidate.customType !== "pi-fabric-actor" ||
+      typeof candidate.details !== "object" ||
+      candidate.details === null ||
+      Array.isArray(candidate.details)
+    ) {
+      return false;
+    }
+    const details = candidate.details as { message?: unknown };
+    return (
+      typeof details.message === "object" &&
+      details.message !== null &&
+      !Array.isArray(details.message) &&
+      (details.message as { id?: unknown }).id === messageId
+    );
+  });
 
 const isAgentRunRecord = (
   record: AgentRunRecord | AgentHandleInfo,
@@ -167,6 +200,9 @@ export class FabricState {
   #actors: ActorManager | undefined;
   #globalActors: GlobalActorRegistry | undefined;
   #mesh: MeshStore | undefined;
+  #workflows: DurableWorkflowStore | undefined;
+  #outcomes: FabricOutcomeStore | undefined;
+  #pathLeases: PathLeaseStore | undefined;
   #identity: MeshIdentity | undefined;
   #mainAgent: MainAgentController | undefined;
   #participants: ParticipantDirectory | undefined;
@@ -181,6 +217,12 @@ export class FabricState {
   readonly prewalk = new PrewalkController();
   readonly sessionApprovals = new FabricSessionApprovals();
   #widgetDismissedAt = 0;
+  #contextQosTelemetry = {
+    passes: 0,
+    retiredResults: 0,
+    retiredChars: 0,
+    protectedResults: 0,
+  };
 
   constructor(
     readonly pi: ExtensionAPI,
@@ -197,6 +239,17 @@ export class FabricState {
 
   set widgetDismissedAt(value: number) {
     this.#widgetDismissedAt = value;
+  }
+
+  get contextQosTelemetry() {
+    return { ...this.#contextQosTelemetry };
+  }
+
+  noteContextQos(report: ContextQosReport): void {
+    this.#contextQosTelemetry.passes++;
+    this.#contextQosTelemetry.retiredResults += report.retiredResults;
+    this.#contextQosTelemetry.retiredChars += report.retiredChars;
+    this.#contextQosTelemetry.protectedResults += report.protectedResults;
   }
 
   get cwd(): string | undefined {
@@ -236,6 +289,21 @@ export class FabricState {
   get mesh(): MeshStore {
     if (!this.#mesh) throw new Error("Pi Fabric has not initialized");
     return this.#mesh;
+  }
+
+  get workflows(): DurableWorkflowStore {
+    if (!this.#workflows) throw new Error("Pi Fabric durable workflows are unavailable");
+    return this.#workflows;
+  }
+
+  get outcomes(): FabricOutcomeStore {
+    if (!this.#outcomes) throw new Error("Pi Fabric outcomes are unavailable");
+    return this.#outcomes;
+  }
+
+  get pathLeases(): PathLeaseStore {
+    if (!this.#pathLeases) throw new Error("Pi Fabric path leases are unavailable");
+    return this.#pathLeases;
   }
 
   mainAgentInfo(context?: ExtensionContext): FabricMainAgentInfo {
@@ -282,12 +350,23 @@ export class FabricState {
     this.activity.reset();
     this.sessionApprovals.approvedRisks.clear();
     this.#cwd = context.cwd;
+    this.#contextQosTelemetry = {
+      passes: 0,
+      retiredResults: 0,
+      retiredChars: 0,
+      protectedResults: 0,
+    };
     const projectTrusted = context.isProjectTrusted();
     this.#config = loadFabricConfig({
       cwd: context.cwd,
       agentDir: getAgentDir(),
       projectTrusted,
     });
+    this.prewalk.configureTriggers(
+      this.#config.prewalk.triggerRisks,
+      this.#config.prewalk.triggerRefs,
+      this.#config.prewalk.triggerEffects,
+    );
     this.#registry = new ActionRegistry(
       new FabricToolResultProxy(() => this.capturedTools.runner),
     );
@@ -297,15 +376,14 @@ export class FabricState {
       effectiveFullCodeMode && this.#config.capture.enabled && !enforceSchema
         ? new CapturedToolsProvider(this.capturedTools)
         : undefined;
-    if (effectiveFullCodeMode) {
-      this.#registry.register(
-        new PiToolsProvider(
+    const piToolsProvider = effectiveFullCodeMode
+      ? new PiToolsProvider(
           context.cwd,
           enforceSchema ? undefined : this.capturedTools,
           capturedToolsProvider,
-        ),
-      );
-    }
+        )
+      : undefined;
+    if (piToolsProvider) this.#registry.register(piToolsProvider);
     this.#registry.register(new McpProvider(context.cwd, this.#config.mcp));
     if (capturedToolsProvider) this.#registry.register(capturedToolsProvider);
     const sessionId = context.sessionManager.getSessionId();
@@ -356,6 +434,25 @@ export class FabricState {
     if (this.#config.mesh.enabled) {
       this.#registry.register(new MeshProvider(this.#mesh, identity, this.#participants));
       this.#registry.register(new StateProvider(this.#mesh, identity));
+      this.#workflows = new DurableWorkflowStore(this.#mesh, identity);
+      this.#registry.register(new WorkflowsProvider(this.#workflows));
+      this.#pathLeases = new PathLeaseStore(this.#mesh, identity);
+      this.#registry.register(new LeasesProvider(this.#pathLeases));
+      piToolsProvider?.setPathLeases(this.#pathLeases);
+      if (this.#config.outcomes.enabled) {
+        this.#outcomes = new FabricOutcomeStore(this.#mesh, identity, {
+          maxRecords: this.#config.outcomes.maxRecords,
+          minRecommendationSamples: this.#config.outcomes.minRecommendationSamples,
+        });
+        this.#registry.register(new OutcomesProvider(this.#outcomes));
+      } else {
+        this.#outcomes = undefined;
+      }
+    } else {
+      this.#workflows = undefined;
+      this.#outcomes = undefined;
+      this.#pathLeases = undefined;
+      piToolsProvider?.setPathLeases(undefined);
     }
     this.#schema = new SchemaController(
       context.cwd,
@@ -432,6 +529,7 @@ export class FabricState {
       ({ actor, message, delivery, triggerTurn }) => {
         const text = message.text ?? "";
         if (!text) return;
+        if (hasActorDelivery(context.sessionManager.getBranch(), message.id)) return;
         const deliveryNotice = actorDeliveryNotice(delivery, triggerTurn);
         this.pi.sendMessage(
           {
@@ -462,8 +560,15 @@ export class FabricState {
             mainAgent,
             canManageActor,
             retention: this.#config.retention,
+            ...(this.#outcomes ? { outcomeSink: this.#outcomes } : {}),
           }
-        : { persistent: false, mainAgent, canManageActor, retention: this.#config.retention },
+        : {
+            persistent: false,
+            mainAgent,
+            canManageActor,
+            retention: this.#config.retention,
+            ...(this.#outcomes ? { outcomeSink: this.#outcomes } : {}),
+          },
     );
     this.#lifecycle = new LifecycleBroker(
       this.#mesh,
@@ -555,6 +660,7 @@ export class FabricState {
       this.#schema,
       undefined,
       this.sessionApprovals,
+      this.#outcomes,
     );
     const discovery: FabricProviderDiscovery = {
       version: 1,
@@ -718,6 +824,9 @@ export class FabricState {
         "state",
         "memory",
         "compact",
+        "workflows",
+        "outcomes",
+        "leases",
       ].includes(provider.name)
     ) {
       throw new Error(`Reserved Fabric provider name: ${provider.name}`);
@@ -745,6 +854,9 @@ export class FabricState {
     this.#actors = undefined;
     this.#globalActors = undefined;
     this.#mesh = undefined;
+    this.#workflows = undefined;
+    this.#outcomes = undefined;
+    this.#pathLeases = undefined;
     this.#identity = undefined;
     this.#mainAgent = undefined;
     this.#participants = undefined;
@@ -794,6 +906,9 @@ export class FabricState {
     this.#agents = undefined;
     this.#actors = undefined;
     this.#mesh = undefined;
+    this.#workflows = undefined;
+    this.#outcomes = undefined;
+    this.#pathLeases = undefined;
     this.#identity = undefined;
     this.#mainAgent = undefined;
     this.#participants = undefined;

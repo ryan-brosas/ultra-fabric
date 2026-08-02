@@ -5,6 +5,20 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { FabricAgentRunner, FabricAgentTransport } from "../config.js";
 import type { FabricThinking } from "../thinking.js";
+import type { FabricRunEnvelopeV1 } from "../run/context.js";
+import type { ModelRouteDecision } from "../routing/model-router.js";
+
+type AgentAdmissionReason =
+  | "independent_context"
+  | "separable_parallel"
+  | "capability_gap"
+  | "long_running"
+  | "independent_verification";
+
+export interface AgentAdmissionIntent {
+  reason: AgentAdmissionReason;
+  expectedArtifact: string;
+}
 
 export type AgentRunStatus =
   | "queued"
@@ -37,13 +51,21 @@ export interface AgentRunRequest {
   runner?: FabricAgentRunner;
   transport?: FabricAgentTransport;
   model?: string;
+  route?: ModelRouteDecision;
+  profile?: string;
+  admission?: AgentAdmissionIntent;
+  grantedRisks?: Array<"read" | "write" | "execute" | "network" | "agent">;
   thinking?: FabricThinking;
   tools?: string[];
   timeoutMs?: number;
+  maxTokens?: number;
+  runContext?: FabricRunEnvelopeV1;
   extensions?: boolean;
   recursive?: boolean;
   worktree?: boolean;
   schema?: Record<string, unknown>;
+  /** Host-only project-relative read roots for an Ultra Consult worker. */
+  consultReadScope?: string[];
   systemPrompt?: string;
   sessionFile?: string;
   actorId?: string;
@@ -90,9 +112,16 @@ export interface AgentRunRecord {
   transport: FabricAgentTransport;
   cwd: string;
   model?: string;
+  route?: ModelRouteDecision;
+  profile?: string;
+  admission?: AgentAdmissionIntent;
   thinking?: FabricThinking;
   actorId?: string;
   actorName?: string;
+  traceId?: string;
+  spanId?: string;
+  parentRunId?: string;
+  parentSpanId?: string;
   recursive?: boolean;
   startedAt: number;
   updatedAt: number;
@@ -130,9 +159,16 @@ export interface AgentHandleInfo {
   transport: FabricAgentTransport;
   cwd: string;
   model?: string;
+  route?: ModelRouteDecision;
+  profile?: string;
+  admission?: AgentAdmissionIntent;
   thinking?: FabricThinking;
   actorId?: string;
   actorName?: string;
+  traceId?: string;
+  spanId?: string;
+  parentRunId?: string;
+  parentSpanId?: string;
   recursive?: boolean;
   sessionId?: string;
   runnerSessionId?: string;
@@ -162,7 +198,12 @@ export interface AgentWorkerOptions {
   tools: string[];
   grantedRisks: string[];
   maxTokens?: number;
+  traceId?: string;
+  parentRunId?: string;
+  parentSpanId?: string;
   fabricExtensionPath?: string;
+  consultScopeExtensionPath?: string;
+  consultReadScope?: string[];
   model?: string;
   thinking?: string;
   systemPrompt?: string;

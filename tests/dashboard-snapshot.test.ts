@@ -349,3 +349,43 @@ describe("dashboard snapshot agent ownership", () => {
     expect(snapshot.actors[0]?.worker?.id).toBe("actor-running");
   });
 });
+
+describe("dashboard snapshot path leases", () => {
+  const leaseState = (state: FabricState, leases: unknown[]): FabricState =>
+    ({
+      ...state,
+      config: { mesh: { enabled: true } },
+      mesh: {
+        list: () => [
+          {
+            key: "path-leases/v1",
+            value: { format: 1, leases },
+            version: 1,
+            updatedAt: 1,
+          },
+        ],
+      },
+    }) as unknown as FabricState;
+
+  it("counts only unexpired write leases", () => {
+    const now = Date.now();
+    const snapshot = createDashboardSnapshot(
+      leaseState(fakeState([], []), [
+        { id: "a", ownerRunId: "r1", path: "/p/a", scope: "file", acquiredAt: 0, expiresAt: now + 60_000 },
+        { id: "b", ownerRunId: "r2", path: "/p/b", scope: "tree", acquiredAt: 0, expiresAt: now - 1 },
+      ]),
+      [],
+    );
+
+    expect(snapshot.observability?.pathLeases).toBe(1);
+  });
+
+  it("treats malformed lease state as no active leases", () => {
+    const snapshot = createDashboardSnapshot(
+      leaseState(fakeState([], []), [{ id: "broken" }]),
+      [],
+    );
+
+    expect(snapshot.observability?.pathLeases).toBe(0);
+  });
+});

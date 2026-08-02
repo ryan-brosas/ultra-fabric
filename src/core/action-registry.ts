@@ -13,8 +13,10 @@ import {
   type FabricInvocationActivityUpdate,
   type FabricInvocationContext,
   type FabricMediaBlock,
+  type FabricEffect,
   type FabricProvider,
   type FabricProviderListRequest,
+  type FabricRisk,
 } from "../protocol.js";
 import type { FabricNestedToolResultProxy } from "./tool-result-proxy.js";
 
@@ -34,11 +36,16 @@ export interface FabricCallAudit {
   resultTruncated?: boolean;
   tool?: string;
   provider?: string;
+  risk?: FabricRisk;
+  effect?: FabricEffect;
   args?: Record<string, unknown>;
   result?: unknown;
   media?: FabricMediaBlock[];
   mediaNote?: string;
   preview?: unknown;
+  runId?: string;
+  traceId?: string;
+  spanId?: string;
 }
 
 export type FabricRegistryActivityEvent =
@@ -328,9 +335,11 @@ export class ActionRegistry {
             inputSchema: action.inputSchema,
             outputSchema: action.outputSchema,
             risk: action.risk,
+            effect: action.effect,
             namespace: action.namespace,
           }),
           risk: action.risk,
+          ...(action.effect ? { effect: action.effect } : {}),
           ...(action.namespace === undefined ? {} : { namespace: action.namespace }),
         }));
       return {
@@ -449,7 +458,7 @@ export class ActionRegistry {
       );
       if (!descriptor) throw new Error(`Unknown Fabric action: ${ref}`);
       const action = resolveDescriptor(provider, descriptor);
-      traceOperation?.resolved(action.provider, action.name);
+      traceOperation?.resolved(action.provider, action.name, action.risk, action.effect);
 
       failureStage = "guard";
       if (context.authorize) {
@@ -483,10 +492,19 @@ export class ActionRegistry {
         startedAt: Date.now(),
         tool: action.name,
         provider: action.provider,
+        risk: action.risk,
+        ...(action.effect ? { effect: action.effect } : {}),
         args: boundedPreviewValue(
           argsPreview,
           MAX_AUDIT_VALUE_CHARS,
         ) as Record<string, unknown>,
+        ...(context.run
+          ? {
+              runId: context.run.runId,
+              traceId: context.run.traceId,
+              spanId: context.run.spanId,
+            }
+          : {}),
       };
       audit = activeAudit;
       invocationActive = true;

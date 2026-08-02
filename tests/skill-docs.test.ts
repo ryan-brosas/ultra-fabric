@@ -139,7 +139,7 @@ describe("fabric-exec skill provider contracts", () => {
       "fabric-advisor": ["agent_settled", "tool_error", "no recreation warning", "without recreating or retrying automatically"],
       "fabric-ambient": ["Choose and execute", "supervisor", "advisor", "never bounce the user", "without automatically rerunning setup"],
       "fabric-council": ["3–5 distinct", "CouncilOutcome", 'status: "partial"', "fallback: completed", "automatic whole-council rerun"],
-      "fabric-exec": ["read, describe, retry", "tools.describe", "timeoutMs", "multiline or syntax-heavy payloads", "shell heredocs", "never load them autonomously", "Peer is a reserved Fabric term", "query `agents.peers()` first", "Search before reading", "offset", "2000 lines or 50KB", "Use offset=n to continue"],
+      "fabric-exec": ["read, describe, retry", "tools.describe", "timeoutMs", "multiline or syntax-heavy payloads", "shell heredocs", "never load them autonomously", "Peer is a reserved Fabric term", "query `agents.peers()` first", "Search before reading", "offset", "2000 lines or 50KB", "Use offset=n to continue", "consult.run", "zero workers", "Partition", "Challenge", "Compare", "at most one", "host-resolvable"],
       "fabric-guide": ["smallest sufficient path", "No advanced skill", "preserves the user’s task as arguments", "Never load or execute"],
       "fabric-fusion": ["2–8 model panel", "PanelOutcome", "ambiguous", 'status: "partial"', "automatic full-panel rerun"],
       "fabric-rlm": ["strings.task", "context-sized", "recursive=true only", "all-failed batch", "full `FabricAgentResult` objects never return", "never rerun successful partitions"],

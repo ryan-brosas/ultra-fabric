@@ -29,6 +29,7 @@ You keep talking to Pi the way you always do. Fabric gives the model **one progr
 | ⚡ | **Code mode** | One flat tool schema; branching, loops, fan-out, and data flow live in checked TypeScript. |
 | 🧰 | **Capability routing** | Call Pi core tools, MCP servers, captured extension tools, or Fabric providers through one runtime. |
 | 🧑‍🤝‍🧑 | **Agent runtime** | One-shot workers, persistent event-driven actors, councils, and bounded recursive queries. |
+| 🧠 | **Ultra Consult** | Zero-agent-by-default context offload through host-scoped read-only fresh workers and byte-bounded validated evidence. |
 | 🕸️ | **Workflows + mesh** | Phased progress plus durable topics, shared tasks, and compare-and-swap state. |
 | 🛡️ | **Guardrails** | Approvals, isolation, timeouts, concurrency, recursion depth, and shared cost budgets. |
 | 🎛️ | **Native TUI** | Live activity, an interactive dashboard, and settings without leaving Pi. |
@@ -83,7 +84,7 @@ pi -e /absolute/path/to/ultra-fabric
 
 ## What you can ask for
 
-Advanced patterns are user-invoked and are not advertised for automatic selection. Run `/skill:fabric-guide` when you want one recommendation, or invoke the exact `/skill:<name>` yourself. Describing an ordinary coding task keeps Pi on the core `fabric-exec` path.
+Advanced patterns are user-invoked and are not advertised for automatic selection. Run `/skill:fabric-guide` when you want one recommendation, or invoke the exact `/skill:<name>` yourself. Describing an ordinary coding task keeps Pi on the core `fabric-exec` path. Ultra Consult is part of that core path rather than an advanced skill: Main may attempt it once when fresh context could change a named decision, while host policy can still admit zero workers.
 
 | You want | Run |
 | -------- | --- |
@@ -117,7 +118,7 @@ See the [interface & commands reference](docs/interface.md) for every view, keyb
 - [Fork boundary](docs/adr/0001-fork-boundary.md) — what stays upstream-shaped and what becomes Ultra-native.
 - [Configuration](docs/configuration.md) — `fabric.json`, code modes, tool capture, approvals, and budgets.
 - [Interface & commands](docs/interface.md) — dashboard, settings, keybindings, slash commands, and headless runs.
-- [Agents, actors & mesh](docs/agents.md) — agents, trajectory-preserving model handoff and `/fabric prewalk`, the Claude runner, transports, steering, persistent actors, global templates, councils, recursive queries, and durable coordination.
+- [Agents, actors & mesh](docs/agents.md) — Ultra Consult, agents, trajectory-preserving model handoff and `/fabric prewalk`, the Claude runner, transports, steering, persistent actors, global templates, councils, recursive queries, and durable coordination.
 - [External providers](docs/providers.md) — the versioned provider protocol for extensions.
 - [Architecture & security](docs/architecture.md) — the host bridge, sandboxing, tool-call robustness, and limitations.
 - [Skills](docs/skills.md) — the core-first invocation policy and user-invoked advanced patterns.
@@ -131,7 +132,7 @@ pnpm test
 pnpm build
 ```
 
-The test suite covers configuration, schema validation, provider dispatch, registered-tool interception and execution, QuickJS isolation, Pi built-in invocation, agents, fake Claude stream-JSON and model discovery, workflows, durable mesh state, actor mailboxes and subscriptions, and Pi/Claude actor restoration. Claude fixtures never make a billable request.
+The test suite covers configuration, schema validation, provider dispatch, registered-tool interception and execution, QuickJS isolation, Pi built-in invocation, Ultra Consult admission/evidence/reduction, agents, fake Claude stream-JSON and model discovery, workflows, durable mesh state, actor mailboxes and subscriptions, and Pi/Claude actor restoration. Claude fixtures never make a billable request.
 
 ## License
 

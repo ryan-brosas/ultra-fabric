@@ -66,12 +66,25 @@ input.on("line", (line) => {
     return;
   }
 
+  if (task.includes("REPORT_CONSULT_SCOPE")) {
+    finishAttempt(
+      successMessage(JSON.stringify({
+        scope: JSON.parse(process.env.PI_FABRIC_CONSULT_SCOPE_V1 ?? "null"),
+        args: process.argv.slice(2),
+      })),
+      false,
+    );
+    return;
+  }
+
   if (task.includes("REPORT_FABRIC_IDENTITY")) {
     finishAttempt(
       successMessage(
         JSON.stringify({
           mainAgentId: process.env.PI_FABRIC_MAIN_AGENT_ID,
           parentRun: process.env.PI_FABRIC_PARENT_RUN,
+          traceId: process.env.PI_FABRIC_TRACE_ID,
+          parentSpanId: process.env.PI_FABRIC_PARENT_SPAN_ID,
           agentName: process.env.PI_FABRIC_AGENT_NAME,
         }),
       ),

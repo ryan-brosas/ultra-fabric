@@ -115,6 +115,12 @@ if (task.includes("HANG")) {
     mainAgentId: args.get("main-agent-id"),
     tools: JSON.parse(args.get("tools") ?? "[]"),
     extensions: args.get("extensions"),
+    ...(args.has("consult-read-scope")
+      ? {
+          consultReadScope: JSON.parse(args.get("consult-read-scope")),
+          consultScopeExtensionPath: args.get("consult-scope-extension"),
+        }
+      : {}),
     imageCount: images.length,
     cwd: args.get("cwd"),
     startedAt: now,

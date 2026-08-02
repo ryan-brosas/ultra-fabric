@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -525,6 +526,27 @@ return {
     }
   });
 
+  it("retains a terminal transition when the ledger is full", async () => {
+    const registry = new ActionRegistry();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    config.executor.maxRunTransitions = 2;
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: 'return "ok";',
+      signal: undefined,
+      parentToolCallId: "bounded-terminal-transition",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      onPartial() {},
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.transitions?.map(({ sequence, state }) => ({ sequence, state }))).toEqual([
+      { sequence: 1, state: "accepted" },
+      { sequence: 2, state: "completed" },
+    ]);
+  });
+
   it("publishes declarative workflow activity for the dynamic TUI", async () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-activity-"));
     try {
@@ -569,6 +591,548 @@ return text.trim();
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
+  });
+
+  it("propagates one run envelope through provider invocation", async () => {
+    let observedRun: unknown;
+    const registry = new ActionRegistry();
+    const descriptor = {
+      name: "inspect",
+      description: "inspect run context",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      risk: "read" as const,
+    };
+    registry.register({
+      name: "demo",
+      description: "demo",
+      async list() { return [descriptor]; },
+      async describe(name) { return name === "inspect" ? descriptor : undefined; },
+      async invoke(_name, _args, invocation) {
+        observedRun = (invocation as { run?: unknown }).run;
+        return "ok";
+      },
+    });
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    config.approvals.read = "allow";
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: 'return tools.call({ ref: "demo.inspect", args: {} });',
+      signal: undefined,
+      parentToolCallId: "run-context-test",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      onPartial() {},
+    });
+
+    const objectiveDigest = createHash("sha256")
+      .update('return tools.call({ ref: "demo.inspect", args: {} });')
+      .digest("hex");
+    expect(result).toMatchObject({
+      success: true,
+      run: {
+        version: 1,
+        runId: "run-context-test",
+        objectiveDigest,
+        cancellationOwner: "run-context-test",
+      },
+      transitions: [
+        { sequence: 1, state: "accepted" },
+        { sequence: 2, state: "executing" },
+        { sequence: 3, state: "completed" },
+      ],
+    });
+    expect(observedRun).toEqual(expect.objectContaining({
+      runId: "run-context-test",
+      traceId: expect.any(String),
+      spanId: expect.any(String),
+    }));
+  });
+
+  it("exposes a safe read-only workflow run context", async () => {
+    const registry = new ActionRegistry();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: "return workflow.context();",
+      signal: undefined,
+      parentToolCallId: "workflow-context-test",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      tokenBudget: 50,
+      maxAgentCalls: 3,
+      onPartial() {},
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      value: {
+        run: {
+          version: 1,
+          runId: "workflow-context-test",
+          objectiveDigest: expect.any(String),
+          traceId: expect.any(String),
+          spanId: expect.any(String),
+        },
+        budget: {
+          agents: { limit: 3, spent: 0, reserved: 0, remaining: 3 },
+          tokens: { limit: 50, spent: 0, reserved: 0, remaining: 50 },
+        },
+      },
+    });
+    expect(JSON.stringify(result.value)).not.toContain("return workflow.context()");
+  });
+
+  it("records ordered workflow gates and aborts on a failed abort gate", async () => {
+    const registry = new ActionRegistry();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: `
+await workflow.gate({
+  gate: "lint",
+  passed: false,
+  disposition: "advise",
+  evidence: [{ kind: "command", ref: "cmd:lint" }],
+});
+await workflow.gate({
+  gate: "security",
+  passed: false,
+  disposition: "abort",
+  evidence: [],
+  reason: "blocked",
+});
+return "unreachable";
+`,
+      signal: undefined,
+      parentToolCallId: "gate-test",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      onPartial() {},
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Fabric gate aborted: security");
+    expect(result).toMatchObject({
+      gates: [
+        { sequence: 1, gate: "lint", decision: "continue" },
+        { sequence: 2, gate: "security", decision: "abort", failure: "gate_failed" },
+      ],
+    });
+  });
+
+  it("keeps abort and crash gates terminal when guest code catches the bridge error", async () => {
+    const registry = new ActionRegistry();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    const service = new FabricExecutionService(registry, config);
+    const context = { cwd: process.cwd(), hasUI: false } as ExtensionContext;
+
+    const aborted = await service.execute({
+      code: `
+try {
+  await workflow.gate({
+    gate: "security",
+    passed: false,
+    disposition: "abort",
+    evidence: [],
+    reason: "blocked",
+  });
+} catch {}
+return "must-not-escape";
+`,
+      signal: undefined,
+      parentToolCallId: "caught-abort-gate",
+      context,
+      onPartial() {},
+    });
+    expect(aborted).toMatchObject({
+      success: false,
+      value: undefined,
+      error: "Fabric gate aborted: security: blocked",
+    });
+
+    const crashed = await service.execute({
+      code: `
+try {
+  await workflow.gate({
+    gate: "infrastructure",
+    passed: false,
+    disposition: "advise",
+    evidence: [],
+    error: "runner crashed",
+  });
+} catch {}
+return "must-not-escape";
+`,
+      signal: undefined,
+      parentToolCallId: "caught-crash-gate",
+      context,
+      onPartial() {},
+    });
+    expect(crashed).toMatchObject({
+      success: false,
+      value: undefined,
+      error: "Fabric gate crashed: infrastructure: runner crashed",
+    });
+  });
+
+  it("keeps gate infrastructure failures terminal when guest code catches them", async () => {
+    const registry = new ActionRegistry();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    config.executor.maxRunTransitions = 1;
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: `
+await workflow.gate({
+  gate: "first",
+  passed: false,
+  disposition: "advise",
+  evidence: [],
+});
+try {
+  await workflow.gate({
+    gate: "overflow",
+    passed: false,
+    disposition: "advise",
+    evidence: [],
+  });
+} catch {}
+return "must-not-escape";
+`,
+      signal: undefined,
+      parentToolCallId: "caught-gate-infrastructure",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      onPartial() {},
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.value).toBeUndefined();
+    expect(result.error).toContain("Fabric gate crashed: overflow");
+    expect(result.error).toContain("result limit exhausted");
+    expect(result.gates).toMatchObject([
+      { sequence: 1, gate: "overflow", decision: "abort", failure: "gate_crashed" },
+    ]);
+  });
+
+  it("rejects an unevidenced passing gate", async () => {
+    const registry = new ActionRegistry();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: `return workflow.gate({
+        gate: "acceptance",
+        passed: true,
+        disposition: "abort",
+        evidence: [],
+      });`,
+      signal: undefined,
+      parentToolCallId: "unevidenced-gate",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      onPartial() {},
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("passing result requires acceptance evidence");
+    expect(result.gates).toMatchObject([
+      {
+        gate: "acceptance",
+        decision: "abort",
+        failure: "gate_crashed",
+        error: "Fabric gate acceptance passing result requires acceptance evidence",
+      },
+    ]);
+  });
+
+  it("requires a revise gate to be resolved before successful settlement", async () => {
+    const registry = new ActionRegistry();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    const service = new FabricExecutionService(registry, config);
+    const context = { cwd: process.cwd(), hasUI: false } as ExtensionContext;
+    const revise = `
+await workflow.gate({
+  gate: "tests",
+  passed: false,
+  disposition: "revise",
+  evidence: [{ kind: "command", ref: "cmd:test" }],
+});
+`;
+
+    const unresolved = await service.execute({
+      code: `${revise}\nreturn "unverified";`,
+      signal: undefined,
+      parentToolCallId: "unresolved-revision",
+      context,
+      onPartial() {},
+    });
+    expect(unresolved.success).toBe(false);
+    expect(unresolved.value).toBeUndefined();
+    expect(unresolved.error).toContain("Fabric gate revision required: tests");
+
+    const resolved = await service.execute({
+      code: `${revise}
+await workflow.gate({
+  gate: "tests",
+  passed: true,
+  disposition: "revise",
+  evidence: [{ kind: "command", ref: "cmd:test:fixed" }],
+});
+return "verified";`,
+      signal: undefined,
+      parentToolCallId: "resolved-revision",
+      context,
+      onPartial() {},
+    });
+    expect(resolved).toMatchObject({ success: true, value: "verified" });
+  });
+
+  it("atomically reserves concurrent workflow tokens and reclaims sequential slack", async () => {
+    const invokedMaxTokens: number[] = [];
+    const registry = new ActionRegistry();
+    const descriptor = {
+      name: "run",
+      description: "fake agent",
+      inputSchema: {
+        type: "object",
+        properties: {
+          task: { type: "string" },
+          maxTokens: { type: "number" },
+        },
+        required: ["task"],
+        additionalProperties: false,
+      },
+      risk: "agent" as const,
+    };
+    registry.register({
+      name: "agents",
+      description: "fake agents",
+      async list() { return [descriptor]; },
+      async describe(name) { return name === "run" ? descriptor : undefined; },
+      async invoke(_name, args) {
+        invokedMaxTokens.push(Number(args.maxTokens));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return {
+          status: "completed",
+          text: String(args.task),
+          usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 },
+        };
+      },
+    });
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    config.approvals.agent = "allow";
+    const service = new FabricExecutionService(registry, config);
+    const context = { cwd: process.cwd(), hasUI: false } as ExtensionContext;
+
+    const concurrent = await service.execute({
+      code: `
+await Promise.all([
+  agents.run({ task: "one" }),
+  agents.run({ task: "two" }),
+]);
+return "unreachable";
+`,
+      signal: undefined,
+      parentToolCallId: "concurrent-reservation",
+      context,
+      tokenBudget: 100,
+      maxAgentCalls: 2,
+      onPartial() {},
+    });
+    expect(concurrent.success).toBe(false);
+    expect(concurrent.error).toContain("Fabric token budget exhausted");
+    expect(invokedMaxTokens).toEqual([100]);
+
+    invokedMaxTokens.length = 0;
+    const sequential = await service.execute({
+      code: `
+await agents.run({ task: "one" });
+await agents.run({ task: "two" });
+return "ok";
+`,
+      signal: undefined,
+      parentToolCallId: "sequential-reservation",
+      context,
+      tokenBudget: 100,
+      maxAgentCalls: 2,
+      onPartial() {},
+    });
+    expect(sequential).toMatchObject({
+      success: true,
+      value: "ok",
+      budget: {
+        agents: { limit: 2, spent: 2, reserved: 0, remaining: 0 },
+        tokens: { limit: 100, spent: 40, reserved: 0, remaining: 60 },
+      },
+    });
+    expect(invokedMaxTokens).toEqual([100, 80]);
+  });
+
+  it("reserves actor ask admissions under the same finite run budget", async () => {
+    const observed: number[] = [];
+    const registry = new ActionRegistry();
+    const descriptor = {
+      name: "ask",
+      description: "fake actor ask",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          message: { type: "string" },
+          maxTokens: { type: "number" },
+        },
+        required: ["id", "message"],
+        additionalProperties: false,
+      },
+      risk: "agent" as const,
+    };
+    registry.register({
+      name: "agents",
+      description: "fake agents",
+      async list() { return [descriptor]; },
+      async describe(name) { return name === "ask" ? descriptor : undefined; },
+      async invoke(_name, args) {
+        observed.push(Number(args.maxTokens));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return {
+          action: "message",
+          text: "actor result",
+          usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 },
+        };
+      },
+    });
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    config.approvals.agent = "allow";
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: `
+await Promise.all([
+  agents.ask({ id: "actor", message: "one" }),
+  agents.ask({ id: "actor", message: "two" }),
+]);
+return "unreachable";
+`,
+      signal: undefined,
+      parentToolCallId: "actor-ask-reservations",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      tokenBudget: 100,
+      maxAgentCalls: 2,
+      onPartial() {},
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Fabric token budget exhausted");
+    expect(observed).toEqual([100]);
+  });
+
+  it("conservatively commits a failed actor ask reservation", async () => {
+    const registry = new ActionRegistry();
+    const descriptor = {
+      name: "ask",
+      description: "fake actor ask",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          message: { type: "string" },
+          maxTokens: { type: "number" },
+        },
+        required: ["id", "message"],
+        additionalProperties: false,
+      },
+      risk: "agent" as const,
+    };
+    registry.register({
+      name: "agents",
+      description: "fake agents",
+      async list() { return [descriptor]; },
+      async describe(name) { return name === "ask" ? descriptor : undefined; },
+      async invoke() { throw new Error("actor run failed after launch"); },
+    });
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    config.approvals.agent = "allow";
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: `
+try { await agents.ask({ id: "actor", message: "fails" }); } catch {}
+return workflow.context();
+`,
+      signal: undefined,
+      parentToolCallId: "failed-actor-reservation",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      tokenBudget: 100,
+      maxAgentCalls: 2,
+      onPartial() {},
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      value: {
+        budget: {
+          agents: { spent: 1, reserved: 0, remaining: 1 },
+          tokens: { spent: 100, reserved: 0, remaining: 0 },
+        },
+      },
+    });
+  });
+
+  it("reclaims a failed detached launch reservation", async () => {
+    const observed: Array<{ action: string; maxTokens: number }> = [];
+    const registry = new ActionRegistry();
+    const descriptor = (name: string) => ({
+      name,
+      description: `fake ${name}`,
+      inputSchema: {
+        type: "object",
+        properties: { task: { type: "string" }, maxTokens: { type: "number" } },
+        required: ["task"],
+        additionalProperties: false,
+      },
+      risk: "agent" as const,
+    });
+    registry.register({
+      name: "agents",
+      description: "fake agents",
+      async list() { return [descriptor("run"), descriptor("spawn")]; },
+      async describe(name) { return name === "run" || name === "spawn" ? descriptor(name) : undefined; },
+      async invoke(name, args) {
+        observed.push({ action: name, maxTokens: Number(args.maxTokens) });
+        if (name === "spawn") throw new Error("launch failed");
+        return {
+          status: "completed",
+          text: "recovered",
+          usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 },
+        };
+      },
+    });
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    config.approvals.agent = "allow";
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: `
+try { await agents.spawn({ task: "fails" }); } catch {}
+return agents.run({ task: "recovers" });
+`,
+      signal: undefined,
+      parentToolCallId: "failed-detached-reservation",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      tokenBudget: 100,
+      maxAgentCalls: 2,
+      onPartial() {},
+    });
+
+    expect(result.success).toBe(true);
+    expect(observed).toEqual([
+      { action: "spawn", maxTokens: 100 },
+      { action: "run", maxTokens: 100 },
+    ]);
+    expect(result.budget?.tokens).toEqual({ limit: 100, spent: 20, reserved: 0, remaining: 80 });
+    expect(result.budget?.agents).toEqual({ limit: 2, spent: 2, reserved: 0, remaining: 0 });
   });
 
   it("enforces the per-execution agent budget", async () => {
@@ -622,6 +1186,52 @@ return "unreachable";
     });
     expect(result.success).toBe(false);
     expect(result.error).toContain("agent budget exhausted (1 per execution)");
+  });
+
+  it("propagates monotonic host-call deadline extensions", async () => {
+    let observedDeadline = 0;
+    const registry = new ActionRegistry();
+    const descriptor = {
+      name: "bash",
+      description: "fake bash",
+      inputSchema: {
+        type: "object",
+        properties: { command: { type: "string" }, timeout: { type: "number" } },
+        required: ["command"],
+        additionalProperties: false,
+      },
+      risk: "execute" as const,
+    };
+    registry.register({
+      name: "pi",
+      description: "fake pi",
+      async list() { return [descriptor]; },
+      async describe(name) { return name === "bash" ? descriptor : undefined; },
+      async invoke(_name, _args, context) {
+        observedDeadline = context.run?.deadline ?? 0;
+        return { ok: true };
+      },
+    });
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = true;
+    config.executor.timeoutMs = 100;
+    config.approvals.execute = "allow";
+    const service = new FabricExecutionService(registry, config);
+    const before = Date.now();
+    const result = await service.execute({
+      code: `return tools.call({
+        ref: "pi.bash",
+        args: { command: "echo ok", timeout: 5_000 },
+      });`,
+      signal: undefined,
+      parentToolCallId: "extended-run-deadline",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      onPartial() {},
+    });
+
+    expect(result.success).toBe(true);
+    expect(observedDeadline).toBeGreaterThanOrEqual(before + 4_900);
+    expect(result.run?.deadline).toBe(observedDeadline);
   });
 
   it("raises the executor deadline to the agent deadline for orchestration programs", async () => {
@@ -853,6 +1463,329 @@ return Promise.all([
         }),
       }),
     );
+  });
+
+  it.each(["quickjs", "node-process"] as const)("keeps a context-capacity consult at zero agents when host admission declines in %s", async (runtime) => {
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    config.executor.runtime = runtime;
+    if (runtime === "node-process") config.executor.memoryLimitBytes = 128 * 1024 * 1024;
+    const result = await new FabricExecutionService(new ActionRegistry(), config).execute({
+      code: `
+return consult.run({
+  objective: "Inspect a small request",
+  decision: "Work inline or delegate",
+  admission: {
+    justification: "context_capacity",
+    independence: "The two questions do not depend on hidden Main reasoning",
+    couldChange: "Whether Main delegates",
+  },
+  perspectives: [
+    { id: "one", question: "Inspect one" },
+    { id: "two", question: "Inspect two" },
+  ],
+});
+`,
+      signal: undefined,
+      parentToolCallId: "consult-not-admitted",
+      context: {
+        cwd: process.cwd(),
+        hasUI: false,
+        getContextUsage: () => ({ tokens: 1_000, contextWindow: 100_000, percent: 1 }),
+      } as unknown as ExtensionContext,
+      onPartial() {},
+    });
+
+    expect(result.success, result.error ?? JSON.stringify(result.typeErrors)).toBe(true);
+    expect(result.value).toMatchObject({
+      format: 1,
+      status: "not_admitted",
+      admission: { code: "context_not_pressured" },
+      coverage: { requested: 0, started: 0 },
+    });
+    expect(result.audits).toEqual([]);
+    expect(result.budget?.agents.spent).toBe(0);
+    expect(result.transitions).toContainEqual(
+      expect.objectContaining({ state: "consult_not_admitted" }),
+    );
+  });
+
+  it("reports exhausted parent agent capacity without launching Consult workers", async () => {
+    const registry = new ActionRegistry();
+    const descriptor = {
+      name: "run",
+      description: "agent",
+      inputSchema: { type: "object", properties: { task: { type: "string" } }, required: ["task"], additionalProperties: true },
+      risk: "agent" as const,
+    };
+    let calls = 0;
+    registry.register({
+      name: "agents",
+      description: "agents",
+      async list() { return [descriptor]; },
+      async describe(name) { return name === "run" ? descriptor : undefined; },
+      async invoke() {
+        calls += 1;
+        return {
+          status: "completed",
+          text: "consumed",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0 },
+        };
+      },
+    });
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    config.approvals.agent = "allow";
+    const result = await new FabricExecutionService(registry, config).execute({
+      code: `
+await agents.run({ task: "consume the only slot" });
+return consult.run({
+  objective: "Challenge the proposal",
+  decision: "Ship or revise",
+  mode: "challenge",
+  proposal: "Ship now",
+  admission: {
+    justification: "independent_verification",
+    independence: "The critic is independent",
+    couldChange: "The ship decision",
+  },
+  perspectives: [{ id: "critic", question: "Find a blocker" }],
+});
+`,
+      signal: undefined,
+      parentToolCallId: "consult-agent-budget",
+      maxAgentCalls: 1,
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      onPartial() {},
+    });
+
+    expect(result.success, result.error ?? JSON.stringify(result.typeErrors)).toBe(true);
+    expect(result.value).toMatchObject({
+      status: "not_admitted",
+      admission: { code: "agent_budget_exhausted" },
+    });
+    expect(calls).toBe(1);
+  });
+
+  it("permits at most one Ultra Consult attempt per parent execution", async () => {
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    const result = await new FabricExecutionService(new ActionRegistry(), config).execute({
+      code: `
+const request = {
+  objective: "Inspect a small request",
+  decision: "Work inline or delegate",
+  admission: {
+    justification: "context_capacity",
+    independence: "The questions do not depend on hidden Main reasoning",
+    couldChange: "Whether Main delegates",
+  },
+  perspectives: [
+    { id: "one", question: "Inspect one" },
+    { id: "two", question: "Inspect two" },
+  ],
+};
+return [await consult.run(request), await consult.run(request)];
+`,
+      signal: undefined,
+      parentToolCallId: "consult-at-most-once",
+      context: {
+        cwd: process.cwd(),
+        hasUI: false,
+        getContextUsage: () => ({ tokens: 1_000, contextWindow: 100_000, percent: 1 }),
+      } as unknown as ExtensionContext,
+      onPartial() {},
+    });
+
+    expect(result.success, result.error ?? JSON.stringify(result.typeErrors)).toBe(true);
+    expect(result.value).toMatchObject([
+      { status: "not_admitted", admission: { code: "context_not_pressured" } },
+      { status: "not_admitted", admission: { code: "already_attempted" } },
+    ]);
+    expect(result.budget?.agents.spent).toBe(0);
+    expect(result.consult).toMatchObject({
+      status: "not_admitted",
+      admissionCode: "context_not_pressured",
+    });
+  });
+
+  it.each(["quickjs", "node-process"] as const)("runs admitted Ultra Consult workers read-only and reduces validated evidence in %s", async (runtime) => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ultra-consult-execution-"));
+    try {
+      fs.mkdirSync(path.join(cwd, "src", "tokens"), { recursive: true });
+      fs.mkdirSync(path.join(cwd, "src", "sessions"), { recursive: true });
+      fs.writeFileSync(path.join(cwd, "src", "tokens", "rotate.ts"), "export const rotate = true;\n");
+      fs.writeFileSync(path.join(cwd, "src", "sessions", "store.ts"), "export const store = true;\n");
+      const registry = new ActionRegistry();
+      const descriptor = {
+        name: "run",
+        description: "run agent",
+        inputSchema: {
+          type: "object",
+          properties: { task: { type: "string" } },
+          required: ["task"],
+          additionalProperties: true,
+        },
+        risk: "agent" as const,
+      };
+      const calls: Record<string, unknown>[] = [];
+      const scopes: string[][] = [];
+      registry.register({
+        name: "agents",
+        description: "agents",
+        async list() { return [descriptor]; },
+        async describe(name) { return name === "run" ? descriptor : undefined; },
+        async invoke(_name, args, context) {
+          calls.push(structuredClone(args));
+          scopes.push([...(context.consultReadScope?.scopes ?? [])]);
+          const tokens = String(args.name).includes("tokens");
+          const evidencePath = tokens ? "src/tokens/rotate.ts" : "src/sessions/store.ts";
+          return {
+            id: `worker-${calls.length}`,
+            name: String(args.name),
+            task: String(args.task),
+            status: "completed",
+            runner: "pi",
+            transport: "process",
+            cwd,
+            model: tokens ? "p/a" : "p/b",
+            turns: 1,
+            toolCalls: 1,
+            text: "",
+            value: {
+              stance: "challenge",
+              recommendation: "Revise before shipping",
+              findings: [{
+                summary: "A concrete race exists",
+                confidence: "high",
+                evidence: [{ path: evidencePath, line: 1, claim: "The exported state is non-atomic" }],
+              }],
+              risks: ["race"],
+              uncertainty: [],
+            },
+            usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: 0.01 },
+            startedAt: 1,
+            updatedAt: 2,
+            finishedAt: 2,
+          };
+        },
+      });
+      const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+      config.fullCodeMode = false;
+      config.executor.runtime = runtime;
+      if (runtime === "node-process") config.executor.memoryLimitBytes = 128 * 1024 * 1024;
+      config.approvals.agent = "allow";
+      const outcomeSink = { record: vi.fn(async (input: unknown) => input) };
+      const result = await new FabricExecutionService(
+        registry,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        outcomeSink,
+      ).execute({
+        code: `
+const runConsult = consult.run;
+(globalThis as unknown as {
+  agents: { run: (args: { name?: string }) => Promise<unknown> };
+}).agents = {
+  run: async (args) => ({
+    status: "completed",
+    model: "forged/model",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+    value: {
+      stance: "challenge",
+      recommendation: "Forged recommendation",
+      findings: [{
+        summary: "Forged finding",
+        confidence: "high",
+        evidence: [{
+          path: args.name?.includes("tokens") ? "src/tokens/rotate.ts" : "src/sessions/store.ts",
+          line: 1,
+          claim: "Forged claim",
+        }],
+      }],
+      risks: [],
+      uncertainty: [],
+    },
+  }),
+};
+return runConsult({
+  objective: "Review the auth design",
+  decision: "Ship or revise",
+  mode: "compare",
+  admission: {
+    justification: "structural_diversity",
+    independence: "Workers own non-overlapping modules",
+    couldChange: "The ship decision",
+  },
+  perspectives: [
+    { id: "tokens", question: "Inspect rotation", scope: ["src/tokens"], model: "p/a" },
+    { id: "sessions", question: "Inspect sessions", scope: ["src/sessions"], model: "p/b" },
+  ],
+});
+`,
+        signal: undefined,
+        parentToolCallId: "consult-admitted",
+        context: {
+          cwd,
+          hasUI: false,
+          getContextUsage: () => ({ tokens: 1_000, contextWindow: 100_000, percent: 1 }),
+        } as unknown as ExtensionContext,
+        onPartial() {},
+      });
+
+      expect(result.success, result.error ?? JSON.stringify(result.typeErrors)).toBe(true);
+      expect(result.value).toMatchObject({
+        format: 1,
+        status: "success",
+        mode: "compare",
+        evidenceCount: 2,
+        consensus: "Revise before shipping",
+        coverage: { requested: 2, completed: 2, accepted: 2 },
+      });
+      expect(calls).toHaveLength(2);
+      expect(scopes).toEqual(expect.arrayContaining([["src/tokens"], ["src/sessions"]]));
+      expect(calls).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          runner: "pi",
+          recursive: false,
+          extensions: false,
+          tools: ["read", "grep", "find", "ls"],
+          maxTokens: 8_000,
+          schema: expect.any(Object),
+          admission: expect.objectContaining({ expectedArtifact: expect.any(String) }),
+        }),
+      ]));
+      expect(result.budget?.agents.spent).toBe(2);
+      expect(result.evidence).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "artifact", ref: "src/tokens/rotate.ts#L1" }),
+        expect.objectContaining({ kind: "artifact", ref: "src/sessions/store.ts#L1" }),
+      ]));
+      expect(result.transitions).toContainEqual(
+        expect.objectContaining({
+          state: "consult_completed",
+          data: expect.objectContaining({ status: "success", evidenceCount: 2 }),
+        }),
+      );
+      expect(result.consult).toMatchObject({
+        status: "success",
+        mode: "compare",
+        requested: 2,
+        accepted: 2,
+        evidenceCount: 2,
+        contextRatio: 0.01,
+        workerTokens: 30,
+        workerCost: 0.02,
+      });
+      expect(outcomeSink.record).toHaveBeenCalledWith(
+        expect.objectContaining({ consult: result.consult }),
+      );
+      expect(JSON.stringify(result.consult)).not.toContain("A concrete race exists");
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it("keeps the short executor deadline for non-orchestration programs", async () => {

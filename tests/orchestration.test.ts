@@ -10,6 +10,7 @@ describe("isBlockingOrchestrationRef", () => {
     expect(isBlockingOrchestrationRef("agents.handoff")).toBe(false);
     expect(isBlockingOrchestrationRef("agents.wait")).toBe(true);
     expect(isBlockingOrchestrationRef("agents.ask")).toBe(true);
+    expect(isBlockingOrchestrationRef("fabric.$consultWorker")).toBe(true);
     expect(isBlockingOrchestrationRef("agents.spawn")).toBe(false);
     expect(isBlockingOrchestrationRef("agents.status")).toBe(false);
     expect(isBlockingOrchestrationRef("demo.slow")).toBe(false);
@@ -42,6 +43,7 @@ describe("codeUsesOrchestration", () => {
   it("detects council and rlm entry points", () => {
     expect(codeUsesOrchestration('await council.run({ task: "review", roles: ["a"] });')).toBe(true);
     expect(codeUsesOrchestration('await rlm.query({ task: "map" });')).toBe(true);
+    expect(codeUsesOrchestration('await consult.run({ objective: "review" });')).toBe(true);
   });
 
   it("ignores read-only and non-blocking agent calls", () => {

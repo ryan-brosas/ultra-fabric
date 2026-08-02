@@ -54,9 +54,15 @@ const COMPACTION_THRESHOLDS = [
   COMPACTION_DEFAULT_THRESHOLD_LABEL,
   ...Array.from({ length: 15 }, (_, index) => `${25 + index * 5}%`),
 ];
+const CONTEXT_QOS_TURN_WINDOWS = [1, 2, 3, 4, 5, 8, 12, 20].map(String);
+const CONTEXT_QOS_RESULT_CHARS = [256, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000].map(String);
 const COMPACTION_TARGET_RATIOS = Array.from(
   { length: 13 },
   (_, index) => String((25 + index * 5) / 100),
+);
+const CONSULT_PRESSURE_RATIOS = Array.from(
+  { length: 15 },
+  (_, index) => (25 + index * 5) / 100,
 );
 const ACTOR_SCOPES = ["project", "session"] as const;
 const RISKS = ["read", "write", "execute", "network", "agent"] as const;
@@ -67,6 +73,9 @@ const TOKEN_VALUES = [0, 50_000, 100_000, 250_000, 500_000, 1_000_000, 2_000_000
 const PREWALK_MODEL_UNSET_LABEL = "Ask each time";
 const PREWALK_THINKING_INHERIT_LABEL = "Agents default";
 const PREWALK_MODES = ["in-place", "trajectory"] as const;
+const PREWALK_RETURN_POLICIES = ["executor", "previous"] as const;
+const PREWALK_VERIFICATION_MODES = ["legacy", "gated"] as const;
+const PREWALK_REVISION_LIMITS = Array.from({ length: 9 }, (_, index) => String(index));
 const ROOT_ITEM_IDS = [
   "fullCodeMode",
   "executor",
@@ -74,13 +83,15 @@ const ROOT_ITEM_IDS = [
   "mcp",
   "prewalk",
   "agents",
+  "consult",
   "capture",
   "ui",
   "compaction",
+  "outcomes",
   "retention",
   "mesh",
 ] as const;
-const RELOAD_SECTIONS = new Set(["mesh", "agents", "mcp", "retention"]);
+const RELOAD_SECTIONS = new Set(["mesh", "agents", "mcp", "outcomes", "retention"]);
 
 const unique = (values: readonly string[]): string[] => [...new Set(values)];
 
@@ -211,6 +222,9 @@ const coerceValue = (id: string, value: string, config: FabricConfig): unknown =
     if (value === COMPACTION_DEFAULT_THRESHOLD_LABEL) return null;
     return Number(value.replace("%", "")) / 100;
   }
+  if (id === "consult.contextPressureThreshold") {
+    return Number(value.replace("%", "")) / 100;
+  }
   const current = getPath(config, id);
   if (typeof current === "boolean") return value === "true";
   if (typeof current === "number") return parseFormattedNumericValue(value);
@@ -226,6 +240,7 @@ const coerceValue = (id: string, value: string, config: FabricConfig): unknown =
     return value === INHERIT_VALUE || value === PREWALK_MODEL_UNSET_LABEL ? "" : value;
   }
   if (id === "prewalk.thinking" && value === PREWALK_THINKING_INHERIT_LABEL) return "";
+  if (id === "prewalk.maxPhaseRevisions") return parseFormattedNumericValue(value);
   if (id === "agents.thinking" || id === "prewalk.thinking") {
     return THINKING_LEVELS.find((level) => thinkingLabel(level) === value) ?? value;
   }
@@ -259,15 +274,23 @@ const summaryFor = (id: string, config: FabricConfig): string => {
     case "mcp":
       return config.mcp.enabled ? "enabled" : "disabled";
     case "prewalk":
-      return `${config.prewalk.mode} · ${config.prewalk.model || PREWALK_MODEL_UNSET_LABEL}${config.prewalk.thinking ? ` · ${thinkingLabel(config.prewalk.thinking)}` : ""}${config.prewalk.alwaysRearm ? " · repeat" : ""}`;
+      return `${config.prewalk.mode} · ${config.prewalk.model || PREWALK_MODEL_UNSET_LABEL}${config.prewalk.verificationMode === "gated" ? ` · gated/${config.prewalk.maxPhaseRevisions ?? 2}` : ""}${config.prewalk.returnPolicy === "previous" ? " · return previous" : ""}${config.prewalk.thinking ? ` · ${thinkingLabel(config.prewalk.thinking)}` : ""}${config.prewalk.alwaysRearm ? " · repeat" : ""}`;
     case "agents":
-      return `${config.agents.runner}/${config.agents.transport}`;
+      return `${config.agents.runner}/${config.agents.transport}${config.agents.fallbackModels.length > 0 ? ` · ${config.agents.fallbackModels.length} routes` : ""}${config.agents.allowQualityDowngrade ? " · downgrade" : ""}`;
+    case "consult":
+      return config.consult.enabled
+        ? `${config.consult.maxWorkers} workers · ${Math.round(config.consult.contextPressureThreshold * 100)}%`
+        : "disabled";
     case "capture":
       return config.capture.enabled ? "enabled" : "disabled";
     case "ui":
       return config.ui.widget;
     case "compaction":
-      return config.compaction.engine;
+      return `${config.compaction.engine} · QoS ${config.compaction.contextQos.enabled ? "on" : "off"}`;
+    case "outcomes":
+      return config.outcomes.enabled
+        ? `learning · min ${config.outcomes.minRecommendationSamples}`
+        : "disabled";
     case "retention":
       return `${formatRetention(config.retention.orphanedTempRunMs)} · ${formatRetention(config.retention.oneShotRunMs)} · ${formatRetention(config.retention.actorRunArchiveMs)}`;
     case "mesh":
@@ -666,6 +689,45 @@ export const buildFabricSettingsItems = (
               ),
             },
           ),
+          setting(
+            "executor.maxGateRevisions",
+            "Gate revision limit",
+            String(config.executor.maxGateRevisions),
+            {
+              description: "Maximum revise dispositions in one Fabric run before the host aborts the gate chain.",
+              values: ["0", "1", "2", "3", "5", "10"],
+            },
+          ),
+          setting(
+            "executor.maxRunEvidence",
+            "Run evidence limit",
+            config.executor.maxRunEvidence.toLocaleString(),
+            {
+              description: "Maximum evidence references retained by one Fabric run.",
+              submenu: numericSubmenu(
+                theme,
+                [32, 64, 128, 256, 512, 1_000],
+                (n) => n.toLocaleString(),
+                "Run evidence limit",
+                "Maximum evidence references retained by one Fabric run.",
+              ),
+            },
+          ),
+          setting(
+            "executor.maxRunTransitions",
+            "Run transition limit",
+            config.executor.maxRunTransitions.toLocaleString(),
+            {
+              description: "Maximum typed lifecycle transitions retained by one Fabric run.",
+              submenu: numericSubmenu(
+                theme,
+                [64, 128, 256, 512, 1_000, 2_000],
+                (n) => n.toLocaleString(),
+                "Run transition limit",
+                "Maximum typed lifecycle transitions retained by one Fabric run.",
+              ),
+            },
+          ),
         ],
         persist,
       ),
@@ -756,9 +818,39 @@ export const buildFabricSettingsItems = (
         [
           setting("prewalk.mode", "Mode", config.prewalk.mode, {
             description:
-              "In-place switches Main, retains that model, and queues a hidden continuation. Trajectory moves the session snapshot to a visible child executor, then queues a hidden verify-and-summarize continuation for Main when it finishes.",
+              "In-place switches Main and queues a hidden continuation; its return policy decides whether the executor remains selected. Trajectory moves the session snapshot to a visible child executor, then queues a hidden verify-and-summarize continuation for Main when it finishes.",
             values: PREWALK_MODES,
           }),
+          setting(
+            "prewalk.returnPolicy",
+            "After in-place task",
+            config.prewalk.returnPolicy,
+            {
+              description:
+                "Keep the executor model, or restore the previous Main model after the owned continuation settles. Trajectory mode never changes Main's model.",
+              values: PREWALK_RETURN_POLICIES,
+            },
+          ),
+          setting(
+            "prewalk.verificationMode",
+            "Verification",
+            config.prewalk.verificationMode ?? "legacy",
+            {
+              description:
+                "Legacy keeps the existing prompt-only continuation. Gated requires host-observed evidence, returns failed revise gates to the executor, and blocks on crash, abort, or a missing acceptance gate.",
+              values: PREWALK_VERIFICATION_MODES,
+            },
+          ),
+          setting(
+            "prewalk.maxPhaseRevisions",
+            "Max revisions",
+            String(config.prewalk.maxPhaseRevisions ?? 2),
+            {
+              description:
+                "Maximum gated verify-to-execute revision cycles for one task. Zero makes the first revise result terminal.",
+              values: PREWALK_REVISION_LIMITS,
+            },
+          ),
           setting(
             "prewalk.alwaysRearm",
             "Always re-arm",
@@ -836,6 +928,26 @@ export const buildFabricSettingsItems = (
               options.modelSource,
             ),
           }),
+          setting(
+            "agents.allowQualityDowngrade",
+            "Allow quality downgrade",
+            config.agents.allowQualityDowngrade ? "true" : "false",
+            {
+              description:
+                "Permit a capability-compatible fallback with a smaller context, output ceiling, reasoning support, or input modalities. Requests cannot elevate this host policy.",
+              values: BOOLEANS,
+            },
+          ),
+          setting(
+            "agents.requireAdmissionIntent",
+            "Require admission intent",
+            config.agents.requireAdmissionIntent ? "true" : "false",
+            {
+              description:
+                "Require every one-shot agent or handoff to name an independent-context, separable, capability-gap, long-running, or verification justification and expected artifact.",
+              values: BOOLEANS,
+            },
+          ),
           setting(
             "agents.claude.model",
             "Claude model",
@@ -945,6 +1057,121 @@ export const buildFabricSettingsItems = (
             description: "Post a message when a background agent completes.",
             values: BOOLEANS,
           }),
+        ],
+        persist,
+      ),
+    }),
+    setting("consult", "Ultra Consult", summaryFor("consult", config), {
+      description: "Context-aware, read-only fresh-worker consultation with host-validated evidence.",
+      submenu: sectionSubmenu(
+        theme,
+        "Ultra Consult",
+        "Host admission defaults to zero workers. Admitted workers are read-only, depth one, and deterministically reduced.",
+        [
+          setting("consult.enabled", "Enabled", config.consult.enabled ? "true" : "false", {
+            description: "Permit consult.run to admit bounded fresh workers; disabled calls return not_admitted.",
+            values: BOOLEANS,
+          }),
+          setting("consult.maxWorkers", "Max workers", String(config.consult.maxWorkers), {
+            description: "Hard ceiling for one consult.run call.",
+            submenu: numericSubmenu(
+              theme,
+              [1, 2, 3],
+              String,
+              "Consult workers",
+              "Hard ceiling for one consult.run call.",
+            ),
+          }),
+          setting(
+            "consult.contextPressureThreshold",
+            "Context pressure",
+            `${Math.round(config.consult.contextPressureThreshold * 100)}%`,
+            {
+              description: "Host context occupancy required for unscoped context-capacity delegation.",
+              submenu: numericSubmenu(
+                theme,
+                CONSULT_PRESSURE_RATIOS,
+                (value) => `${Math.round(value * 100)}%`,
+                "Consult context pressure",
+                "Host context occupancy required for unscoped context-capacity delegation.",
+              ),
+            },
+          ),
+          setting(
+            "consult.maxFindingsPerWorker",
+            "Max findings",
+            String(config.consult.maxFindingsPerWorker),
+            {
+              description: "Maximum structured findings accepted from one worker.",
+              submenu: numericSubmenu(
+                theme,
+                [1, 2, 4, 8, 12, 16],
+                String,
+                "Findings per worker",
+                "Maximum structured findings accepted from one worker.",
+              ),
+            },
+          ),
+          setting(
+            "consult.maxEvidencePerFinding",
+            "Evidence per finding",
+            String(config.consult.maxEvidencePerFinding),
+            {
+              description: "Maximum file addresses validated for one finding.",
+              submenu: numericSubmenu(
+                theme,
+                [1, 2, 4, 8, 12, 16],
+                String,
+                "Evidence per finding",
+                "Maximum file addresses validated for one finding.",
+              ),
+            },
+          ),
+          setting(
+            "consult.maxEvidenceFileBytes",
+            "Evidence file size",
+            formatBytes(config.consult.maxEvidenceFileBytes),
+            {
+              description: "Maximum file size read to validate cited line ranges.",
+              submenu: numericSubmenu(
+                theme,
+                [64 * 1024, 256 * 1024, 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024, 16 * 1024 * 1024],
+                formatBytes,
+                "Evidence file size",
+                "Maximum file size read to validate cited line ranges.",
+              ),
+            },
+          ),
+          setting(
+            "consult.maxEvidenceBytesPerConsult",
+            "Evidence byte budget",
+            formatBytes(config.consult.maxEvidenceBytesPerConsult),
+            {
+              description: "Cumulative bytes read while validating cited line ranges in one Consult.",
+              submenu: numericSubmenu(
+                theme,
+                [1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024, 16 * 1024 * 1024, 32 * 1024 * 1024, 64 * 1024 * 1024],
+                formatBytes,
+                "Consult evidence byte budget",
+                "Cumulative bytes read while validating cited line ranges in one Consult.",
+              ),
+            },
+          ),
+          setting(
+            "consult.maxTokensPerWorker",
+            "Worker token limit",
+            formatTokens(config.consult.maxTokensPerWorker),
+            {
+              description: "Per-worker token ceiling before the execution-wide budget is applied.",
+              submenu: numericSubmenu(
+                theme,
+                [256, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000],
+                formatTokens,
+                "Consult worker token limit",
+                "Per-worker token ceiling before the execution-wide budget is applied.",
+              ),
+            },
+          ),
         ],
         persist,
       ),
@@ -1078,6 +1305,34 @@ export const buildFabricSettingsItems = (
             values: COMPACTION_ENGINES,
           }),
           setting(
+            "compaction.contextQos.enabled",
+            "Context QoS",
+            config.compaction.contextQos.enabled ? "true" : "false",
+            {
+              description:
+                "Before each model request, retire only old superseded read-result bodies while preserving call/result pairs, recent turns, failures, mutations, and evidence.",
+              values: BOOLEANS,
+            },
+          ),
+          setting(
+            "compaction.contextQos.turnWindow",
+            "Protected turns",
+            String(config.compaction.contextQos.turnWindow),
+            {
+              description: "Number of most-recent user turns Context QoS never retires.",
+              values: CONTEXT_QOS_TURN_WINDOWS,
+            },
+          ),
+          setting(
+            "compaction.contextQos.minResultChars",
+            "Retire after chars",
+            String(config.compaction.contextQos.minResultChars),
+            {
+              description: "Minimum text-result size eligible for deterministic retirement.",
+              values: CONTEXT_QOS_RESULT_CHARS,
+            },
+          ),
+          setting(
             "compaction.targetContextRatio",
             "Target occupancy",
             String(config.compaction.targetContextRatio),
@@ -1085,6 +1340,46 @@ export const buildFabricSettingsItems = (
               description:
                 "Fraction of the advertised model window Fabric targets after compaction.",
               values: COMPACTION_TARGET_RATIOS,
+            },
+          ),
+        ],
+        persist,
+      ),
+    }),
+    setting("outcomes", "Outcomes", summaryFor("outcomes", config), {
+      description: "Bounded run metrics, evaluation scores, and sample-gated route recommendations.",
+      submenu: sectionSubmenu(
+        theme,
+        "Outcomes",
+        "Persist derived metrics only. Prompts, result bodies, gate reasons, and judge prose are never stored.",
+        [
+          setting("outcomes.enabled", "Enabled", config.outcomes.enabled ? "true" : "false", {
+            description: "Record terminal Fabric run outcomes in project mesh state.",
+            values: BOOLEANS,
+          }),
+          setting("outcomes.maxRecords", "Max records", String(config.outcomes.maxRecords), {
+            description: "Bounded ledger capacity; new records stop when capacity is reached.",
+            submenu: numericSubmenu(
+              theme,
+              [100, 250, 500, 1_000, 2_000, 5_000, 10_000],
+              String,
+              "Outcome records",
+              "Maximum derived run outcomes retained in project mesh state.",
+            ),
+          }),
+          setting(
+            "outcomes.minRecommendationSamples",
+            "Recommendation samples",
+            String(config.outcomes.minRecommendationSamples),
+            {
+              description: "Minimum samples for a model before it can be recommended.",
+              submenu: numericSubmenu(
+                theme,
+                [2, 3, 5, 10, 20, 50, 100],
+                String,
+                "Recommendation samples",
+                "Minimum outcome samples required before a model route can be recommended.",
+              ),
             },
           ),
         ],
@@ -1193,6 +1488,148 @@ export const buildFabricSettingsItems = (
               "Maximum messages queued per actor mailbox.",
             ),
           }),
+          setting(
+            "mesh.actorOverflowPolicy",
+            "Actor overflow policy",
+            config.mesh.actorOverflowPolicy,
+            {
+              description:
+                "Reject, source-coalesce, drop the oldest queued activation, or dead-letter the oldest queued activation when the mailbox is full.",
+              values: ["reject", "coalesce", "drop-oldest", "dead-letter"],
+            },
+          ),
+          setting(
+            "mesh.actorRunMaxAttempts",
+            "Actor startup attempts",
+            String(config.mesh.actorRunMaxAttempts),
+            {
+              description: "Maximum attempts for zero-effect actor startup failures. Runs with model/tool activity never replay automatically.",
+              values: ["1", "2", "3", "4", "5"],
+            },
+          ),
+          setting(
+            "mesh.actorRunBaseDelayMs",
+            "Actor startup retry base",
+            formatMs(config.mesh.actorRunBaseDelayMs),
+            {
+              description: "Initial delay for safe zero-effect actor run retry.",
+              submenu: numericSubmenu(
+                theme,
+                [0, 100, 250, 500, 1_000, 2_000],
+                formatMs,
+                "Actor startup retry base",
+                "Initial delay for safe zero-effect actor run retry.",
+              ),
+            },
+          ),
+          setting(
+            "mesh.actorRunMaxDelayMs",
+            "Actor startup retry max",
+            formatMs(config.mesh.actorRunMaxDelayMs),
+            {
+              description: "Maximum exponential delay for safe actor run retry.",
+              submenu: numericSubmenu(
+                theme,
+                [0, 500, 1_000, 2_000, 5_000, 10_000],
+                formatMs,
+                "Actor startup retry max",
+                "Maximum exponential delay for safe actor run retry.",
+              ),
+            },
+          ),
+          setting(
+            "mesh.actorRunJitterMs",
+            "Actor startup retry jitter",
+            formatMs(config.mesh.actorRunJitterMs),
+            {
+              description: "Random jitter added to safe actor run retry delays.",
+              submenu: numericSubmenu(
+                theme,
+                [0, 50, 100, 250, 500, 1_000],
+                formatMs,
+                "Actor startup retry jitter",
+                "Random jitter added to safe actor run retry delays.",
+              ),
+            },
+          ),
+          setting(
+            "mesh.actorDeliveryMaxAttempts",
+            "Actor delivery attempts",
+            String(config.mesh.actorDeliveryMaxAttempts),
+            {
+              description: "Maximum idempotent mesh/Main delivery attempts before dead-lettering.",
+              values: ["1", "2", "3", "4", "5"],
+            },
+          ),
+          setting(
+            "mesh.actorDeliveryBaseDelayMs",
+            "Actor retry base delay",
+            formatMs(config.mesh.actorDeliveryBaseDelayMs),
+            {
+              description: "Initial actor delivery retry delay before exponential growth.",
+              submenu: numericSubmenu(
+                theme,
+                [0, 50, 100, 250, 500, 1_000],
+                formatMs,
+                "Actor retry base delay",
+                "Initial actor delivery retry delay before exponential growth.",
+              ),
+            },
+          ),
+          setting(
+            "mesh.actorDeliveryMaxDelayMs",
+            "Actor retry max delay",
+            formatMs(config.mesh.actorDeliveryMaxDelayMs),
+            {
+              description: "Maximum exponential component of actor delivery backoff.",
+              submenu: numericSubmenu(
+                theme,
+                [250, 500, 1_000, 2_000, 5_000, 10_000],
+                formatMs,
+                "Actor retry max delay",
+                "Maximum exponential component of actor delivery backoff.",
+              ),
+            },
+          ),
+          setting(
+            "mesh.actorDeliveryJitterMs",
+            "Actor retry jitter",
+            formatMs(config.mesh.actorDeliveryJitterMs),
+            {
+              description: "Random jitter added to actor delivery retry delays.",
+              submenu: numericSubmenu(
+                theme,
+                [0, 25, 50, 100, 250, 500],
+                formatMs,
+                "Actor retry jitter",
+                "Random jitter added to actor delivery retry delays.",
+              ),
+            },
+          ),
+          setting(
+            "mesh.actorCircuitFailureThreshold",
+            "Actor circuit threshold",
+            String(config.mesh.actorCircuitFailureThreshold),
+            {
+              description: "Consecutive terminal Main delivery failures before the actor circuit opens.",
+              values: ["1", "2", "3", "5", "10"],
+            },
+          ),
+          setting(
+            "mesh.actorCircuitCooldownMs",
+            "Actor circuit cooldown",
+            formatMs(config.mesh.actorCircuitCooldownMs),
+            {
+              description: "Wait before one half-open actor delivery probe is allowed.",
+              submenu: numericSubmenu(
+                theme,
+                [0, 1_000, 5_000, 15_000, 30_000, 60_000, 300_000],
+                formatMs,
+                "Actor circuit cooldown",
+                "Wait before one half-open actor delivery probe is allowed.",
+              ),
+            },
+          ),
           setting("mesh.actorContextEntries", "Actor context entries", String(config.mesh.actorContextEntries), {
             description: "Transcript entries forwarded to actors as context.",
             submenu: numericSubmenu(

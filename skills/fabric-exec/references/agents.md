@@ -6,16 +6,18 @@ Every method takes a single options object.
 
 ## One-shot child agents
 
-- `agents.run(args)` runs to completion and returns `FabricAgentResult` with `{ id, runner, status, text, value?, error?, usage, turns, toolCalls, runnerSessionId? }`.
+- `agents.run(args)` runs to completion and returns `FabricAgentResult` with `{ id, runner, status, text, value?, error?, usage, turns, toolCalls, traceId?, spanId?, parentRunId?, parentSpanId?, runnerSessionId? }`.
 - `agents.spawn(args)` returns a background `FabricAgentHandle` with an `id`. Then use `agents.wait({ id })`, `agents.status({ id })`, `agents.stop({ id })`.
 - `agents.list({ scope? })` returns agent participants. `scope` defaults to `"local"`; use `"lineage"` for every agent under the same root across recursive runtimes, or `"project"` for all live project agents. Local entries retain full run detail; remote entries are bounded participant summaries.
 - `agents.cleanup({ id, deleteBranch? })` returns `{ cleaned }` and removes a worktree branch.
 
-`args` is a `FabricAgentRequest`: `{ task, name?, runner?, transport?, model?, thinking?, tools?, timeoutMs?, extensions?, recursive?, worktree?, schema? }`.
+`args` is a `FabricAgentRequest`: `{ task, name?, runner?, transport?, model?, fallbackModels?, requirements?, allowQualityDowngrade?, profile?, admission?, thinking?, tools?, timeoutMs?, maxTokens?, extensions?, recursive?, worktree?, schema? }`. Inside a finite `fabric_exec tokenBudget`, the host injects or narrows `maxTokens` from an atomic reservation before launch.
 
 - `runner` is `pi` or `claude` and defaults to `agents.runner` (`pi`).
 - `transport` is one of `auto`, `process`, `tmux`, `screen`, `localterm`, `herdr` (default `process`). `auto` tries Herdr when the parent runs inside a Herdr workspace, then LocalTerm, tmux, screen, and process.
 - Pi `model` values are `provider/id` keys from `tools.models()`; omitted uses `agents.model` or inherits the host model. Claude values are `claude/<value>` keys from `agents.models({ runner: "claude" })`; omitted uses `agents.claude.model` or Claude Code's runtime default. `agents.models()` defaults to the configured runner; Claude discovery is a local CLI control handshake and makes no model inference request.
+- `fallbackModels`/`requirements` request capability/auth-aware Pi routing before launch. Capability-preserving fallback is automatic. Quality reduction requires host `agents.allowQualityDowngrade`; requests may narrow but cannot elevate it. Results and handles include `route`.
+- `admission` is `{ reason, expectedArtifact }`; host `agents.requireAdmissionIntent` rejects omission before launch. `profile` selects a configured fixed tool/risk profile and cannot be overridden by request tools.
 - `thinking` is the reasoning effort (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`); defaults to `agents.thinking` (`medium`) and is clamped to the model's supported levels (next highest when unsupported).
 - `tools` defaults to `agents.defaultTools`. Claude maps `read→Read`, `grep→Grep`, `find/ls→Glob`, `bash→Bash`, `edit→Edit`, and `write→Write`; other tool names fail before launch.
 - `schema` is a JSON Schema; the worker returns validated structured data in `result.value`.
@@ -38,6 +40,51 @@ return await agents.wait({ id: handle.id });
 ```
 
 Detached `agents.spawn()` runs already notify Main on terminal completion when `agents.notifyOnComplete` is enabled (the default). The notification is a triggered follow-up. Use `agents.wait()` when the current Fabric program needs the result, `agents.status()` only for a point-in-time progress inspection, and lifecycle subscriptions when another participant's Pi boundary matters. Calling `wait()` makes that run foreground work and suppresses the detached completion notification.
+
+## Ultra Consult
+
+`consult.run(request)` is a host-owned fresh-context primitive, not a free-form council. It performs admission, launches zero to three workers, validates file evidence, and deterministically reduces the result. The parent may attempt it once per `fabric_exec` execution.
+
+Request:
+
+```ts
+interface FabricConsultRequest {
+  objective: string;
+  decision: string;
+  mode?: "auto" | "partition" | "challenge" | "compare";
+  proposal?: string;
+  admission: {
+    justification: "context_capacity" | "independent_verification" | "structural_diversity";
+    independence: string;
+    couldChange: string;
+  };
+  perspectives: Array<{
+    id: string;
+    question: string;
+    scope?: string[];
+    model?: string;
+  }>;
+}
+```
+
+Host invariants:
+
+- zero workers on declined admission, including insufficient context pressure, overlap, missing structural diversity, exhausted agent slots, disabled policy, or a repeated attempt;
+- at most three workers and never more than the remaining parent agent budget;
+- fixed Pi runner, fresh context, depth one, discovered extensions off, no recursion, and only `read`, `grep`, `find`, and `ls`; one explicit host extension realpath-checks every tool path against the project and perspective scope;
+- fixed host `maxTokensPerWorker`; request fields cannot elevate it;
+- every accepted finding resolves to an existing regular file inside the project and perspective scope, with a valid optional line range;
+- project traversal, absolute paths, out-of-project symlinks, missing files, and oversized line-validation reads are rejected; canonical file snapshots are cached under per-file and cumulative byte ceilings;
+- consensus requires complete accepted coverage and one normalized-equal recommendation from every requested perspective; otherwise Compare returns ordered `disagreements` without synthesis;
+- no automatic retry and no second Consult in the same parent execution.
+
+The result status is `success`, `partial`, `inconclusive`, `failed`, `cancelled`, `timed_out`, `budget_exhausted`, or `not_admitted`. `coverage` reports requested, started, completed, accepted, failed, rejected, and missing perspective IDs. Accepted `findings` contain only canonical host-resolvable evidence refs such as `src/auth/tokens.ts#L20-L28`. `recommendations`, exact `consensus?`, `disagreements`, risks, uncertainty, per-perspective status, and aggregate worker token/cost usage remain bounded. A silent Challenge has `status: "success"` and `silent: true`.
+
+Persisted outcome records include only the compact Consult status, mode, coverage counts, unique evidence count, context ratio, and aggregate worker tokens/cost. Prompts, recommendation text, findings, risks, uncertainty, and evidence claims are not persisted.
+
+## Shared-workspace leases
+
+Use `leases.acquire({ paths: [{ path, scope: "file" | "tree" }], ttlMs })`, then release returned IDs in `finally`. Active foreign leases reject `pi.edit`/`pi.write` before mutation. They cannot inspect `pi.bash`; use `worktree: true` for opaque writers.
 
 ## Participant lifecycle subscriptions
 
@@ -90,11 +137,11 @@ The guest result is `{ scheduled: true, status: "deferred", boundary: "fabric_ex
 
 ## Automatic prewalk
 
-`/fabric prewalk [task]` arms one automatic continuation when a Fabric invocation contains a successful `pi.edit`, `pi.write`, or `schema.commit`. With a task it submits immediately; without one it captures the next user input. The executor comes from `prewalk.model` or an interactive choice, and its reasoning effort from `prewalk.thinking` (inheriting `agents.thinking` when unset). `prewalk.alwaysRearm` keeps the controller armed until `/fabric prewalk --off`.
+`/fabric prewalk [task]` arms one automatic continuation when a Fabric invocation contains a successful `pi.edit`, `pi.write`, or `schema.commit`. With a task it submits immediately; without one it captures the next user input. The executor comes from `prewalk.model` or an interactive choice, and its reasoning effort from `prewalk.thinking` (inheriting `agents.thinking` when unset). `prewalk.alwaysRearm` keeps the controller armed after successful tasks until `/fabric prewalk --off`. Failed handoffs block with their task and attempt preserved; after correcting the cause, `/fabric prewalk --retry` explicitly re-arms and resubmits that task. Successful handoffs stay pending until the hidden message with the matching handoff identity runs and settles; stale historical continuation messages are removed from model context, and always-rearm activates only after settlement. In-place mode keeps the executor by default; `prewalk.returnPolicy: "previous"` restores Main's boundary model after that settlement. Optional `prewalk.fallbackModels` provides a bounded model-selection chain before continuation starts; trajectory children are never auto-retried.
 
 The default `prewalk.mode: "in-place"` switches Main to the executor model at the finalized outer boundary and queues one hidden follow-up to continue the existing task. It does not spawn or wait for a child. The outer tool terminates the old-model automatic turn, then Pi drains the queued continuation on the newly selected model. This mode requires full code mode but not enabled agents; Pi's public model switch also updates its persisted default model.
 
-Set `prewalk.mode: "trajectory"` to fork the finalized call/result into a Pi child and wait. A hidden follow-up then has Main verify the child's work and summarize, so it never settles idle by design. The parent activity card shows the handoff call, child, progress/current tool, nested tools, metrics, and result. Trajectory mode requires enabled agents. Both modes let all nested calls settle before the boundary, disarm a triggerless completed task, defer to explicit `agents.handoff()`, and are disabled by Schema enforce mode. Use `/fabric prewalk --status` or `/fabric prewalk --off`.
+Set `prewalk.mode: "trajectory"` to fork the finalized call/result into a Pi child and wait. A hidden follow-up then has Main verify the child's work and summarize, so it never settles idle by design. The parent activity card shows the handoff call, child, progress/current tool, nested tools, metrics, and result. Trajectory mode requires enabled agents. Both modes let all nested calls settle before the boundary, disarm a triggerless completed task, defer to explicit `agents.handoff()`, and are disabled by Schema enforce mode. Use `/fabric prewalk --status`, `/fabric prewalk --retry`, or `/fabric prewalk --off`.
 
 Use `/fabric agents` to list children and `/fabric attach <id>` for the attach command. Abort signals propagate to the transport and selected child process. Claude runs use official `claude -p` stream JSON with `dontAsk`, `--tools`, and `--allowedTools`; `extensions: false` adds Claude safe mode. One-shot Claude sessions use `--no-session-persistence`. Claude cannot use `recursive: true`, `fabric_exec`, or direct mesh APIs.
 
@@ -172,15 +219,21 @@ For a native asynchronous vision handoff, create one actor with an explicit mult
 
 Mailbox:
 
-- `agents.ask({ id, message, data? })` returns a `FabricActorMessage` (blocking exchange).
-- `agents.tell({ id, message, data? })` returns `{ queued, messageId }` (fire and forget).
+- `agents.create({ ..., budget?: { lifetimeActivations?, windowActivations?, windowMs? } })` installs durable host-owned activation quotas. `agents.actorTelemetry()` returns aggregate activation/token/rejection counters.
+- `agents.ask({ id, message, data?, maxTokens? })` returns a `FabricActorMessage` (blocking exchange). In a finite run budget, the host injects the reserved ceiling and propagates the run/trace/span parent into the actor child.
+- `agents.tell({ id, message, data?, maxTokens? })` returns `{ queued, messageId }` (fire and forget). Its detached child conservatively commits the full reservation.
 - `agents.actorStatus({ id })` and `agents.actors()` return full info only for locally owned actors. Discover remote actors through `agents.members({ kinds: ["actor"] })`.
 - `agents.setModel({ id, model? })` and `agents.setThinking({ id, thinking? })` migrate the next activation while preserving the actor's runner session.
 - `agents.setTools({ id, tools, scope? })` replaces the persisted tool allowlist for a project actor (default) or global template.
 - `agents.setDeliveryPolicy({ id, delivery, triggerTurn, scope? })` replaces the explicit project/global continuation policy without recreating the actor. In the dashboard, press `y` on an actor/template for the same control.
-- `agents.messages({ id, limit? })` returns owner-local message history; passive shared-registry views cannot read another owner's mailbox.
+- `agents.messages({ id, limit? })` returns owner-local durable inbox/outbox history, including per-channel `deliveryReceipt` state; passive shared-registry views cannot read another owner's mailbox.
+- `agents.retryDelivery({ id, messageId })` explicitly retries failed mesh/Main delivery under the stable outbox ID. Zero-effect actor startup failures may retry one-for-one under the configured bound and report `runAttempts`; any turn, tool call, or token use prevents replay. Automatic delivery attempts use bounded exponential backoff and jitter; exhaustion dead-letters the channel, and repeated terminal Main failures open a persisted cooldown circuit. Queue overload follows the configured reject, source-coalesce, drop-oldest, or dead-letter policy with explicit terminal records.
 - `agents.remove({ id })` returns `{ removed }`.
 - `agents.log({ id, type?, lines?, runId? })` reads the LLM/agent log for a locally owned actor or one-shot run. `type` is `session` (the actor's `session.jsonl` transcript — every user/assistant turn and tool call), `run` (the last retained run's `events.jsonl` event stream), or `all` (both; default `session` for actors). Actors retain their last `MAX_RETAINED_RUNS` runs so logs survive after success. Returns `{ actorId, actorName, sessionFile, logDir, session, run?, retainedRuns }` (actors) or `{ id, runDirectory, logFile, status?, events }` (one-shot runs). Use this to inspect what an "offending" actor actually sent to its model. From the TUI: `/fabric log <id>` previews, `/fabric export-log <id> [path]` writes the raw `session.jsonl` + retained `runs/` to disk.
+
+## Outcomes
+
+`outcomes.list/status` reads prompt-free terminal metrics. `outcomes.evaluate` appends exact/contains/numeric fixture scores; `outcomes.judge` appends only a model judge score/verdict. `outcomes.recommend()` returns `insufficient_samples` until a model reaches the configured minimum, then reports success, verification, cost, duration, downgrade, admission, and Wilson confidence metrics without changing routing defaults.
 
 ## Recursive queries
 

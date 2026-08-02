@@ -12,6 +12,8 @@ import { registerFabricActorHostEventObservers } from "./actors/host-event-obser
 import { CapturedToolCatalog } from "./capture/catalog.js";
 import { installRegisteredToolCapture } from "./capture/interceptor.js";
 import { registerFabricCommand } from "./commands/fabric.js";
+import { filterPrewalkContinuationMessages } from "./prewalk/continuation.js";
+import { restorePrewalkModel } from "./prewalk/model.js";
 import { withTrajectoryRearmDirective } from "./prewalk/handoff.js";
 import type { PendingFabricHandoff } from "./prewalk/handoff.js";
 import {
@@ -19,6 +21,7 @@ import {
   effectiveToolCaptureConfig,
 } from "./config.js";
 import { registerCompactionHook } from "./compaction/hook.js";
+import { applyContextQos } from "./context/qos.js";
 import { compactAtConfiguredThreshold } from "./compaction/threshold.js";
 import {
   FabricToolLifecycle,
@@ -276,18 +279,38 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     if (state.initialized) await state.publishHostLifecycle("pi.agent_end", event);
   });
 
-  pi.on("turn_end", async (event, context) => {
+  pi.on("turn_end", async (event) => {
     if (!state.initialized) return;
     await state.publishHostLifecycle("pi.turn_end", event);
   });
 
   pi.on("agent_settled", async (event, context) => {
     if (!state.initialized) return;
-    if (state.prewalk.settleTask(context.sessionManager.getSessionId())) {
+    const sessionId = context.sessionManager.getSessionId();
+    const settledContinuation = state.prewalk.settleContinuation(sessionId);
+    if (settledContinuation.returnModel) {
+      const restored = await restorePrewalkModel(
+        pi,
+        context,
+        settledContinuation.returnModel,
+      );
+      context.ui.notify(
+        restored.status === "restored"
+          ? `Prewalk restored Main → ${restored.model}`
+          : `Prewalk could not restore ${restored.model}: ${restored.error}`,
+        restored.status === "restored" ? "info" : "warning",
+      );
+    }
+    const settledTask = state.prewalk.settleTask(sessionId);
+    if (settledContinuation.settled || settledTask) {
       const status = state.prewalk.status();
       context.ui.setStatus(
         "fabric-prewalk",
-        status.state === "armed" ? `armed → ${status.model}` : undefined,
+        status.state === "armed"
+          ? `armed → ${status.model}`
+          : status.state === "blocked"
+            ? `blocked → ${status.model}`
+            : undefined,
       );
     }
     // Keep the completed widget mounted until a newer Fabric run replaces it.
@@ -398,7 +421,7 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     }
   });
 
-  pi.on("session_compact", async (event, context) => {
+  pi.on("session_compact", async (event) => {
     if (!state.initialized) return;
     await state.publishHostLifecycle("pi.session_compact", event);
   });
@@ -421,9 +444,29 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
         : DEFAULT_FABRIC_CONFIG.compaction.thresholds[modelKey],
   });
 
-  pi.on("context", (event) => {
-    let changed = false;
-    const messages = event.messages.map((message) => {
+  pi.on("context", (event, context) => {
+    const continuation = filterPrewalkContinuationMessages(
+      event.messages,
+      (handoffId) =>
+        state.initialized &&
+        state.prewalk.acceptContinuation(
+          context.sessionManager.getSessionId(),
+          handoffId,
+        ),
+    );
+    const contextQos = state.initialized
+      ? state.config.compaction.contextQos
+      : DEFAULT_FABRIC_CONFIG.compaction.contextQos;
+    const qos = contextQos.enabled
+      ? applyContextQos(continuation.messages, contextQos)
+      : {
+          messages: continuation.messages,
+          changed: false,
+          report: { retiredResults: 0, retiredChars: 0, protectedResults: 0 },
+        };
+    state.noteContextQos(qos.report);
+    let changed = continuation.changed || qos.changed;
+    const messages = qos.messages.map((message) => {
       if (message.role !== "user") return message;
       if (typeof message.content === "string") {
         const content = expandSkillDirMarkersInSkillBlock(message.content);
