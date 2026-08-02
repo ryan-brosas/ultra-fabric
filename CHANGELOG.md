@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.31.1-ultra.1 - 2026-08-02
+
+- Fix packaged Pi startup by removing an unsupported `pi-ai` deep import.
+- Add an isolated packed-extension smoke gate before release.
+
 ## 0.31.1-ultra.0 - 2026-08-02
 
 First experimental Ultra Fabric prerelease, based on pi-fabric 0.31.1.

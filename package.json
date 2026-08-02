@@ -1,6 +1,6 @@
 {
   "name": "ultra-fabric",
-  "version": "0.31.1-ultra.0",
+  "version": "0.31.1-ultra.1",
   "description": "A resilient, adaptive orchestration runtime for Pi",
   "type": "module",
   "main": "./dist/index.js",
@@ -34,6 +34,7 @@
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "smoke:package": "node scripts/smoke-pi-package.mjs",
     "certify:context": "pnpm run build && node scripts/certify-context.mjs",
     "benchmark:real-resume": "pnpm run build && node scripts/benchmark-real-resume.mjs",
     "benchmark:prewalk": "node scripts/benchmark-prewalk.mjs",
@@ -41,7 +42,7 @@
     "benchmark:prewalk:real": "pnpm run build && node scripts/benchmark-prewalk-real.mjs",
     "benchmark:memory-heads": "pnpm run build && node scripts/benchmark-memory-heads.mjs",
     "lint:dead": "knip --no-gitignore",
-    "check": "pnpm run typecheck && pnpm run build && pnpm run test && pnpm run lint:dead",
+    "check": "pnpm run typecheck && pnpm run build && pnpm run test && pnpm run lint:dead && pnpm run smoke:package",
     "prepare": "npm run build",
     "prepack": "pnpm run check"
   },

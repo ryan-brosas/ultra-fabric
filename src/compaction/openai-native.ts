@@ -6,10 +6,8 @@ import {
   type ExtensionContext,
   type SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
-import { calculateCost, type Usage } from "@earendil-works/pi-ai";
-import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
+import { calculateCost, type Message, type Usage } from "@earendil-works/pi-ai";
 
-const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 const CODEX_INSTALLATION_ID = randomUUID();
 const RETAINED_USER_HISTORY_BYTES = 80_000;
 const MAX_REMOTE_RESPONSE_BYTES = 20 * 1024 * 1024;
@@ -252,18 +250,100 @@ const retainedUserHistory = (
 
 type ApplicationMessage = Parameters<typeof convertToLlm>[0][number];
 
+const normalizeOpenAIId = (value: string, fallback: string): string => {
+  const normalized = value.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64).replace(/_+$/, "");
+  return normalized || fallback;
+};
+
+const responseTextIdentity = (
+  signature: string | undefined,
+  fallback: string,
+): { id: string; phase?: "commentary" | "final_answer" } => {
+  if (!signature) return { id: fallback };
+  try {
+    const parsed = JSON.parse(signature) as unknown;
+    if (isRecord(parsed) && parsed.v === 1 && typeof parsed.id === "string") {
+      const id = parsed.id.length <= 64 ? parsed.id : fallback;
+      return parsed.phase === "commentary" || parsed.phase === "final_answer"
+        ? { id, phase: parsed.phase }
+        : { id };
+    }
+  } catch {
+    // Older sessions store the response item id directly.
+  }
+  return { id: signature.length <= 64 ? signature : fallback };
+};
+
+const reasoningItem = (signature: string | undefined): OpenAINativeResponseItem[] => {
+  if (!signature) return [];
+  try {
+    const parsed = JSON.parse(signature) as unknown;
+    return isOpenAINativeResponseItem(parsed) ? [parsed] : [];
+  } catch {
+    return [];
+  }
+};
+
+const toolOutput = (message: Extract<Message, { role: "toolResult" }>): string => {
+  const text = message.content
+    .filter((item) => item.type === "text")
+    .map((item) => item.text)
+    .join("\n");
+  if (text.length > 0) return text;
+  return message.content.some((item) => item.type === "image")
+    ? "(see attached image)"
+    : "(no tool output)";
+};
+
 export const openAIResponseItemsFor = (
   messages: ApplicationMessage[],
   model: ActiveModel,
-): OpenAINativeResponseItem[] => {
-  const converted = convertResponsesMessages(
-    model,
-    { messages: convertToLlm(messages) },
-    OPENAI_TOOL_CALL_PROVIDERS,
-    { includeSystemPrompt: false },
-  ) as unknown;
-  return Array.isArray(converted) ? converted.filter(isOpenAINativeResponseItem) : [];
-};
+): OpenAINativeResponseItem[] => convertToLlm(messages).flatMap((message, messageIndex) => {
+  if (message.role === "user") {
+    const content = (typeof message.content === "string"
+      ? [{ type: "input_text", text: message.content }]
+      : message.content.map((item) => item.type === "text"
+        ? { type: "input_text", text: item.text }
+        : model.input.includes("image")
+          ? { type: "input_image", detail: "auto", image_url: `data:${item.mimeType};base64,${item.data}` }
+          : { type: "input_text", text: "(image omitted: model does not support images)" }));
+    return content.length > 0 ? [{ role: "user", content }] : [];
+  }
+  if (message.role === "toolResult") {
+    return [{
+      type: "function_call_output",
+      call_id: normalizeOpenAIId(message.toolCallId.split("|")[0] ?? "", "call_pi"),
+      output: toolOutput(message),
+    }];
+  }
+  if (message.stopReason === "error" || message.stopReason === "aborted") return [];
+  let textIndex = 0;
+  return message.content.flatMap((block): OpenAINativeResponseItem[] => {
+    if (block.type === "thinking") return reasoningItem(block.thinkingSignature);
+    if (block.type === "toolCall") {
+      const [callId = "", itemId] = block.id.split("|");
+      return [{
+        type: "function_call",
+        ...(itemId?.startsWith("fc_") ? { id: normalizeOpenAIId(itemId, "fc_pi") } : {}),
+        call_id: normalizeOpenAIId(callId, "call_pi"),
+        name: block.name,
+        arguments: JSON.stringify(block.arguments),
+      }];
+    }
+    const fallback = textIndex === 0
+      ? `msg_pi_${messageIndex}`
+      : `msg_pi_${messageIndex}_${textIndex}`;
+    textIndex += 1;
+    const identity = responseTextIdentity(block.textSignature, fallback);
+    return [{
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: block.text, annotations: [] }],
+      status: "completed",
+      ...identity,
+    }];
+  });
+});
 
 const responseItemsFor = (
   event: SessionBeforeCompactEvent,
