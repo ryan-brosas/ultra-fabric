@@ -151,7 +151,6 @@ export const reducePrewalkLifecycle = (
         : status;
     case "checklist_ready":
       return status.state === "armed" &&
-        status.mode === "research" &&
         status.sessionId === event.sessionId
         ? { ...status, checklist: structuredClone(event.checklist) }
         : status;

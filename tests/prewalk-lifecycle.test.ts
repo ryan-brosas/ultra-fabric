@@ -325,7 +325,7 @@ describe("reducePrewalkLifecycle", () => {
     expect(next).not.toHaveProperty("task");
   });
 
-  it("records checklist readiness only for the owning research task", () => {
+  it("records checklist readiness for any armed mode, not only research", () => {
     const state = armed({ mode: "research" });
     const checklist = {
       items: Array.from({ length: 5 }, (_, index) => ({
@@ -344,10 +344,12 @@ describe("reducePrewalkLifecycle", () => {
       sessionId: "session-1",
       checklist,
     })).toEqual({ ...state, checklist });
-    expect(reducePrewalkLifecycle(armed(), {
+    // An in-place (default-mode) arm records the checklist the same way.
+    const inPlace = armed();
+    expect(reducePrewalkLifecycle(inPlace, {
       kind: "checklist_ready",
       sessionId: "session-1",
       checklist,
-    })).toEqual(armed());
+    })).toEqual({ ...inPlace, checklist });
   });
 });

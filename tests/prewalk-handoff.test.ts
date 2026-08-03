@@ -952,12 +952,14 @@ describe("prewalkArmedPrompt", () => {
     expect(text).toContain("anthropic/executor (trajectory)");
     expect(text).toContain("pi.edit / pi.write / schema.commit");
     expect(text).toContain("the executor takes over the implementation there, and a hidden follow-up asks you to verify its work and summarize when it finishes.");
-    expect(text).toContain("restate the remaining steps before your first edit");
+    expect(text).toContain("prewalk.checklist({ items }) call inside fabric_exec with 5-9 ordered items");
+    expect(text).toContain("concrete task and a specific validation");
   });
 
   it("describes in-place continuation for Main", () => {
     const text = prewalkArmedPrompt("in-place", "anthropic/executor");
     expect(text).toContain("this session switches to anthropic/executor and keeps working.");
+    expect(text).toContain("prewalk.checklist({ items }) call inside fabric_exec with 5-9 ordered items");
     expect(text).not.toContain("hidden follow-up asks you to verify");
   });
 });

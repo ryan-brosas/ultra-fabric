@@ -163,6 +163,8 @@ Prewalk trigger matching is host-owned. `prewalk.triggerEffects` defaults to `["
 - `"in-place"` (default compatibility mode) switches Main to the executor only after the complete outer Fabric call settles and queues a hidden follow-up in the same session.
 - `"trajectory"` forks the finalized outer Fabric call/result to a visible Pi child and waits; when the child finishes, a hidden continuation turn has Main verify the work and summarize instead of going idle.
 
+Every armed mode can record a checklist with `prewalk.checklist({ items })` inside `fabric_exec`, and the arming instruction asks for 5–9 ordered items each carrying a concrete task and a specific validation. Only `"research"` rejects mutations until that checklist is accepted; the other modes treat it as advisory at the boundary but still carry it into the continuation, so the plan and its validations survive the model switch. In-place replays the checklist in its hidden follow-up, and trajectory embeds it in the child executor's task. A gated verification revision keeps its scoped feedback instead, because that revision must stay narrow.
+
 ```json
 {
   "prewalk": {

@@ -39,7 +39,7 @@ const PREWALK_CONTINUE_PROMPT = [
   "Finish the remaining implementation, check matching call sites for consistency, and run the relevant verification before reporting completion.",
 ].join(" ");
 
-const researchContinuationPrompt = (checklist: FabricPrewalkChecklist): string => [
+const checklistContinuationPrompt = (checklist: FabricPrewalkChecklist): string => [
   "Continue the existing implementation in this same session under the executor model. The first mutation already succeeded.",
   "Keep this host-accepted checklist active until every remaining item and validation is complete:",
   ...checklist.items.map(
@@ -66,8 +66,9 @@ const PREWALK_TRAJECTORY_VERIFY_PROMPT = [
 ].join(" ");
 
 // Arm-time framing is LLM-visible, TUI-hidden, and does not fire an
-// input event. Research framing has a distinct custom type so the context hook
-// can remove it before the executor's first inference.
+// input event. Research framing has a distinct custom type so its plan
+// message is identifiable; the context hook removes both framing types
+// before the executor's first inference.
 export const prewalkArmedMessageType = (mode: FabricPrewalkMode): string =>
   mode === "research" ? PREWALK_PLAN_MESSAGE_TYPE : PREWALK_ARMED_MESSAGE_TYPE;
 
@@ -88,7 +89,7 @@ export const prewalkArmedPrompt = (mode: FabricPrewalkMode, model: string): stri
             ? "the executor takes over the implementation there, and a hidden follow-up asks you to verify its work and summarize when it finishes."
             : `this session switches to ${model} and keeps working.`
         }`,
-        "Reads never fire it; for multi-step work, restate the remaining steps before your first edit.",
+        "Before your first edit, commit to the remaining execution plan as a host-accepted prewalk.checklist({ items }) call inside fabric_exec with 5-9 ordered items. Every item must have a concrete task and a specific validation. Reads never fire it.",
       ].join("\n");
 
 const customMessageText = (content: unknown): string | undefined => {
@@ -174,6 +175,18 @@ const createPrewalkPending = (input: {
         ? "In-place Prewalk"
         : "Prewalk trajectory executor",
     ...(revisionTask ? { task: revisionTask } : {}),
+    ...(!inPlace && !revisionTask && input.arm.checklist
+      ? {
+          task: [
+            input.arm.task ? `Continue the existing task: ${input.arm.task}` : "Continue the existing task in the forked session.",
+            "Keep this host-accepted checklist active until every item and validation is complete:",
+            ...input.arm.checklist.items.map(
+              (item, index) => `${index + 1}. ${item.task}\n   Validation: ${item.validation}`,
+            ),
+            "Finish the implementation, run every listed validation plus the relevant final verification, and only then report completion.",
+          ].join("\n").slice(0, 20_000),
+        }
+      : {}),
     ...(!inPlace && input.arm.thinking ? { thinking: input.arm.thinking } : {}),
   };
   const audit: FabricCallAudit = {
@@ -194,7 +207,7 @@ const createPrewalkPending = (input: {
     audit,
     resultFormat: input.resultFormat,
     returnPolicy: input.arm.returnPolicy,
-    ...(research && input.arm.checklist
+    ...(input.arm.checklist
       ? { checklist: structuredClone(input.arm.checklist) }
       : {}),
     ...(input.arm.fallbackModels
@@ -345,8 +358,8 @@ const runInPlacePrewalk = async (
     "info",
   );
   const mode = pending.kind === "prewalk-research" ? "research" : "in-place";
-  const basePrompt = pending.kind === "prewalk-research" && pending.checklist
-    ? researchContinuationPrompt(pending.checklist)
+  const basePrompt = pending.checklist
+    ? checklistContinuationPrompt(pending.checklist)
     : PREWALK_CONTINUE_PROMPT;
   extension.sendMessage(
     {

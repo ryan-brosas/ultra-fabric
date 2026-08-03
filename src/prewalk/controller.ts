@@ -141,12 +141,15 @@ export class PrewalkController {
       : undefined;
   }
 
+  // Every armed mode may record a checklist so the executor inherits the plan
+  // and its validations. Only research reserves the mutation, because that
+  // reservation ends fabric_exec at the first write.
   executionBoundary(sessionId: string): FabricPrewalkExecutionBoundary | undefined {
-    if (!this.#researchStatus(sessionId)) return undefined;
+    if (!this.isArmed(sessionId)) return undefined;
     return {
       registerChecklist: (input) => {
-        if (!this.#researchStatus(sessionId)) {
-          throw new Error("Research Prewalk is no longer armed for this session");
+        if (!this.isArmed(sessionId)) {
+          throw new Error("Prewalk is no longer armed for this session");
         }
         const checklist = parsePrewalkChecklist(input);
         this.#transition({ kind: "checklist_ready", sessionId, checklist });

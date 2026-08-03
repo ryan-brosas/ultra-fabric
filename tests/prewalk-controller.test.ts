@@ -245,6 +245,39 @@ describe("PrewalkController", () => {
     });
   });
 
+  it("accepts a host checklist for every armed mode, not only research", () => {
+    for (const mode of ["in-place", "trajectory"] as const) {
+      const controller = new PrewalkController();
+      controller.arm({
+        mode,
+        model: "anthropic/executor",
+        sessionId: "session-1",
+        task: "Implement",
+      });
+      const boundary = controller.executionBoundary("session-1");
+      expect(boundary).toBeDefined();
+      boundary!.registerChecklist({
+        items: Array.from({ length: 6 }, (_, index) => ({
+          task: `Change target ${index + 1}`,
+          validation: `Run check ${index + 1}`,
+        })),
+      });
+      expect(controller.status()).toMatchObject({
+        state: "armed",
+        mode,
+        checklist: { items: expect.any(Array) },
+      });
+      // Only research reserves the first mutation: other modes authorize reads
+      // and non-mutating calls without a reservation.
+      expect(boundary!.authorize({ ref: "pi.read" })).toBe(false);
+      expect(boundary!.authorize({
+        ref: "pi.write",
+        risk: "write",
+        effect: "workspace",
+      })).toBe(false);
+    }
+  });
+
   it("serializes the research mode first mutation reservation", () => {
     const controller = new PrewalkController();
     controller.arm({
