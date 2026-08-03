@@ -55,6 +55,19 @@ return {
 
 Independent calls run in parallel; only the returned object enters the model context.
 
+## DeepSWE smoke comparison
+
+A matched [Pier benchmark](bench/README.md) recorded on 2026-08-03 compared the published packages on the `scc-bounded-memory-spilling` DeepSWE task. Both arms used Pi 0.83.0, `openai-codex/gpt-5.6-sol` at low thinking, the same Docker task image and verifier, and three serial attempts.
+
+| Package | Full solves | Mean partial score | Median agent wall time | Total model cost |
+| ------- | ----------: | -----------------: | ---------------------: | ---------------: |
+| `pi-fabric@0.25.6` | 0/3 | 0.9748 | 320.9s | $2.79 |
+| `ultra-fabric@0.31.1-ultra.1` | 2/3 | 0.9947 | 398.1s | $2.90 |
+
+The binary verifier awards a full solve only when all 31 task-specific fail-to-pass tests and all 286 pass-to-pass regression tests pass. The reference arm preserved all regression tests but missed task-specific edge cases in every attempt. Ultra passed all 31 task-specific tests in every attempt and produced two fully correct patches. All six trials completed without infrastructure errors.
+
+This is a one-task smoke comparison with three stochastic attempts. It also compares different package versions, so it neither proves broad benchmark superiority nor isolates Ultra-native behavior from upstream evolution. See the [benchmark harness and reproduction notes](bench/README.md) for methodology and controls.
+
 ## One Agent runtime, configurable roles
 
 An Agent is either `one-shot` or `persistent`; scout, worker, advisor, supervisor, and other names are role profiles rather than separate runtimes. Discover them with `(await agents.roles()).roles` and inspect its `diagnostics`, select one with `role`, and override a concrete goal, completion contract, or narrower turn budget per instance. Add user profiles in `~/.pi/agent/agents/*.md` or trusted project profiles in `.pi/agents/*.md`.
