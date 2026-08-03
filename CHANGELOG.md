@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.1-ultra.3 - 2026-08-04
+
+- Default `prewalk.returnPolicy` to `previous` so in-place returns Main to its own model once the continuation settles, matching trajectory.
+- Carry a host-accepted checklist into every prewalk mode instead of research only, replaying it in the in-place continuation and embedding it in the trajectory executor task.
+- Declare `@earendil-works/pi-ai` as a bundled peer dependency at `*` so an installed package cannot bind to a duplicate module instance.
+
 ## 0.31.1-ultra.2 - 2026-08-04
 
 - Keep an unfired prewalk arm armed across turn boundaries; it previously disarmed at the end of the turn that observed its task, so a later first edit never handed off.
