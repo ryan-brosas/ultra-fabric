@@ -148,7 +148,7 @@ describe("Fabric configuration", () => {
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
-      alwaysRearm: false,
+      alwaysRearm: true,
     });
     expect(normalizeFabricConfig({ prewalk: { model: "   " } }).prewalk).toEqual({
       mode: "in-place",
@@ -156,15 +156,15 @@ describe("Fabric configuration", () => {
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
-      alwaysRearm: false,
+      alwaysRearm: true,
     });
-    expect(normalizeFabricConfig({ prewalk: { alwaysRearm: true } }).prewalk).toEqual({
+    expect(normalizeFabricConfig({ prewalk: { alwaysRearm: false } }).prewalk).toEqual({
       mode: "in-place",
       returnPolicy: "executor",
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
-      alwaysRearm: true,
+      alwaysRearm: false,
     });
     expect(normalizeFabricConfig({ prewalk: { mode: "trajectory" } }).prewalk.mode).toBe(
       "trajectory",
@@ -683,7 +683,7 @@ describe("Fabric configuration", () => {
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
-      alwaysRearm: false,
+      alwaysRearm: true,
     });
   });
 

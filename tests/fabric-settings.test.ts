@@ -417,7 +417,7 @@ describe("FabricSettingsComponent", () => {
       { keepVisibleCandidates: ["fabric_exec"], modelSource: fakeModelSource },
     );
     const prewalk = items.find((item) => item.id === "prewalk")!;
-    expect(prewalk.currentValue).toBe("in-place · Ask each time");
+    expect(prewalk.currentValue).toBe("in-place · Ask each time · repeat");
     const section = prewalk.submenu!("", () => {}) as any;
     const list = section.settingsList as any;
     list.selectedIndex = list.items.findIndex(
@@ -498,7 +498,7 @@ describe("FabricSettingsComponent", () => {
       { keepVisibleCandidates: ["fabric_exec"], modelSource: fakeModelSource },
     );
     const prewalk = items.find((item) => item.id === "prewalk")!;
-    expect(prewalk.currentValue).toBe("in-place · Ask each time");
+    expect(prewalk.currentValue).toBe("in-place · Ask each time · repeat");
     const section = prewalk.submenu!("", () => {}) as any;
     const list = section.settingsList as any;
     const row = list.items.find((item: { id: string }) => item.id === "prewalk.thinking");
@@ -700,7 +700,7 @@ describe("FabricSettingsComponent", () => {
       expect(config.prewalk.thinking).toBe("xhigh");
       expect(
         rootList.items.find((item: { id: string }) => item.id === "prewalk").currentValue,
-      ).toBe("in-place · Ask each time · XHigh");
+      ).toBe("in-place · Ask each time · XHigh · repeat");
       expect(applyFabricMode).toHaveBeenCalledOnce();
       expect(notify).toHaveBeenCalledWith("Fabric settings saved.", "info");
     } finally {

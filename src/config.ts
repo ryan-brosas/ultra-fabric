@@ -305,7 +305,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     triggerRisks: [],
     triggerEffects: ["workspace"],
     triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
-    alwaysRearm: false,
+    alwaysRearm: true,
   },
   agents: {
     enabled: true,
