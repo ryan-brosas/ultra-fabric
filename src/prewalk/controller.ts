@@ -15,6 +15,7 @@ import {
   type FabricPrewalkArm,
   type FabricPrewalkArmedStatus,
   type FabricPrewalkEvent,
+  type FabricPrewalkRearmDefaults,
   type FabricPrewalkStatus,
 } from "./lifecycle.js";
 
@@ -250,14 +251,23 @@ export class PrewalkController {
     return this.#researchStatus(sessionId) !== undefined;
   }
 
-  settleTask(sessionId: string): boolean {
+  settleTask(sessionId: string, rearm?: FabricPrewalkRearmDefaults): boolean {
     const previous = this.#status;
-    this.#transition({ kind: "task_settled", sessionId, at: Date.now() });
+    this.#transition({
+      kind: "task_settled",
+      sessionId,
+      at: Date.now(),
+      ...(rearm ? { rearm } : {}),
+    });
     return previous !== this.#status;
   }
 
-  supersedeTask(): FabricPrewalkStatus {
-    return this.#transition({ kind: "task_superseded", at: Date.now() });
+  supersedeTask(rearm?: FabricPrewalkRearmDefaults): FabricPrewalkStatus {
+    return this.#transition({
+      kind: "task_superseded",
+      at: Date.now(),
+      ...(rearm ? { rearm } : {}),
+    });
   }
 
   selectHandoffModel(model: string): FabricPrewalkStatus {
@@ -283,7 +293,10 @@ export class PrewalkController {
     );
   }
 
-  settleContinuation(sessionId: string): {
+  settleContinuation(
+    sessionId: string,
+    rearm?: FabricPrewalkRearmDefaults,
+  ): {
     settled: boolean;
     status: FabricPrewalkStatus;
     returnModel?: string;
@@ -297,6 +310,7 @@ export class PrewalkController {
       kind: "continuation_settled",
       sessionId,
       at: Date.now(),
+      ...(rearm ? { rearm } : {}),
     });
     return {
       settled: previous !== this.#status,

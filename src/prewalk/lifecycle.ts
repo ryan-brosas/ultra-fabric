@@ -20,6 +20,17 @@ export interface FabricPrewalkArm {
   maxPhaseRevisions?: number;
 }
 
+export interface FabricPrewalkRearmDefaults {
+  mode: FabricPrewalkMode;
+  model?: string;
+  alwaysRearm: boolean;
+  returnPolicy: FabricPrewalkReturnPolicy;
+  fallbackModels?: string[];
+  thinking?: FabricThinking;
+  verificationMode?: "gated";
+  maxPhaseRevisions?: number;
+}
+
 interface FabricPrewalkPhaseState {
   revision?: number;
   revisionGate?: string;
@@ -68,10 +79,15 @@ export type FabricPrewalkEvent =
   | { kind: "armed"; arm: FabricPrewalkArm }
   | { kind: "task_observed"; sessionId: string; task: string }
   | { kind: "checklist_ready"; sessionId: string; checklist: FabricPrewalkChecklist }
-  | { kind: "task_settled"; sessionId: string; at: number }
+  | {
+      kind: "task_settled";
+      sessionId: string;
+      at: number;
+      rearm?: FabricPrewalkRearmDefaults;
+    }
   | { kind: "handoff_claimed"; sessionId: string; handoffId: string }
   | { kind: "executor_selected"; model: string }
-  | { kind: "task_superseded"; at: number }
+  | { kind: "task_superseded"; at: number; rearm?: FabricPrewalkRearmDefaults }
   | {
       kind: "handoff_succeeded";
       at: number;
@@ -79,7 +95,12 @@ export type FabricPrewalkEvent =
       returnModel?: string;
     }
   | { kind: "continuation_accepted"; sessionId: string; handoffId: string }
-  | { kind: "continuation_settled"; sessionId: string; at: number }
+  | {
+      kind: "continuation_settled";
+      sessionId: string;
+      at: number;
+      rearm?: FabricPrewalkRearmDefaults;
+    }
   | {
       kind: "verification_revision";
       sessionId: string;
@@ -123,13 +144,40 @@ const toArmed = (
   ...(status.revisionFeedback ? { revisionFeedback: status.revisionFeedback } : {}),
 });
 
+// A re-arm must adopt the configuration in force now, not clone the arm that
+// just finished. Without this a mode or model change never takes effect while
+// always-rearm keeps carrying the original arm forward.
+const applyRearm = (
+  armed: FabricPrewalkArmedStatus,
+  rearm: FabricPrewalkRearmDefaults,
+): FabricPrewalkArmedStatus => ({
+  state: "armed",
+  mode: rearm.mode,
+  model: rearm.model ?? armed.model,
+  sessionId: armed.sessionId,
+  armedAt: armed.armedAt,
+  alwaysRearm: rearm.alwaysRearm,
+  returnPolicy: rearm.returnPolicy,
+  attempt: armed.attempt,
+  ...(rearm.fallbackModels && rearm.fallbackModels.length > 0
+    ? { fallbackModels: [...rearm.fallbackModels] }
+    : {}),
+  ...(rearm.thinking ? { thinking: rearm.thinking } : {}),
+  ...(rearm.verificationMode ? { verificationMode: rearm.verificationMode } : {}),
+  ...(rearm.maxPhaseRevisions !== undefined
+    ? { maxPhaseRevisions: rearm.maxPhaseRevisions }
+    : {}),
+});
+
 const finish = (
   status: ActivePrewalkStatus,
   at: number,
-): FabricPrewalkStatus =>
-  status.alwaysRearm
-    ? toArmed(status, at, { preserveTask: false, attempt: 0 })
-    : { state: "idle" };
+  rearm?: FabricPrewalkRearmDefaults,
+): FabricPrewalkStatus => {
+  if (!(rearm ? rearm.alwaysRearm : status.alwaysRearm)) return { state: "idle" };
+  const armed = toArmed(status, at, { preserveTask: false, attempt: 0 });
+  return rearm ? applyRearm(armed, rearm) : armed;
+};
 
 export const reducePrewalkLifecycle = (
   status: FabricPrewalkStatus,
@@ -166,7 +214,9 @@ export const reducePrewalkLifecycle = (
       // example, the first reply only investigates). Keep that one-shot arm
       // alive so the next mutation can still hand off; only re-arming configs
       // finish here, which clears the task so it rebinds to the next message.
-      return status.alwaysRearm ? finish(status, event.at) : status;
+      return (event.rearm ? event.rearm.alwaysRearm : status.alwaysRearm)
+        ? finish(status, event.at, event.rearm)
+        : status;
     case "handoff_claimed":
       return status.state === "armed" && status.sessionId === event.sessionId
         ? {
@@ -181,7 +231,7 @@ export const reducePrewalkLifecycle = (
         ? { ...status, model: event.model }
         : status;
     case "task_superseded":
-      return status.state === "idle" ? status : finish(status, event.at);
+      return status.state === "idle" ? status : finish(status, event.at, event.rearm);
     case "handoff_succeeded":
       return status.state === "handing_off" && status.handoffId === event.handoffId
         ? {
@@ -210,7 +260,7 @@ export const reducePrewalkLifecycle = (
       };
     case "continuation_settled":
       if (status.state === "idle" || status.sessionId !== event.sessionId) return status;
-      if (status.state === "continuing") return finish(status, event.at);
+      if (status.state === "continuing") return finish(status, event.at, event.rearm);
       if (status.state === "verifying") {
         return {
           ...status,

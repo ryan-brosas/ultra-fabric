@@ -325,6 +325,57 @@ describe("reducePrewalkLifecycle", () => {
     expect(next).not.toHaveProperty("task");
   });
 
+  it("adopts the current configuration when always-rearm re-arms", () => {
+    const next = reducePrewalkLifecycle(armed({ alwaysRearm: true }), {
+      kind: "task_settled",
+      sessionId: "session-1",
+      at: 20,
+      rearm: {
+        mode: "trajectory",
+        model: "makora/executor",
+        alwaysRearm: true,
+        returnPolicy: "previous",
+        thinking: "max",
+      },
+    });
+    expect(next).toMatchObject({
+      state: "armed",
+      mode: "trajectory",
+      model: "makora/executor",
+      thinking: "max",
+      attempt: 0,
+    });
+    expect(next).not.toHaveProperty("task");
+  });
+
+  it("keeps an unfired arm when the current configuration turns always-rearm off", () => {
+    const pending = armed({ alwaysRearm: true });
+    expect(
+      reducePrewalkLifecycle(pending, {
+        kind: "task_settled",
+        sessionId: "session-1",
+        at: 20,
+        rearm: { mode: "in-place", alwaysRearm: false, returnPolicy: "previous" },
+      }),
+    ).toBe(pending);
+  });
+
+  it("idles a settled continuation when the current configuration turns always-rearm off", () => {
+    const continuing = {
+      ...armed({ alwaysRearm: true }),
+      state: "continuing" as const,
+      handoffId: "handoff-1",
+    } as FabricPrewalkStatus;
+    expect(
+      reducePrewalkLifecycle(continuing, {
+        kind: "continuation_settled",
+        sessionId: "session-1",
+        at: 20,
+        rearm: { mode: "in-place", alwaysRearm: false, returnPolicy: "previous" },
+      }),
+    ).toEqual({ state: "idle" });
+  });
+
   it("records checklist readiness for any armed mode, not only research", () => {
     const state = armed({ mode: "research" });
     const checklist = {

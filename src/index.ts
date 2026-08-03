@@ -17,6 +17,7 @@ import {
   filterPrewalkPlanningMessages,
 } from "./prewalk/continuation.js";
 import { restorePrewalkModel } from "./prewalk/model.js";
+import { prewalkRearmDefaults } from "./prewalk/rearm.js";
 import { withTrajectoryRearmDirective } from "./prewalk/handoff.js";
 import type { PendingFabricHandoff } from "./prewalk/handoff.js";
 import {
@@ -290,7 +291,10 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
   pi.on("agent_settled", async (event, context) => {
     if (!state.initialized) return;
     const sessionId = context.sessionManager.getSessionId();
-    const settledContinuation = state.prewalk.settleContinuation(sessionId);
+    // Re-arming reads the configuration in force now, so a mode or model change
+    // between tasks takes effect instead of the previous arm being carried on.
+    const rearm = prewalkRearmDefaults(state.config);
+    const settledContinuation = state.prewalk.settleContinuation(sessionId, rearm);
     if (settledContinuation.returnModel) {
       const restored = await restorePrewalkModel(
         pi,
@@ -304,7 +308,7 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
         restored.status === "restored" ? "info" : "warning",
       );
     }
-    const settledTask = state.prewalk.settleTask(sessionId);
+    const settledTask = state.prewalk.settleTask(sessionId, rearm);
     if (settledContinuation.settled || settledTask) {
       const status = state.prewalk.status();
       context.ui.setStatus(
