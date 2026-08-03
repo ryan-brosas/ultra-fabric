@@ -156,11 +156,18 @@ export const reducePrewalkLifecycle = (
         ? { ...status, checklist: structuredClone(event.checklist) }
         : status;
     case "task_settled":
-      return status.state === "armed" &&
-        status.sessionId === event.sessionId &&
-        Boolean(status.task)
-        ? finish(status, event.at)
-        : status;
+      if (
+        status.state !== "armed" ||
+        status.sessionId !== event.sessionId ||
+        !status.task
+      ) {
+        return status;
+      }
+      // A single turn may arm prewalk and then settle without firing (for
+      // example, the first reply only investigates). Keep that one-shot arm
+      // alive so the next mutation can still hand off; only re-arming configs
+      // finish here, which clears the task so it rebinds to the next message.
+      return status.alwaysRearm ? finish(status, event.at) : status;
     case "handoff_claimed":
       return status.state === "armed" && status.sessionId === event.sessionId
         ? {

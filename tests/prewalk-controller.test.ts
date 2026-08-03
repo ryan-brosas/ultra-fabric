@@ -35,15 +35,20 @@ describe("PrewalkController", () => {
     });
   });
 
-  it("disarms an observed task when it settles without a mutation", () => {
+  it("keeps an unfired arm armed when an observed task settles", () => {
     const controller = new PrewalkController();
     controller.arm({ model: "anthropic/executor", sessionId: "session-1" });
 
     expect(controller.settleTask("session-1")).toBe(false);
     controller.observeTask("session-1", "Inspect without changing anything");
     expect(controller.settleTask("session-2")).toBe(false);
-    expect(controller.settleTask("session-1")).toBe(true);
-    expect(controller.status()).toEqual({ state: "idle" });
+    expect(controller.settleTask("session-1")).toBe(false);
+    expect(controller.status()).toMatchObject({
+      state: "armed",
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Inspect without changing anything",
+    });
   });
 
   it("re-arms without leaking the previous task when always re-arm is enabled", () => {

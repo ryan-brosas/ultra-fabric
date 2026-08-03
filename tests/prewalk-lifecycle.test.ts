@@ -290,7 +290,7 @@ describe("reducePrewalkLifecycle", () => {
     });
   });
 
-  it("settles only an observed task from the owning session", () => {
+  it("keeps an unfired one-shot arm armed when its task settles", () => {
     const taskless = armed();
     delete taskless.task;
     expect(
@@ -300,13 +300,29 @@ describe("reducePrewalkLifecycle", () => {
         at: 20,
       }),
     ).toBe(taskless);
+    const pending = armed();
     expect(
-      reducePrewalkLifecycle(armed(), {
+      reducePrewalkLifecycle(pending, {
         kind: "task_settled",
         sessionId: "session-1",
         at: 20,
       }),
-    ).toEqual({ state: "idle" });
+    ).toBe(pending);
+  });
+
+  it("clears the settled task so a re-arming prewalk rebinds the next one", () => {
+    const next = reducePrewalkLifecycle(armed({ alwaysRearm: true }), {
+      kind: "task_settled",
+      sessionId: "session-1",
+      at: 20,
+    });
+    expect(next).toMatchObject({
+      state: "armed",
+      alwaysRearm: true,
+      armedAt: 20,
+      attempt: 0,
+    });
+    expect(next).not.toHaveProperty("task");
   });
 
   it("records checklist readiness only for the owning research task", () => {
