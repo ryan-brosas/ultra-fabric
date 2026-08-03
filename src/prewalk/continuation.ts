@@ -1,4 +1,5 @@
 export const PREWALK_CONTINUE_MESSAGE_TYPE = "pi-fabric-prewalk-continue";
+export const PREWALK_ARMED_MESSAGE_TYPE = "pi-fabric-prewalk-armed";
 export const PREWALK_PLAN_MESSAGE_TYPE = "pi-fabric-prewalk-research-plan";
 
 interface MessageWithRole {
@@ -32,8 +33,11 @@ export const filterPrewalkPlanningMessages = <Message extends MessageWithRole>(
   if (keepPlanningInstruction) return { messages, changed: false };
   const filtered = messages.filter((message) => {
     if (message.role !== "custom") return true;
-    return (message as Message & { customType?: unknown }).customType !==
-      PREWALK_PLAN_MESSAGE_TYPE;
+    const customType = (message as Message & { customType?: unknown }).customType;
+    return (
+      customType !== PREWALK_PLAN_MESSAGE_TYPE &&
+      customType !== PREWALK_ARMED_MESSAGE_TYPE
+    );
   });
   return filtered.length === messages.length
     ? { messages, changed: false }

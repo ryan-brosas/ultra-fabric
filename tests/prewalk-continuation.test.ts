@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  PREWALK_ARMED_MESSAGE_TYPE,
   PREWALK_CONTINUE_MESSAGE_TYPE,
   PREWALK_PLAN_MESSAGE_TYPE,
   filterPrewalkContinuationMessages,
@@ -59,14 +60,27 @@ describe("filterPrewalkPlanningMessages", () => {
     customType: PREWALK_PLAN_MESSAGE_TYPE,
     content: "research planning instruction",
   };
+  const armed: TestMessage = {
+    role: "custom",
+    customType: PREWALK_ARMED_MESSAGE_TYPE,
+    content: "prewalk armed instruction",
+  };
   const ordinary: TestMessage = { role: "user", content: "continue" };
 
-  it("keeps the instruction only while the research planner owns the phase", () => {
-    const visible = filterPrewalkPlanningMessages([planning, ordinary], true);
-    expect(visible).toEqual({ messages: [planning, ordinary], changed: false });
+  it("keeps the instructions only while the planner owns the phase", () => {
+    const visible = filterPrewalkPlanningMessages(
+      [planning, armed, ordinary],
+      true,
+    );
+    expect(visible).toEqual({
+      messages: [planning, armed, ordinary],
+      changed: false,
+    });
     expect(visible.messages[0]).toBe(planning);
 
-    expect(filterPrewalkPlanningMessages([planning, ordinary], false)).toEqual({
+    expect(
+      filterPrewalkPlanningMessages([planning, armed, ordinary], false),
+    ).toEqual({
       messages: [ordinary],
       changed: true,
     });

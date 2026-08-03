@@ -457,7 +457,7 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     );
     const planning = filterPrewalkPlanningMessages(
       continuation.messages,
-      state.initialized && state.prewalk.isResearchPlanning(sessionId),
+      state.initialized && state.prewalk.isArmed(sessionId),
     );
     const contextQos = state.initialized
       ? state.config.compaction.contextQos

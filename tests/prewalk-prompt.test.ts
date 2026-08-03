@@ -40,7 +40,8 @@ describe("prewalk prompt isolation", () => {
     expect(handler).toContain("filterPrewalkContinuationMessages");
     expect(handler).toContain("filterPrewalkPlanningMessages");
     expect(handler).toContain("state.prewalk.acceptContinuation");
-    expect(handler).toContain("state.prewalk.isResearchPlanning");
+    expect(handler).toContain("state.prewalk.isArmed");
+    expect(handler).not.toContain("state.prewalk.isResearchPlanning");
     expect(handler).toContain("context.sessionManager.getSessionId()");
     expect(handler).toContain("applyContextQos");
     expect(handler).toContain("state.noteContextQos");

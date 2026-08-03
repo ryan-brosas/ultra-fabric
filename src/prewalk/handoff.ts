@@ -25,12 +25,13 @@ import type {
 import type { PrewalkController } from "./controller.js";
 import type { FabricPrewalkChecklist } from "./checklist.js";
 import {
+  PREWALK_ARMED_MESSAGE_TYPE,
   PREWALK_CONTINUE_MESSAGE_TYPE,
   PREWALK_PLAN_MESSAGE_TYPE,
 } from "./continuation.js";
 import { requirePrewalkModel } from "./model.js";
 
-export { PREWALK_PLAN_MESSAGE_TYPE } from "./continuation.js";
+export { PREWALK_PLAN_MESSAGE_TYPE, PREWALK_ARMED_MESSAGE_TYPE } from "./continuation.js";
 
 const PREWALK_CONTINUE_PROMPT = [
   "Continue the existing task in this same session under the new executor model.",
@@ -63,8 +64,6 @@ const PREWALK_TRAJECTORY_VERIFY_PROMPT = [
   "Continue now: run the relevant verification (matching test module, build, or an equivalent probe) and check the changed call sites for consistency, then summarize what the executor implemented and how the checks went.",
   "If a check fails, fix only the failing part; keep the fix scoped. If this verification already happened in this turn, respond with the summary only.",
 ].join(" ");
-
-export const PREWALK_ARMED_MESSAGE_TYPE = "pi-fabric-prewalk-armed";
 
 // Arm-time framing is LLM-visible, TUI-hidden, and does not fire an
 // input event. Research framing has a distinct custom type so the context hook
