@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.1-ultra.2 - 2026-08-04
+
+- Keep an unfired prewalk arm armed across turn boundaries; it previously disarmed at the end of the turn that observed its task, so a later first edit never handed off.
+- Default `prewalk.alwaysRearm` to on, still adjustable in `/fabric settings`.
+- Prune the prewalk arming instruction for every mode instead of research only, so in-place and trajectory executors no longer inherit the handoff scaffold on their first inference.
+
 ## 0.31.1-ultra.1 - 2026-08-02
 
 - Fix packaged Pi startup by removing an unsupported `pi-ai` deep import.
