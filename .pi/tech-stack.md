@@ -1,76 +1,121 @@
-# Ultra Fabric Tech Stack
+---
+purpose: Verified runtime, dependencies, agent inventory, integrations, commands, and local discovery context
+---
 
-This file is generated from repository evidence during /init. Keep durable work status in source, issues, or configured memory, not here.
+# Ultra Fabric tech stack
+
+This file records repository and runtime evidence observed during initialization. It is not a second task tracker.
 
 ## Authoritative sources
 
 - `package.json` and `pnpm-lock.yaml` define package metadata, dependency versions, scripts, and package manager.
-- `tsconfig.json` and `tsconfig.build.json` define TypeScript compiler behavior and build output.
-- `vitest.config.ts` defines the test runner configuration.
-- `.github/workflows/test.yml` defines CI checks.
+- `tsconfig.json` and `tsconfig.build.json` define TypeScript behavior and build output.
+- `vitest.config.ts` and `knip.json` define tests and dead-code analysis.
+- `.github/workflows/test.yml` and `.github/workflows/release.yml` define CI and npm prerelease automation.
 - `AGENTS.md`, `docs/ultra-fabric.md`, and `docs/adr/0001-fork-boundary.md` define project policy and architecture.
 
-## Runtime and package manager
+## Runtime and languages
 
-- Runtime: Node.js `>=24` from `package.json`; observed local Node `v26.5.0` during /init.
-- Package manager: `pnpm@11.18.0` from `package.json`; observed local pnpm `11.18.0` during /init.
-- Module format: ESM (`"type": "module"`).
-- Shell observed during initialization: `/usr/bin/bash`.
-- Language: strict TypeScript with `moduleResolution: "NodeNext"`, `noUnusedLocals`, `noUncheckedIndexedAccess`, and `exactOptionalPropertyTypes`.
+- Required runtime: Node.js `>=24`; observed local Node.js `v26.5.0` during initialization.
+- Package manager: `pnpm@11.18.0`; observed local pnpm `11.18.0`.
+- Package version: `0.31.1-ultra.1`.
+- Module format: ESM with strict TypeScript and `moduleResolution: "NodeNext"`.
+- Enabled compiler checks include `noUnusedLocals`, `noUncheckedIndexedAccess`, and `exactOptionalPropertyTypes`.
+- Shell observed for this checkout: `/usr/bin/bash`.
 
-## Important libraries
+## Manifests and package management
 
-Runtime dependencies from `package.json` include:
+- `package.json` exports `dist/index.js` and `dist/protocol.js` with generated declarations.
+- `pnpm-lock.yaml` uses lockfile format 9.0 and is committed.
+- Runtime dependencies include Pi AI 0.83.0, QuickJS bindings, mcporter, TypeBox, TypeScript, YAML, Shiki, Diff, and Cross-spawn.
+- Development dependencies include Pi Coding Agent and Pi TUI 0.83.0, Vitest, Knip, and Node/Cross-spawn types.
+- Pi Coding Agent and Pi TUI are peers at `>=0.80.6` and development dependencies at 0.83.0.
+- No tracked environment example or template was found. Do not infer required secrets from local environment values.
 
-- `@earendil-works/pi-ai` `0.83.0`
-- `@jitl/quickjs-singlefile-mjs-release-sync`
-- `quickjs-emscripten-core`
-- `mcporter`
-- `typebox`
-- `typescript`
-- `yaml`
-- `shiki`
-- `diff`
-- `cross-spawn`
+## Frameworks and libraries
 
-Development dependencies include Pi 0.83.x packages, Vitest, Knip, and Node/Cross-spawn types.
+- Pi Extension API supplies registration, lifecycle, model, tool, UI, and session-continuation surfaces.
+- QuickJS is the default isolated guest runtime. The optional Node-process runtime is trusted unsafe execution.
+- mcporter supplies pooled MCP integration.
+- TypeBox defines runtime schemas; Vitest runs tests; Knip performs dead-code analysis.
+- Shiki and Diff support code and diff presentation; YAML and Cross-spawn support configuration and process adapters.
 
-## Source layout
+## Agent runtime
 
-- `src/` contains the runtime implementation.
-- `agents/` contains packaged built-in Agent role profiles. `src/agents/` contains one-shot and persistent runtime code.
-- Key runtime areas include `agents/`, `audit/`, `commands/`, `compaction/`, `context/`, `core/`, `leases/`, `mesh/`, `outcomes/`, `prewalk/`, `providers/`, `routing/`, `run/`, `runtime/`, `schema/`, `state/`, `ui/`, `worker/`, and `workflows/`.
-- `tests/` contains Vitest test files and fixtures.
-- `skills/` contains Fabric skills shipped with the package.
-- `docs/` contains product architecture and ADRs.
-- `scripts/` contains local certification and benchmark scripts.
+Read-only runtime inventory returned nine effective built-in roles and no diagnostics:
+
+- One-shot: `scout` 6+1 turns, `planner` 8+1, `explorer` 10+1, `reviewer` 10+1, and `worker` 30+2.
+- Persistent: `ambient` 4+1 turns, `supervisor` 4+1, `advisor` 8+1, and `coordinator` 12+1.
+- `worker` alone has `edit` and `write`; `advisor`, `explorer`, and `reviewer` include `bash`.
+- All profile sources are built-in Markdown files under `agents/`.
+- `agents.templates()` returned an empty list. `.pi/agents/` is absent, so no optional project override or custom profile was found.
+- `.pi/fabric.json` has no `agents` key. The inventory did not return global timeout or concurrency values, so only role turn budgets are recorded as observed limits.
+
+Initialization did not start an Agent or create an Agent profile.
+
+## Storage and integrations
+
+- Mesh durable state defaults to `.pi/fabric/mesh/`; run records use `.pi/fabric-runs/`.
+- `.pi/fabric.json` is optional trusted project-local Fabric configuration. Its values are not reproduced here.
+- Hindsight delivery files under `.pi/hindsight/` are transient runtime state, not project authority.
+- Agent execution supports Pi and, when available, a configured Claude CLI plus process, tmux, screen, LocalTerm, and Herdr transports.
+
+## Repository layout
+
+- `src/index.ts` is the Pi extension entry point.
+- `src/fabric-state.ts`, `src/fabric-exec-tool.ts`, and `src/execution-service.ts` compose and run the control plane.
+- `src/runtime/`, `src/core/`, and `src/providers/` own execution isolation, the action registry, and provider adapters.
+- `src/agents/`, `src/prewalk/`, `src/mesh/`, `src/run/`, and `src/leases/` own lifecycle, continuity, coordination, identity, and shared-write control.
+- `src/quality/`, `src/context/`, `src/compaction/`, `src/outcomes/`, `src/ui/`, and `src/activity/` own evidence, context, learning, and presentation.
+- `src/worker.ts`, `src/worker/`, and `src/workflows/` contain worker and durable workflow runtime code.
+- `agents/` and `skills/` contain packaged profiles and skills; `tests/` contains Vitest suites and fixtures.
+- `scripts/` and `bench/` contain certification, package smoke, benchmark collection, and analysis.
+- `sources/` contains local DeepSWE, Pier, and published-trajectory source checkouts.
 
 ## Generated and runtime paths
 
-Do not hand-edit generated output.
-
-- `dist/` is generated by `pnpm run build` and is loaded by Pi through the package manifest. The build removes it before compiling.
-- `node_modules/`, `dist/`, `coverage/`, `.pi/fabric-runs/`, `.pi/fabric/mesh/`, `*.log`, and `.DS_Store` are ignored by repository policy.
-- `.pi/fabric.json` is optional project-local Fabric runtime configuration. Do not echo its values.
-- `.pi/hindsight/retain-cursors.json`, `.pi/hindsight/retain-queue.jsonl`, and `.pi/hindsight/retain-receipts.json` are transient Hindsight delivery state, not project authority.
-- No tracked environment example or template was found. Do not infer required secrets from local environment values.
+- `dist/` is generated by `pnpm run build`, loaded by Pi, and deleted before TypeScript compilation. Do not hand-edit it.
+- `.gitignore` excludes `node_modules/`, `dist/`, `coverage/`, `.pi/fabric-runs/`, `.pi/fabric/mesh/`, `*.log`, and `.DS_Store`.
+- `.pi/user.md`, `.pi/project.md`, `.pi/roadmap.md`, and `.pi/tech-stack.md` are initialization context.
 
 ## Verified commands
-
-Repository scripts discovered from `package.json`:
 
 - `pnpm run typecheck` runs `tsc --noEmit`.
 - `pnpm run build` removes `dist/` and runs `tsc -p tsconfig.build.json`.
 - `pnpm run test` runs `vitest run`.
 - `pnpm run lint:dead` runs `knip --no-gitignore`.
-- `pnpm run check` runs typecheck, fresh build, all tests, and Knip.
-- `pnpm run certify:context`, `pnpm run benchmark:real-resume`, and `pnpm run benchmark:memory-heads` build first, then run scripts under `scripts/`.
+- `pnpm run smoke:package` installs the packed package and checks Pi loading.
+- `pnpm run check` runs typecheck, a fresh build, all tests, Knip, and package smoke.
+- During initialization, `pnpm run check` exited 0 on the then-current dirty worktree: 135 test files and 1,464 tests passed, Knip exited 0, and package smoke registered `/fabric`. This is not a clean-HEAD claim.
+- The gate emitted a non-fatal npm warning for the unknown `manage-package-manager-versions` environment setting.
 
-The required handoff gate is `pnpm run check`, followed by `git diff --check` and `git status --short --branch`.
+## Unverified commands
 
-## CI
+- `pnpm run certify:context`, `pnpm run benchmark:real-resume`, and `pnpm run benchmark:memory-heads` build first and run scripts under `scripts/`; they were discovered but not run.
+- Prewalk corpus and real-model benchmark commands were discovered but not run. Real collection can use paid providers.
 
-- GitHub Actions workflow: `.github/workflows/test.yml`.
-- CI runs on Ubuntu and Windows with Node.js 24 and pnpm from `package.json`.
-- Dependency installation uses `pnpm install --frozen-lockfile`.
-- Both platforms run typecheck, build, the full test suite, and Knip. Windows also runs `tests/type-checker.test.ts` as a focused regression check.
+## CI, publication, and live checks
+
+- `.github/workflows/test.yml` uses frozen pnpm installation on Ubuntu and Windows with Node 24, then runs typecheck, build, tests, and Knip.
+- Windows also runs `tests/type-checker.test.ts` as a focused regression check.
+- `.github/workflows/release.yml` publishes a public npm prerelease from `v*` tags after tag and package-version agreement.
+- No deployment, release, package-registry state, live server, feature flag, or rollback path was verified.
+
+## Local graph, memory, MCP, and Hindsight discovery
+
+- CodeGraphContext's narrowest indexed ancestor is `/home/ryanj/work`. The health probe returned 110,777 files, 811,997 functions, 636,630 classes, and 121,480 modules.
+- A non-fuzzy graph query located `piFabric` at current `src/index.ts:92`; source and `tests/extension-shutdown.test.ts` verified the hit. Empty relationship results are not absence evidence.
+- `list_watched_paths` returned none. No watcher was started for the broad ancestor.
+- `memory.sessions()` returned one hot active session for this checkout. No legacy `~/.pi/memory-md/ultra-fabric/` directory exists.
+- `mcp.servers()` returned eleven registrations: `cloudflare`, `cloudflare-bindings`, `cloudflare-builds`, `cloudflare-docs`, `cloudflare-observability`, `codegraphcontext`, `context7`, `deepwiki`, `exa`, `open-design`, and `pyxel`.
+  Registration is not a service-health check.
+- Hindsight setup is complete with domain-tagged remote-derived project scope, strict project-only observations, auto recall and retain enabled, and a mid recall budget capped at 800 tokens.
+  The retain queue is empty, mental-model injection is off, and the global bank is disabled.
+- No Hindsight config, mental model, retained document, or delivery state was changed. Context was not retained because no deterministic same-document replacement target was established.
+
+## Constraints and unknowns
+
+- Broad graph indexes can under-report current relationships and cannot safely support project-wide metrics without a scoped index.
+- Global Agent timeout and concurrency values were not returned by the required role/template inventory.
+- MCP registration does not prove remote availability or authorization.
+- Paid-provider benchmark authority and cost limits remain unconfirmed.

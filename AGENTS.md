@@ -1,15 +1,13 @@
 # AGENTS.md — Ultra Fabric
 
-## Project
+Detailed context lives in `.pi/project.md`, `.pi/roadmap.md`, and `.pi/tech-stack.md`. Architecture authority is `docs/ultra-fabric.md`; fork authority is `docs/adr/0001-fork-boundary.md`.
 
-Ultra Fabric is a resilient, adaptive orchestration runtime for Pi, forked from `monotykamary/pi-fabric`.
+## Project invariants
 
-- Checkout: `/home/ryanj/work/projects/ultra-fabric`
-- Product architecture: `docs/ultra-fabric.md`
-- Fork boundary: `docs/adr/0001-fork-boundary.md`
-- Runtime: Node.js 24+ and Pi 0.83.x
-- Package manager: pnpm with a committed lockfile
-- Git remotes: `origin` is Ultra Fabric; `upstream` is pi-fabric
+- Ultra Fabric is a resilient Pi orchestration runtime forked from `monotykamary/pi-fabric`.
+- Support Node.js 24+ and Pi 0.83.x. Use pnpm with the committed lockfile.
+- Main retains task intent and final authority. The default remains zero agents.
+- Keep automatic policy promotion disabled until the documented Slice 8 benchmark and soak gates pass.
 
 ## Working contract
 
@@ -30,25 +28,16 @@ Ultra Fabric is a resilient, adaptive orchestration runtime for Pi, forked from 
 
 ## Mission
 
-Close Fabric's control loop without discarding its proven runtime. The user states an outcome once; Ultra Fabric may route, delegate, supervise, retry, compact, and verify only within host-owned limits. The default remains zero agents.
+Close Fabric's control loop without discarding its proven runtime. The user states an outcome once; Ultra Fabric may route, delegate, supervise, retry, compact, and verify only within host-owned limits.
 
-Implement the roadmap continuously in the order recorded in `docs/ultra-fabric.md`:
-
-1. Prewalk v2 continuity and stale-result ownership
-2. Reliable persistent Agents with durable inbox/outbox and explicit delivery outcomes
-3. Run context, evidence gates, and atomic reservations
-4. Durable workflows over mesh CAS
-5. Context QoS
-6. Capability routing and admission
-7. Outcome learning and UI
-
-Finish the smallest coherent tested slice, update adoption status, then continue to the next unblocked slice. Stop only for a material product boundary, dependency change, destructive operation, contradictory proof, or unavailable required authority.
+- Follow the ordered roadmap in `.pi/roadmap.md` and `docs/ultra-fabric.md`; the current milestone is Slice 8 representative benchmark and soak evidence.
+- Finish the smallest coherent tested slice, update adoption status, then continue until a material boundary, destructive effect, contradiction, or missing authority blocks progress.
 
 ## Fork boundary
 
-Keep two lanes separate:
+Classify every change before implementation and keep the two lanes separate:
 
-- **Upstream-shaped fixes:** minimal existing-file changes, focused regression tests, no Ultra policy concepts.
+- **Upstream-shaped fixes:** minimal existing-file changes, focused regression tests, compatibility with upstream, and no Ultra policy concepts.
 - **Ultra-native capability:** pure typed modules, narrow adapters, opt-in policy until measured, and no UI before backend contracts stabilize.
 
 Do not mix an upstream refresh with behavior changes. Preserve the upstream MIT license and attribution.
@@ -60,27 +49,22 @@ Do not mix an upstream refresh with behavior changes. Preserve the upstream MIT 
 - Treat async completion as owned by a stable run/session/phase identity; reject stale completion.
 - Preserve task intent across infrastructure failure. Never retry permanent failure automatically.
 - Bound every loop by attempts, time, tokens, cost, concurrency, and effects.
-- Failure states remain distinct: blocked, failed, stale, rejected, timed out, dead-lettered, and budget-exhausted.
+- Keep blocked, failed, stale, rejected, timed out, dead-lettered, and budget-exhausted distinct.
 - Do not add dependencies without explicit user approval.
 - Do not hand-edit `dist/`; build it from `src/`.
 - Keep shared-workspace writers serialized. Installed Pi policy blocks branch and worktree creation in this checkout.
 
 ## Verification
 
-Name the narrow check before each slice. Before handoff, run:
+Name the narrow check before each slice. Before handoff, run exactly:
 
 ```sh
 pnpm run check
-```
-
-This runs typecheck, a fresh build, all tests, and Knip dead-code analysis. Also inspect:
-
-```sh
 git diff --check
 git status --short --branch
 ```
 
-Tests run against `src/`, while Pi loads `dist/`, so a fresh build is mandatory even when focused tests pass.
+`pnpm run check` performs typecheck, a fresh build, all tests, Knip dead-code analysis, and package smoke. Tests run against `src/`, while Pi loads `dist/`.
 
 ## Commits and publication
 
