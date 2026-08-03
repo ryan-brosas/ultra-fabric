@@ -169,7 +169,7 @@ Every armed mode can record a checklist with `prewalk.checklist({ items })` insi
 {
   "prewalk": {
     "mode": "research",
-    "returnPolicy": "executor",
+    "returnPolicy": "previous",
     "model": "anthropic/claude-haiku-4-5",
     "fallbackModels": ["openai/gpt-5-mini", "google/gemini-2.5-flash"],
     "thinking": "high",
@@ -186,7 +186,7 @@ Every armed mode can record a checklist with `prewalk.checklist({ items })` insi
 
 Set `prewalk.verificationMode` to `"gated"` to require an identity-owned verification continuation to finish through `workflow.gate()`. A passing evidence gate settles the task; `revise` returns only scoped failure evidence to the executor; abort, crash, missing evidence, or exceeding `prewalk.maxPhaseRevisions` blocks without losing task intent. The compatibility default remains prompt-only verification when the field is omitted. `maxPhaseRevisions` defaults to 2 and is bounded to 0–8.
 
-`prewalk.returnPolicy` controls legacy in-place model ownership. `"executor"` (default) keeps the executor selected. `"previous"` snapshots Main's current provider/model at the handoff boundary and restores it only after the identity-owned continuation reaches `agent_settled`; trajectory mode never changes Main's model. Research mode always normalizes this setting to `"executor"`, matching its permanent same-conversation switch. An unavailable or unauthenticated return model is reported visibly and the completed task is not rerun.
+`prewalk.returnPolicy` controls in-place model ownership. `"previous"` (default) snapshots Main's current provider/model at the handoff boundary and restores it only after the identity-owned continuation reaches `agent_settled`, so in-place matches trajectory in leaving Main on its own model once the work settles. `"executor"` keeps the executor selected instead. Trajectory mode never changes Main's model. Research mode always normalizes this setting to `"executor"`, matching its permanent same-conversation switch. An unavailable or unauthenticated return model is reported visibly and the completed task is not rerun.
 
 ## Run context and gates
 

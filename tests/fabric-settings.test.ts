@@ -480,13 +480,13 @@ describe("FabricSettingsComponent", () => {
     const row = list.items.find(
       (item: { id: string }) => item.id === "prewalk.returnPolicy",
     );
-    expect(row.currentValue).toBe("executor");
+    expect(row.currentValue).toBe("previous");
     list.selectedIndex = list.items.indexOf(row);
 
     list.activateItem();
 
-    expect(applied.at(-1)).toEqual({ id: "prewalk.returnPolicy", value: "previous" });
-    expect(list.items[list.selectedIndex].currentValue).toBe("previous");
+    expect(applied.at(-1)).toEqual({ id: "prewalk.returnPolicy", value: "executor" });
+    expect(list.items[list.selectedIndex].currentValue).toBe("executor");
   });
 
   it("persists a Prewalk thinking selection and clears it back to Agents default", () => {
@@ -730,7 +730,7 @@ describe("FabricSettingsComponent", () => {
           config.prewalk = {
             ...config.prewalk,
             mode: saved.prewalk?.mode ?? "in-place",
-            returnPolicy: saved.prewalk?.returnPolicy ?? "executor",
+            returnPolicy: saved.prewalk?.returnPolicy ?? "previous",
             ...(saved.prewalk?.model ? { model: saved.prewalk.model } : {}),
             alwaysRearm: saved.prewalk?.alwaysRearm === true,
           };

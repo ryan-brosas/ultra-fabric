@@ -143,7 +143,7 @@ describe("Fabric configuration", () => {
       normalizeFabricConfig({ prewalk: { model: "anthropic/executor" } }).prewalk,
     ).toEqual({
       mode: "in-place",
-      returnPolicy: "executor",
+      returnPolicy: "previous",
       model: "anthropic/executor",
       triggerRisks: [],
       triggerEffects: ["workspace"],
@@ -152,7 +152,7 @@ describe("Fabric configuration", () => {
     });
     expect(normalizeFabricConfig({ prewalk: { model: "   " } }).prewalk).toEqual({
       mode: "in-place",
-      returnPolicy: "executor",
+      returnPolicy: "previous",
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
@@ -160,7 +160,7 @@ describe("Fabric configuration", () => {
     });
     expect(normalizeFabricConfig({ prewalk: { alwaysRearm: false } }).prewalk).toEqual({
       mode: "in-place",
-      returnPolicy: "executor",
+      returnPolicy: "previous",
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
@@ -181,11 +181,11 @@ describe("Fabric configuration", () => {
       "in-place",
     );
     expect(
-      normalizeFabricConfig({ prewalk: { returnPolicy: "previous" } }).prewalk,
-    ).toMatchObject({ returnPolicy: "previous" });
+      normalizeFabricConfig({ prewalk: { returnPolicy: "executor" } }).prewalk,
+    ).toMatchObject({ returnPolicy: "executor" });
     expect(
       normalizeFabricConfig({ prewalk: { returnPolicy: "planner" } }).prewalk,
-    ).toMatchObject({ returnPolicy: "executor" });
+    ).toMatchObject({ returnPolicy: "previous" });
     expect(
       normalizeFabricConfig({
         prewalk: {
@@ -679,7 +679,7 @@ describe("Fabric configuration", () => {
     saveFabricConfig(location, { prewalk: { model: "" } });
     expect(loadFabricConfig(location).prewalk).toEqual({
       mode: "in-place",
-      returnPolicy: "executor",
+      returnPolicy: "previous",
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],

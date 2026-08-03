@@ -301,7 +301,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
   },
   prewalk: {
     mode: "in-place",
-    returnPolicy: "executor",
+    returnPolicy: "previous",
     triggerRisks: [],
     triggerEffects: ["workspace"],
     triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
