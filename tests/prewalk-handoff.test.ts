@@ -964,6 +964,106 @@ describe("prewalkArmedPrompt", () => {
   });
 });
 
+const checklistItems = [
+  { task: "Change the guard", validation: "Run the guard test" },
+  { task: "Update the matching caller", validation: "Run the caller test" },
+  { task: "Refresh the docs section", validation: "Read the rendered section" },
+  { task: "Run the focused suite", validation: "Confirm every focused test passes" },
+  { task: "Check dead code", validation: "Confirm knip reports no unused exports" },
+];
+
+const armedWithChecklist = (mode: "in-place" | "trajectory"): PrewalkController => {
+  const controller = new PrewalkController();
+  controller.arm({
+    mode,
+    model: "anthropic/executor",
+    sessionId: "session-1",
+    task: "Implement the guard",
+  });
+  controller.executionBoundary("session-1")!.registerChecklist({ items: checklistItems });
+  return controller;
+};
+
+describe("prewalk checklist handoff", () => {
+  it("embeds the checklist in the trajectory executor task", () => {
+    const controller = armedWithChecklist("trajectory");
+    const pending = claimFabricHandoff(controller, execution(), "session-1", "auto")!;
+    const task = String((pending.args as { task?: unknown }).task ?? "");
+    for (const item of checklistItems) {
+      expect(task).toContain(item.task);
+      expect(task).toContain(`Validation: ${item.validation}`);
+    }
+  });
+
+  it("replays the checklist in the in-place continuation message", async () => {
+    const controller = armedWithChecklist("in-place");
+    const pending = claimFabricHandoff(controller, execution(), "session-1", "json")!;
+    const ctx = context();
+    const ext = extension();
+    await runFabricHandoffAtBoundary(
+      controller,
+      unusedRunner(),
+      ext.value,
+      pending,
+      outerResult(),
+      ctx.value,
+    );
+    const call = ext.sendMessage.mock.calls.find(
+      ([message]) =>
+        (message as { customType?: string }).customType ===
+        "pi-fabric-prewalk-continue",
+    );
+    expect(call).toBeDefined();
+    const content = String((call![0] as { content?: unknown }).content);
+    for (const item of checklistItems) {
+      expect(content).toContain(item.task);
+      expect(content).toContain(`Validation: ${item.validation}`);
+    }
+    expect(content).not.toContain(
+      "Continue the existing task in this same session under the executor model.",
+    );
+  });
+
+  it("keeps a gated revision's feedback over the checklist task for a trajectory arm", () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      mode: "trajectory",
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement the guard",
+      verificationMode: "gated",
+      maxPhaseRevisions: 1,
+    } as never);
+    controller.executionBoundary("session-1")!.registerChecklist({ items: checklistItems });
+    const first = claimFabricHandoff(controller, execution(), "session-1", "json")!;
+    controller.completeHandoff();
+    controller.acceptContinuation("session-1", first.audit.nestedToolCallId);
+    const verification = execution();
+    verification.audits = [];
+    verification.gates = [
+      {
+        gate: "acceptance",
+        passed: false,
+        disposition: "revise",
+        evidence: [{ kind: "command", ref: "pnpm:test" }],
+        reason: "one regression failed",
+        sequence: 1,
+        recordedAt: 20,
+        decision: "revise",
+        revision: 1,
+      },
+    ];
+    const revision = claimFabricHandoff(controller, verification, "session-1", "json");
+    expect(revision).toMatchObject({ kind: "prewalk-trajectory", revision: 1 });
+    const task = String(revision?.args.task);
+    expect(task).toContain("one regression failed");
+    expect(task).toContain("Revision 1");
+    for (const item of checklistItems) {
+      expect(task).not.toContain(item.task);
+    }
+  });
+});
+
 describe("hasPrewalkArmedPrompt", () => {
   it("matches persisted armed prompts by content only", () => {
     const armed = prewalkArmedPrompt("trajectory", "anthropic/executor");

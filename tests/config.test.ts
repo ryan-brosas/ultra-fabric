@@ -182,7 +182,7 @@ describe("Fabric configuration", () => {
     );
     expect(
       normalizeFabricConfig({ prewalk: { returnPolicy: "executor" } }).prewalk,
-    ).toMatchObject({ returnPolicy: "executor" });
+    ).toMatchObject({ returnPolicy: "previous" });
     expect(
       normalizeFabricConfig({ prewalk: { returnPolicy: "planner" } }).prewalk,
     ).toMatchObject({ returnPolicy: "previous" });

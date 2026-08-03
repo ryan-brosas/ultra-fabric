@@ -517,12 +517,6 @@ const prewalkModeValue = (
     ? value
     : fallback;
 
-const prewalkReturnPolicyValue = (
-  value: unknown,
-  fallback: FabricPrewalkReturnPolicy,
-): FabricPrewalkReturnPolicy =>
-  value === "executor" || value === "previous" ? value : fallback;
-
 const transportValue = (
   value: unknown,
   fallback: FabricAgentTransport,
@@ -873,12 +867,10 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
     },
     prewalk: {
       mode: prewalkMode,
-      returnPolicy: prewalkMode === "research"
-        ? "executor"
-        : prewalkReturnPolicyValue(
-            prewalk.returnPolicy,
-            DEFAULT_FABRIC_CONFIG.prewalk.returnPolicy,
-          ),
+      // In-place and trajectory always hand Main back its own model, so no
+      // configuration can strand the main session on the executor. Research
+      // remains a deliberate permanent same-conversation switch.
+      returnPolicy: prewalkMode === "research" ? "executor" : "previous",
       ...(prewalkModel ? { model: prewalkModel } : {}),
       ...(prewalkFallbackModels.length > 0
         ? { fallbackModels: prewalkFallbackModels }

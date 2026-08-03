@@ -175,7 +175,7 @@ const createPrewalkPending = (input: {
         ? "In-place Prewalk"
         : "Prewalk trajectory executor",
     ...(revisionTask ? { task: revisionTask } : {}),
-    ...(!inPlace && !revisionTask && input.arm.checklist
+    ...(!inPlace && !input.revision && input.arm.checklist
       ? {
           task: [
             input.arm.task ? `Continue the existing task: ${input.arm.task}` : "Continue the existing task in the forked session.",

@@ -466,29 +466,6 @@ describe("FabricSettingsComponent", () => {
     expect(clearedUnsetLine).toContain("✓");
   });
 
-  it("persists the Prewalk model return policy", () => {
-    const applied: Array<{ id: string; value: unknown }> = [];
-    const items = buildFabricSettingsItems(
-      theme,
-      structuredClone(DEFAULT_FABRIC_CONFIG),
-      (id, value) => applied.push({ id, value }),
-      { keepVisibleCandidates: ["fabric_exec"], modelSource: fakeModelSource },
-    );
-    const prewalk = items.find((item) => item.id === "prewalk")!;
-    const section = prewalk.submenu!("", () => {}) as any;
-    const list = section.settingsList as any;
-    const row = list.items.find(
-      (item: { id: string }) => item.id === "prewalk.returnPolicy",
-    );
-    expect(row.currentValue).toBe("previous");
-    list.selectedIndex = list.items.indexOf(row);
-
-    list.activateItem();
-
-    expect(applied.at(-1)).toEqual({ id: "prewalk.returnPolicy", value: "executor" });
-    expect(list.items[list.selectedIndex].currentValue).toBe("executor");
-  });
-
   it("persists a Prewalk thinking selection and clears it back to Agents default", () => {
     const applied: Array<{ id: string; value: unknown }> = [];
     const items = buildFabricSettingsItems(
