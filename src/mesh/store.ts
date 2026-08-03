@@ -102,6 +102,7 @@ const isMeshStateFile = (value: unknown): value is MeshStateFile => {
 
 const recoverConcatenatedState = (serialized: string): MeshStateFile | undefined => {
   const snapshots: MeshStateFile[] = [];
+  let documents = 0;
   let start = -1;
   let depth = 0;
   let inString = false;
@@ -129,8 +130,8 @@ const recoverConcatenatedState = (serialized: string): MeshStateFile | undefined
       if (depth !== 0) continue;
       try {
         const parsed: unknown = JSON.parse(serialized.slice(start, index + 1));
-        if (!isMeshStateFile(parsed)) return undefined;
-        snapshots.push(parsed);
+        documents += 1;
+        if (isMeshStateFile(parsed)) snapshots.push(parsed);
       } catch {
         return undefined;
       }
@@ -138,7 +139,7 @@ const recoverConcatenatedState = (serialized: string): MeshStateFile | undefined
     }
   }
 
-  return start < 0 && snapshots.length > 1 ? snapshots.at(-1) : undefined;
+  return start < 0 && documents > 1 ? snapshots.at(-1) : undefined;
 };
 
 const readState = (filePath: string, maxBytes: number): MeshStateFile => {

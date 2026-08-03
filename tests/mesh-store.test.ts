@@ -112,6 +112,15 @@ describe("MeshStore", () => {
     expect(normalized.entries["shared/other"]?.value).toBe(true);
   });
 
+  it("recovers state with complete non-state JSON records appended", async () => {
+    const store = createStore();
+    await store.put({ key: "shared/value", value: { revision: 1 }, identity });
+    const statePath = path.join(store.root, "state.json");
+    fs.appendFileSync(statePath, '\n{"tick":1}\n{"tick":2}\n');
+
+    expect(store.get("shared/value")?.value).toEqual({ revision: 1 });
+  });
+
   it("supports complete internal prefix scans independently of public read limits", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-mesh-scan-"));
     roots.push(root);
