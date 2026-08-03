@@ -498,7 +498,7 @@ describe("AgentManager", () => {
     expect(recursive.mainAgentId).toBe("session:root-main");
   });
 
-  it("loads only the Consult scope guard into a real Pi worker", async () => {
+  it("isolates a real Pi Consult worker from ambient project resources", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-consult-worker-"));
     roots.push(root);
     fs.mkdirSync(path.join(root, "src", "auth"), { recursive: true });
@@ -528,7 +528,13 @@ describe("AgentManager", () => {
       args: string[];
     };
     expect(reported.scope).toEqual({ version: 1, root, scopes: ["src/auth"] });
-    expect(reported.args).toContain("--no-extensions");
+    for (const flag of [
+      "--no-extensions",
+      "--no-context-files",
+      "--no-skills",
+      "--no-prompt-templates",
+      "--no-themes",
+    ]) expect(reported.args).toContain(flag);
     const extensionIndex = reported.args.indexOf("-e");
     expect(extensionIndex).toBeGreaterThan(-1);
     expect(reported.args[extensionIndex + 1]).toBe(scopeGuard);

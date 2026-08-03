@@ -285,7 +285,17 @@ const main = async (): Promise<void> => {
     if (options.runner !== "pi" || !options.consultScopeExtensionPath) {
       throw new Error("Ultra Consult read scope requires a Pi guard extension");
     }
-    piArguments.push("-e", options.consultScopeExtensionPath);
+    // Consult must receive only its task, explicit tools, schema, and scope guard.
+    // Ambient project resources defeat fresh-context isolation and can exceed the
+    // worker token ceiling before it produces a finding.
+    piArguments.push(
+      "--no-context-files",
+      "--no-skills",
+      "--no-prompt-templates",
+      "--no-themes",
+      "-e",
+      options.consultScopeExtensionPath,
+    );
   }
   if (options.tools.length > 0) piArguments.push("--tools", options.tools.join(","));
   else piArguments.push("--no-tools"); // explicit empty allowlist => no tools, not Pi defaults
