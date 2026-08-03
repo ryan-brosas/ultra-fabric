@@ -82,7 +82,6 @@
     "image": "https://raw.githubusercontent.com/monotykamary/pi-fabric/main/media/cover.jpg"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.83.0",
     "@jitl/quickjs-singlefile-mjs-release-sync": "^0.32.0",
     "cross-spawn": "^7.0.6",
     "diff": "^9.0.0",
@@ -94,10 +93,12 @@
     "yaml": "^2.9.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.80.6",
-    "@earendil-works/pi-tui": ">=0.80.6"
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "0.83.0",
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@earendil-works/pi-tui": "0.83.0",
     "@types/cross-spawn": "^6.0.6",

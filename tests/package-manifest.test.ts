@@ -27,7 +27,14 @@ describe("package manifest", () => {
       fs.readFileSync(path.join(root, "package.json"), "utf8"),
     ) as PackageManifest;
     const worker = fs.readFileSync(path.join(root, "src", "worker.ts"), "utf8");
-    const imports = [...worker.matchAll(/\bfrom\s+["']([^"']+)["']/g)]
+    // Type-only imports are erased at build, so the standalone worker never
+    // resolves them at runtime. Consume those statements first so only real
+    // runtime specifiers reach the dependency assertion.
+    const imports = [
+      ...worker.matchAll(
+        /\bimport\s+type\s+[^;]*?from\s+["'][^"']+["']|\bfrom\s+["']([^"']+)["']/g,
+      ),
+    ]
       .map((match) => match[1])
       .filter((specifier): specifier is string =>
         Boolean(specifier && !specifier.startsWith(".") && !specifier.startsWith("node:")),
