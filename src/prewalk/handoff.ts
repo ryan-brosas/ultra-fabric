@@ -45,7 +45,8 @@ const checklistContinuationPrompt = (checklist: FabricPrewalkChecklist): string 
   ...checklist.items.map(
     (item, index) => `${index + 1}. ${item.task}\n   Validation: ${item.validation}`,
   ),
-  "Finish the implementation, check matching call sites for consistency, run every listed validation plus the relevant final verification, and only then report completion.",
+  "Before claiming completion: sweep every other call site for any pattern, signature, or check you changed and apply the same change; keep the diff minimal and confirm no out-of-scope behavior changed; run the full test module the change lives in, not just the test you expect to flip.",
+  "Finish the implementation, run every listed validation plus the relevant final verification, and only then report completion.",
 ].join("\n");
 
 // Forced continuation after a completed trajectory handoff: Main must not
@@ -89,7 +90,7 @@ export const prewalkArmedPrompt = (mode: FabricPrewalkMode, model: string): stri
             ? "the executor takes over the implementation there, and a hidden follow-up asks you to verify its work and summarize when it finishes."
             : `this session switches to ${model} and keeps working.`
         }`,
-        "Before your first edit, commit to the remaining execution plan as a host-accepted prewalk.checklist({ items }) call inside fabric_exec with 5-9 ordered items. Every item must have a concrete task and a specific validation. Reads never fire it.",
+        "Before your first edit, commit to the remaining execution plan as a host-accepted prewalk.checklist({ items }) call inside fabric_exec with 5-9 ordered items. Every item must have a concrete task and a specific validation. Only steps that change or verify code belong on the list — no reporting, bookkeeping, cleanup-ceremony, or release-note items. The checklist serves the task, never the reverse: when reality disagrees with an item, fix the actual problem rather than working the checklist. Reads never fire it.",
       ].join("\n");
 
 const customMessageText = (content: unknown): string | undefined => {

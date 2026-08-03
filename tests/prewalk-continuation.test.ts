@@ -5,6 +5,7 @@ import {
   PREWALK_PLAN_MESSAGE_TYPE,
   filterPrewalkContinuationMessages,
   filterPrewalkPlanningMessages,
+  prewalkChecklistReminder,
 } from "../src/prewalk/continuation.js";
 
 interface TestMessage {
@@ -84,5 +85,30 @@ describe("filterPrewalkPlanningMessages", () => {
       messages: [ordinary],
       changed: true,
     });
+  });
+});
+
+describe("prewalkChecklistReminder", () => {
+  const checklist = {
+    items: [
+      { task: "Change the guard", validation: "Run the guard test" },
+      { task: "Update the caller", validation: "Run the caller test" },
+    ],
+    readyAt: 5,
+  };
+
+  it("renders every item task with its validation", () => {
+    const text = prewalkChecklistReminder(checklist);
+    for (const item of checklist.items) {
+      expect(text).toContain(item.task);
+      expect(text).toContain(`Validation: ${item.validation}`);
+    }
+  });
+
+  it("restates the completion checks that steer a drifting executor", () => {
+    const text = prewalkChecklistReminder(checklist);
+    expect(text).toContain("do not end the turn");
+    expect(text).toContain("sweep every other call site");
+    expect(text).toContain("run the full test module");
   });
 });

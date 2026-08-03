@@ -1,3 +1,5 @@
+import type { FabricPrewalkChecklist } from "./checklist.js";
+
 export const PREWALK_CONTINUE_MESSAGE_TYPE = "pi-fabric-prewalk-continue";
 export const PREWALK_ARMED_MESSAGE_TYPE = "pi-fabric-prewalk-armed";
 export const PREWALK_PLAN_MESSAGE_TYPE = "pi-fabric-prewalk-research-plan";
@@ -58,3 +60,17 @@ export const filterPrewalkContinuationMessages = <Message extends MessageWithRol
   });
   return { messages: changed ? filtered : messages, changed };
 };
+
+// A per-turn reminder rendered from the live checklist so a long continuation
+// cannot drift away from its own plan. Injected by the context hook, not
+// persisted, so it steers every inference without accumulating in the session.
+export const prewalkChecklistReminder = (
+  checklist: FabricPrewalkChecklist,
+): string => [
+  "Prewalk checklist still active. Keep working it; do not end the turn until every item and validation is complete.",
+  ...checklist.items.map(
+    (item, index) =>
+      `- ${index + 1}. ${item.task}\n  Validation: ${item.validation}`,
+  ),
+  "Before claiming completion: sweep every other call site for any pattern, signature, or check you changed; keep the diff minimal and confirm no out-of-scope behavior changed; run the full test module the change lives in, not just the test you expect to flip.",
+].join("\n");

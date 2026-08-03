@@ -247,6 +247,15 @@ export class PrewalkController {
     );
   }
 
+  // The executor is steered every turn from the live checklist, not once at the
+  // boundary, so a long continuation cannot drift away from its own plan.
+  activeChecklist(sessionId: string): FabricPrewalkChecklist | undefined {
+    const status = this.#status;
+    if (status.state !== "continuing" && status.state !== "verifying") return undefined;
+    if (status.sessionId !== sessionId || !status.checklist) return undefined;
+    return structuredClone(status.checklist);
+  }
+
   isResearchPlanning(sessionId: string): boolean {
     return this.#researchStatus(sessionId) !== undefined;
   }

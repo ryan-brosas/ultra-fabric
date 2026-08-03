@@ -278,6 +278,29 @@ describe("PrewalkController", () => {
     }
   });
 
+  it("exposes the active checklist only while a continuation is live", () => {
+    const controller = new PrewalkController();
+    controller.arm({ mode: "in-place", model: "anthropic/executor", sessionId: "session-1" });
+    controller.executionBoundary("session-1")!.registerChecklist({
+      items: Array.from({ length: 5 }, (_, index) => ({
+        task: `Change target ${index + 1}`,
+        validation: `Run check ${index + 1}`,
+      })),
+    });
+    expect(controller.activeChecklist("session-1")).toBeUndefined();
+
+    const claim = controller.claim([audit("pi.edit", true)], "session-1", "handoff-1");
+    expect(claim).toBeDefined();
+    controller.completeHandoff();
+    controller.acceptContinuation("session-1", "handoff-1");
+
+    expect(controller.activeChecklist("session-1")?.items).toHaveLength(5);
+    expect(controller.activeChecklist("session-2")).toBeUndefined();
+
+    controller.cancel();
+    expect(controller.activeChecklist("session-1")).toBeUndefined();
+  });
+
   it("serializes the research mode first mutation reservation", () => {
     const controller = new PrewalkController();
     controller.arm({

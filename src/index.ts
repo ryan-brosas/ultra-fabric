@@ -17,6 +17,7 @@ import {
   filterPrewalkPlanningMessages,
 } from "./prewalk/continuation.js";
 import { restorePrewalkModel } from "./prewalk/model.js";
+import { prewalkChecklistReminder } from "./prewalk/continuation.js";
 import { prewalkRearmDefaults } from "./prewalk/rearm.js";
 import { withTrajectoryRearmDirective } from "./prewalk/handoff.js";
 import type { PendingFabricHandoff } from "./prewalk/handoff.js";
@@ -475,7 +476,7 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
         };
     state.noteContextQos(qos.report);
     let changed = continuation.changed || planning.changed || qos.changed;
-    const messages = qos.messages.map((message) => {
+    let messages = qos.messages.map((message) => {
       if (message.role !== "user") return message;
       if (typeof message.content === "string") {
         const content = expandSkillDirMarkersInSkillBlock(message.content);
@@ -494,6 +495,19 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
       });
       return messageChanged ? { ...message, content } : message;
     });
+    const activeChecklist = state.initialized
+      ? state.prewalk.activeChecklist(sessionId)
+      : undefined;
+    if (activeChecklist) {
+      messages = [
+        ...messages,
+        {
+          role: "user",
+          content: [{ type: "text", text: prewalkChecklistReminder(activeChecklist) }],
+        } as (typeof messages)[number],
+      ];
+      changed = true;
+    }
     return changed ? { messages } : undefined;
   });
 
