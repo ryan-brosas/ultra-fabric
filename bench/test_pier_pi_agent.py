@@ -3,7 +3,76 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pier_pi_agent
 from pier_pi_agent import collect_pi_session_metrics
+
+
+class PiAgentPackagingTest(unittest.TestCase):
+    def _agent(self, root: Path, **kwargs: object) -> pier_pi_agent.PiCodingAgent:
+        agent_dir = root / "agent"
+        agent_dir.mkdir()
+        (agent_dir / "auth.json").write_text("{}")
+        return pier_pi_agent.PiCodingAgent(
+            logs_dir=root / "logs",
+            model_name="openai-codex/gpt-5.6-sol",
+            pi_agent_dir=str(agent_dir),
+            **kwargs,
+        )
+
+    def test_uses_selected_fabric_global_extension_path(self) -> None:
+        self.assertEqual(
+            pier_pi_agent.fabric_extension_flags("ultra-fabric"),
+            '-e "$(npm root -g)/ultra-fabric"',
+        )
+        self.assertEqual(
+            pier_pi_agent.fabric_extension_flags("pi-fabric"),
+            '-e "$(npm root -g)/pi-fabric"',
+        )
+
+    def test_extracts_package_name_from_exact_npm_spec(self) -> None:
+        self.assertEqual(
+            pier_pi_agent.package_name_from_spec("pi-fabric@0.25.6"),
+            "pi-fabric",
+        )
+        self.assertEqual(
+            pier_pi_agent.package_name_from_spec(
+                "ultra-fabric@0.31.1-ultra.1"
+            ),
+            "ultra-fabric",
+        )
+
+    def test_rejects_unsafe_or_non_exact_npm_specs(self) -> None:
+        for spec in (
+            "pi-fabric",
+            "pi-fabric@latest",
+            "pi-fabric@^0.25.6",
+            "pi-fabric@0.25.6; touch /tmp/unsafe",
+        ):
+            with self.subTest(spec=spec), self.assertRaises(ValueError):
+                pier_pi_agent.package_name_from_spec(spec)
+
+    def test_installs_exact_npm_package_in_cached_agent_image(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            agent = self._agent(
+                Path(directory), fabric_package_spec="pi-fabric@0.25.6"
+            )
+            command = agent.install_spec().steps[0].run
+
+        self.assertIn("--legacy-peer-deps", command)
+        self.assertIn("pi-fabric@0.25.6", command)
+
+    def test_rejects_package_path_and_spec_together(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "fabric.tgz"
+            archive.write_bytes(b"archive")
+            with self.assertRaises(ValueError):
+                self._agent(
+                    root,
+                    fabric_package_path=str(archive),
+                    fabric_package_name="ultra-fabric",
+                    fabric_package_spec="ultra-fabric@0.31.1-ultra.1",
+                )
 
 
 class PiSessionMetricsTest(unittest.TestCase):

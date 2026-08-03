@@ -54,6 +54,8 @@ Harbor task images and separate verifier environment. Keep sibling checkouts of
 
     PIER_ENVIRONMENT=modal ./run-deepswe-pier.sh bandit-interprocedural-taint-checks baseline
     PIER_ENVIRONMENT=modal ./run-deepswe-pier.sh bandit-interprocedural-taint-checks fabric-local
+    PI_FABRIC_SPEC=pi-fabric@0.25.6 PIER_ENVIRONMENT=modal ./run-deepswe-pier.sh bandit-interprocedural-taint-checks fabric-npm
+
 
 The matrix runner pins either the original reporter subset or a smaller adversarial cross-language canary, expands independent attempts through Pier, and gives both configurations deterministic resumable job names. Previewing is free; matrices over 24 paid cells require an explicit confirmation.
 
@@ -69,14 +71,17 @@ Compare completed matched jobs and write replayable cell-level JSON with:
 
 The adapter installs Pi inside the task container, uploads only the isolated
 OAuth/settings directory, and packs the current Fabric checkout for local runs.
-Pier results land under `results/pier/`. In addition to verifier reward, the
+For `fabric-npm`, `PI_FABRIC_SPEC` must be an exact `name@semver`; Pier installs
+that package into the cached agent image so repetitions do not repeat the slow
+runtime dependency installation. Pier results land under `results/pier/`. In addition to verifier reward, the
 trial metadata records fresh/cached/combined and peak context tokens, outer and nested
 call mix, failures, same-file edit fragmentation, compactions, bounded versus
-whole-file reads, model-visible result volume, and results over 50 KB. Pass additional `pier run` flags after the config, such as timeout multipliers or dataset sampling flags. For the launcher's standard repetition and concurrency controls, use `PIER_N_ATTEMPTS` and `PIER_N_CONCURRENT`. Modal is recommended on ARM hosts because the official images are amd64. Set `PI_FABRIC_PACKAGE` to reuse one already-certified tarball across tasks. Run OAuth-backed cells serially.
+whole-file reads, model-visible result volume, and results over 50 KB. Pass additional `pier run` flags after the config, such as dataset sampling flags. For the launcher's standard controls, use `PIER_N_ATTEMPTS`, `PIER_N_CONCURRENT`, `PIER_PI_VERSION`, and `PIER_AGENT_SETUP_TIMEOUT_MULTIPLIER`. The setup multiplier defaults to 3 because a first uncached local archive install exceeded Pier's 360-second default. Modal is recommended on ARM hosts because the official images are amd64. Set `PI_FABRIC_PACKAGE` to reuse one already-certified tarball across tasks. Run OAuth-backed cells serially.
 
 Notes:
 
 - Model is pinned to `openai-codex/gpt-5.6-sol` at thinking `low`, matching
   the trajectories benchmark.
 - Run cells serially: the codex OAuth token is shared and refresh writes race.
+- Historical parity uses three repetitions. The archived `36_v2` reference pins `pi-fabric@0.25.6`; compare it to an exact `ultra-fabric` npm spec under the same Pi version before claiming an improvement.
 - `results/`, `.cache/`, `.runtime/` (if any) and `vendor/` are git-ignored.

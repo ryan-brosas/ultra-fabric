@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -12,8 +13,40 @@ from pier.models.agent.install import AgentInstallSpec, InstallStep
 from pier.models.agent.network import NetworkAllowlist
 
 
+NPM_PACKAGE_NAME_PATTERN = (
+    r"(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*"
+)
+EXACT_SEMVER_PATTERN = (
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
+)
+
+
+def validate_package_name(package_name: str) -> str:
+    if not re.fullmatch(NPM_PACKAGE_NAME_PATTERN, package_name):
+        raise ValueError(f"Invalid npm package name: {package_name}")
+    return package_name
+
+
+def package_name_from_spec(package_spec: str) -> str:
+    match = re.fullmatch(
+        rf"(?P<name>{NPM_PACKAGE_NAME_PATTERN})@{EXACT_SEMVER_PATTERN}",
+        package_spec,
+    )
+    if match is None:
+        raise ValueError(
+            "Fabric npm package must use an exact name@semver spec"
+        )
+    return match.group("name")
+
+
+def fabric_extension_flags(package_name: str) -> str:
+    package_name = validate_package_name(package_name)
+    return f'-e "$(npm root -g)/{package_name}"'
+
+
 class PiCodingAgent(BaseInstalledAgent):
-    """Pier adapter for paired Pi core and local pi-fabric DeepSWE trials."""
+    """Pier adapter for paired baseline and Fabric DeepSWE trials."""
 
     SUPPORTS_ATIF = False
 
@@ -22,14 +55,38 @@ class PiCodingAgent(BaseInstalledAgent):
         *args: Any,
         pi_agent_dir: str,
         fabric_package_path: str | None = None,
+        fabric_package_name: str | None = None,
+        fabric_package_spec: str | None = None,
         thinking_level: str = "low",
         pi_version: str = "0.83.0",
         **kwargs: Any,
     ) -> None:
         self._pi_agent_dir = Path(pi_agent_dir).resolve()
+        if fabric_package_path and fabric_package_spec:
+            raise ValueError(
+                "fabric_package_path and fabric_package_spec are mutually exclusive"
+            )
         self._fabric_package_path = (
             Path(fabric_package_path).resolve() if fabric_package_path else None
         )
+        self._fabric_package_spec = fabric_package_spec
+        if fabric_package_spec:
+            spec_name = package_name_from_spec(fabric_package_spec)
+            if fabric_package_name and fabric_package_name != spec_name:
+                raise ValueError(
+                    "fabric_package_name does not match fabric_package_spec"
+                )
+            self._fabric_package_name = spec_name
+        elif self._fabric_package_path:
+            self._fabric_package_name = validate_package_name(
+                fabric_package_name or "ultra-fabric"
+            )
+        else:
+            if fabric_package_name:
+                raise ValueError(
+                    "fabric_package_name requires a package path or npm spec"
+                )
+            self._fabric_package_name = None
         self._thinking_level = thinking_level
         self._pi_version = pi_version
         self._session_logs_dir: Path | None = None
@@ -37,7 +94,7 @@ class PiCodingAgent(BaseInstalledAgent):
             raise ValueError(f"Pi auth.json not found under {self._pi_agent_dir}")
         if self._fabric_package_path and not self._fabric_package_path.is_file():
             raise ValueError(
-                f"pi-fabric package not found: {self._fabric_package_path}"
+                f"Fabric package not found: {self._fabric_package_path}"
             )
         super().__init__(*args, version=pi_version, **kwargs)
 
@@ -58,7 +115,10 @@ class PiCodingAgent(BaseInstalledAgent):
         )
 
     def install_spec(self) -> AgentInstallSpec:
-        package = f"@earendil-works/pi-coding-agent@{self._pi_version}"
+        packages = [f"@earendil-works/pi-coding-agent@{self._pi_version}"]
+        if self._fabric_package_spec:
+            packages.append(self._fabric_package_spec)
+        package_args = " ".join(shlex.quote(package) for package in packages)
         return AgentInstallSpec(
             agent_name=self.name(),
             version=self._pi_version,
@@ -77,7 +137,8 @@ class PiCodingAgent(BaseInstalledAgent):
                         "  elif command -v yum >/dev/null; then yum install -y ripgrep; "
                         "  else echo 'Pi requires ripgrep' >&2; exit 1; fi; "
                         "fi; "
-                        f"npm install -g --ignore-scripts {shlex.quote(package)}; "
+                        "npm install -g --ignore-scripts --legacy-peer-deps "
+                        f"{package_args}; "
                         "pi --version"
                     ),
                 )
@@ -109,11 +170,14 @@ class PiCodingAgent(BaseInstalledAgent):
         )
         if self._fabric_package_path:
             await environment.upload_file(
-                self._fabric_package_path, "/tmp/pi-fabric.tgz"
+                self._fabric_package_path, "/tmp/fabric-package.tgz"
             )
             await self.exec_as_root(
                 environment,
-                command="npm install -g --ignore-scripts /tmp/pi-fabric.tgz",
+                command=(
+                    "npm install -g --ignore-scripts --legacy-peer-deps "
+                    "/tmp/fabric-package.tgz"
+                ),
             )
 
     @with_prompt_template
@@ -129,8 +193,8 @@ class PiCodingAgent(BaseInstalledAgent):
         local_session_dir = self.logs_dir / "pi-session"
         self._session_logs_dir = local_session_dir
         extension_flags = ""
-        if self._fabric_package_path:
-            extension_flags = '-e "$(npm root -g)/pi-fabric"'
+        if self._fabric_package_name:
+            extension_flags = fabric_extension_flags(self._fabric_package_name)
         else:
             extension_flags = "--no-skills --no-extensions"
         command = " ".join(
@@ -189,7 +253,8 @@ class PiCodingAgent(BaseInstalledAgent):
             "whole_file_reads": metrics["whole_file_reads"],
             "bounded_reads": metrics["bounded_reads"],
             "results_over_50kb": metrics["results_over_50kb"],
-            "fabric_enabled": self._fabric_package_path is not None,
+            "fabric_enabled": self._fabric_package_name is not None,
+            "fabric_package_name": self._fabric_package_name,
         }
 
 

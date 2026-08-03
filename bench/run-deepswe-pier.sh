@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "usage: $0 <task-slug|task-path|dataset-path> <baseline|fabric-local> [pier run args...]" >&2
+  echo "usage: $0 <task-slug|task-path|dataset-path> <baseline|fabric-local|fabric-npm> [pier run args...]" >&2
   exit 2
 fi
 
@@ -18,6 +18,8 @@ DEEPSWE_ROOT=${DEEPSWE_ROOT:-$OPEN_SOURCE_ROOT/deep-swe}
 PIER_ENVIRONMENT=${PIER_ENVIRONMENT:-docker}
 PIER_N_ATTEMPTS=${PIER_N_ATTEMPTS:-1}
 PIER_N_CONCURRENT=${PIER_N_CONCURRENT:-1}
+PIER_AGENT_SETUP_TIMEOUT_MULTIPLIER=${PIER_AGENT_SETUP_TIMEOUT_MULTIPLIER:-3}
+PIER_PI_VERSION=${PIER_PI_VERSION:-0.83.0}
 
 if ! [[ "$PIER_N_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
   echo "PIER_N_ATTEMPTS must be a positive integer" >&2
@@ -25,6 +27,23 @@ if ! [[ "$PIER_N_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if ! [[ "$PIER_N_CONCURRENT" =~ ^[1-9][0-9]*$ ]]; then
   echo "PIER_N_CONCURRENT must be a positive integer" >&2
+  exit 2
+fi
+if ! python3 - "$PIER_AGENT_SETUP_TIMEOUT_MULTIPLIER" <<'PY'
+import sys
+
+try:
+    value = float(sys.argv[1])
+except ValueError:
+    raise SystemExit(1)
+raise SystemExit(0 if value > 0 else 1)
+PY
+then
+  echo "PIER_AGENT_SETUP_TIMEOUT_MULTIPLIER must be positive" >&2
+  exit 2
+fi
+if ! [[ "$PIER_PI_VERSION" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+  echo "PIER_PI_VERSION must be an exact semantic version" >&2
   exit 2
 fi
 
@@ -82,16 +101,42 @@ case "$CONFIG" in
         exit 2
       fi
     else
-      rm -f "$ARTIFACT_DIR"/pi-fabric-*.tgz
+      rm -f "$ARTIFACT_DIR"/*.tgz
       (
         cd "$REPO_ROOT"
         pnpm run build
         npm pack --ignore-scripts --pack-destination "$ARTIFACT_DIR"
       )
-      PACKAGES=("$ARTIFACT_DIR"/pi-fabric-*.tgz)
+      PACKAGES=("$ARTIFACT_DIR"/*.tgz)
+      if [[ ${#PACKAGES[@]} -ne 1 || ! -f "${PACKAGES[0]}" ]]; then
+        echo "Expected exactly one packed Fabric archive under $ARTIFACT_DIR" >&2
+        exit 2
+      fi
       FABRIC_PACKAGE=${PACKAGES[0]}
     fi
-    FABRIC_ARGS=(--agent-kwarg "fabric_package_path=$FABRIC_PACKAGE")
+    FABRIC_PACKAGE_NAME=$(
+      python3 - "$FABRIC_PACKAGE" <<'PY'
+import json
+import sys
+import tarfile
+
+with tarfile.open(sys.argv[1], "r:gz") as archive:
+    package = json.load(archive.extractfile("package/package.json"))
+print(package["name"])
+PY
+    )
+    FABRIC_ARGS=(
+      --agent-kwarg "fabric_package_path=$FABRIC_PACKAGE"
+      --agent-kwarg "fabric_package_name=$FABRIC_PACKAGE_NAME"
+    )
+    ;;
+  fabric-npm)
+    FABRIC_SPEC=${PI_FABRIC_SPEC:-}
+    if [[ -z "$FABRIC_SPEC" ]]; then
+      echo "PI_FABRIC_SPEC is required for fabric-npm" >&2
+      exit 2
+    fi
+    FABRIC_ARGS=(--agent-kwarg "fabric_package_spec=$FABRIC_SPEC")
     ;;
   *)
     echo "unknown config: $CONFIG" >&2
@@ -133,6 +178,7 @@ PIER_ARGS=(
   --agent-import-path pier_pi_agent:PiCodingAgent
   --model openai-codex/gpt-5.6-sol
   --agent-kwarg "pi_agent_dir=$AGENT_DIR"
+  --agent-kwarg "pi_version=$PIER_PI_VERSION"
 )
 PIER_ARGS+=("${FABRIC_ARGS[@]}")
 PIER_ARGS+=(
@@ -141,6 +187,7 @@ PIER_ARGS+=(
   --n-concurrent "$PIER_N_CONCURRENT"
   --job-name "$JOB_NAME"
   --jobs-dir "$BENCH/results/pier"
+  --agent-setup-timeout-multiplier "$PIER_AGENT_SETUP_TIMEOUT_MULTIPLIER"
   --yes
 )
 PIER_ARGS+=("$@")
