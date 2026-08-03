@@ -2,7 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { MeshStore, type MeshIdentity, type MeshStoreOptions } from "../src/mesh/store.js";
+import {
+  MeshStore,
+  type MeshIdentity,
+  type MeshStateEntry,
+  type MeshStoreOptions,
+} from "../src/mesh/store.js";
 
 const roots: string[] = [];
 const identity: MeshIdentity = {
@@ -86,6 +91,25 @@ describe("MeshStore", () => {
 
     await writer.put({ key: "shared/value", value: { revision: 2 }, identity });
     expect(reader.get("shared/value")?.value).toEqual({ revision: 2 });
+  });
+
+  it("recovers the newest complete state when snapshots are concatenated", async () => {
+    const store = createStore();
+    await store.put({ key: "shared/value", value: { revision: 1 }, identity });
+    const statePath = path.join(store.root, "state.json");
+    const first = fs.readFileSync(statePath, "utf8");
+    await store.put({ key: "shared/value", value: { revision: 2 }, identity });
+    const second = fs.readFileSync(statePath, "utf8");
+    fs.writeFileSync(statePath, `${first}\n${second}`);
+
+    expect(store.get("shared/value")?.value).toEqual({ revision: 2 });
+
+    await store.put({ key: "shared/other", value: true, identity });
+    const normalized = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
+      entries: Record<string, MeshStateEntry>;
+    };
+    expect(normalized.entries["shared/value"]?.value).toEqual({ revision: 2 });
+    expect(normalized.entries["shared/other"]?.value).toBe(true);
   });
 
   it("supports complete internal prefix scans independently of public read limits", async () => {

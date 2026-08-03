@@ -87,23 +87,74 @@ const jsonClone = <T>(value: T): T => {
   return JSON.parse(serialized) as T;
 };
 
+const isMeshStateFile = (value: unknown): value is MeshStateFile => {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    (value as { format?: unknown }).format !== 1
+  ) {
+    return false;
+  }
+  const entries = (value as { entries?: unknown }).entries;
+  return typeof entries === "object" && entries !== null && !Array.isArray(entries);
+};
+
+const recoverConcatenatedState = (serialized: string): MeshStateFile | undefined => {
+  const snapshots: MeshStateFile[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < serialized.length; index += 1) {
+    const character = serialized[index]!;
+    if (start < 0) {
+      if (/\s/.test(character)) continue;
+      if (character !== "{") return undefined;
+      start = index;
+      depth = 1;
+      continue;
+    }
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === "{") depth += 1;
+    else if (character === "}") {
+      depth -= 1;
+      if (depth !== 0) continue;
+      try {
+        const parsed: unknown = JSON.parse(serialized.slice(start, index + 1));
+        if (!isMeshStateFile(parsed)) return undefined;
+        snapshots.push(parsed);
+      } catch {
+        return undefined;
+      }
+      start = -1;
+    }
+  }
+
+  return start < 0 && snapshots.length > 1 ? snapshots.at(-1) : undefined;
+};
+
 const readState = (filePath: string, maxBytes: number): MeshStateFile => {
   try {
     const stat = fs.statSync(filePath);
     if (stat.size > maxBytes) throw new Error(`state exceeds ${maxBytes} bytes`);
-    const parsed: unknown = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      !Array.isArray(parsed) &&
-      (parsed as { format?: unknown }).format === 1
-    ) {
-      const entries = (parsed as { entries?: unknown }).entries;
-      if (typeof entries === "object" && entries !== null && !Array.isArray(entries)) {
-        return parsed as MeshStateFile;
-      }
+    const serialized = fs.readFileSync(filePath, "utf8");
+    try {
+      const parsed: unknown = JSON.parse(serialized);
+      if (isMeshStateFile(parsed)) return parsed;
+      throw new Error("invalid state format");
+    } catch (error) {
+      const recovered = recoverConcatenatedState(serialized);
+      if (recovered) return recovered;
+      throw error;
     }
-    throw new Error("invalid state format");
   } catch (error) {
     if (errorCode(error) === "ENOENT") return { format: 1, entries: {} };
     const message = error instanceof Error ? error.message : String(error);
