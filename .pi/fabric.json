@@ -22,7 +22,12 @@
   "compaction": {
     "thresholds": {
       "openai-codex/gpt-5.6-sol": 0.5
-    }
+    },
+    "contextQos": {
+      "turnWindow": 5
+    },
+    "engine": "fabric",
+    "targetContextRatio": 0.6
   },
   "quality": {
     "mode": "audit",
