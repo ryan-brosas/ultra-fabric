@@ -6,7 +6,12 @@
     "maxPhaseRevisions": 5,
     "model": "makora/zai-org/GLM-5.2-NVFP4",
     "alwaysRearm": true,
+    "autoArm": true,
     "mode": "in-place"
+  },
+  "agents": {
+    "retainRuns": true,
+    "runRoot": "/home/ryanj/work/projects/ultra-fabric/.pi/fabric/runs"
   },
   "compaction": {
     "thresholds": {
