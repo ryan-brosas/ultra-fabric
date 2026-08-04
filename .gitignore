@@ -3,6 +3,7 @@ dist/
 coverage/
 .pi/fabric-runs/
 .pi/fabric/mesh/
+.pi/fabric/runs/
 .pi/hindsight/
 *.log
 .DS_Store
