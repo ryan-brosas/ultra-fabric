@@ -169,6 +169,22 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ prewalk: { mode: "trajectory" } }).prewalk.mode).toBe(
       "trajectory",
     );
+    // Auto-arm is opt-in and absent unless explicitly enabled, so existing
+    // configurations keep the manual /fabric prewalk arming path.
+    expect(normalizeFabricConfig({ prewalk: { autoArm: true } }).prewalk).toMatchObject({
+      autoArm: true,
+    });
+    expect(normalizeFabricConfig({}).prewalk).not.toHaveProperty("autoArm");
+    expect(normalizeFabricConfig({ prewalk: { autoArm: false } }).prewalk).not.toHaveProperty(
+      "autoArm",
+    );
+    // A configured run root must be absolute so agent evidence lands somewhere predictable.
+    expect(normalizeFabricConfig({ agents: { runRoot: "/tmp/fabric-runs" } }).agents.runRoot).toBe(
+      "/tmp/fabric-runs",
+    );
+    expect(normalizeFabricConfig({ agents: { runRoot: "relative/path" } }).agents).not.toHaveProperty(
+      "runRoot",
+    );
     expect(normalizeFabricConfig({ prewalk: { mode: "research" } }).prewalk.mode).toBe(
       "research",
     );

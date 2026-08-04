@@ -115,11 +115,13 @@ describe("prewalk prompt isolation", () => {
   });
 
   it("selects a prunable planning message type for research arms", () => {
+    // Arming moved to the shared helper so the command and configured
+    // auto-arming produce the same message type and dedupe.
     const source = fs.readFileSync(
-      path.join(process.cwd(), "src", "commands", "fabric.ts"),
+      path.join(process.cwd(), "src", "prewalk", "arm.ts"),
       "utf8",
     );
-    expect(source).toContain("prewalkArmedMessageType(state.config.prewalk.mode)");
+    expect(source).toContain("prewalkArmedMessageType(prewalk.mode)");
     expect(source).toContain("customType: armedMessageType");
     expect(source).toContain("hasPrewalkArmedPrompt(");
   });

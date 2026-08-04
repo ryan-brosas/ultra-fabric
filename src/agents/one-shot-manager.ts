@@ -968,8 +968,6 @@ export class OneShotAgentManager {
     await Promise.allSettled(running.map((managed) => this.#waitForTransportExit(managed)));
     if (this.#managedTempRoot) {
       markRunRootClosed(this.#runRoot);
-    } else if (!this.config.retainRuns) {
-      await removeTree(this.#runRoot);
     }
     if (this.#budgetOwned && this.#budget) {
       await removeTree(path.dirname(this.#budget.file));

@@ -18,6 +18,7 @@ import {
 } from "./prewalk/continuation.js";
 import { restorePrewalkModel } from "./prewalk/model.js";
 import { prewalkChecklistReminder } from "./prewalk/continuation.js";
+import { autoArmPrewalk } from "./prewalk/arm.js";
 import { prewalkRearmDefaults } from "./prewalk/rearm.js";
 import { withTrajectoryRearmDirective } from "./prewalk/handoff.js";
 import type { PendingFabricHandoff } from "./prewalk/handoff.js";
@@ -260,6 +261,9 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
       console.warn("[pi-fabric] Failed to refresh code preview settings.", error);
     }
     await state.initialize(context);
+    if (state.initialized) {
+      autoArmPrewalk(pi, state.prewalk, state.config, context);
+    }
     applyFabricMode();
     fabricUi.start(context);
     installHaltOnEscape(context);

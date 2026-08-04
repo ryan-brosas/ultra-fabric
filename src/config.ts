@@ -76,6 +76,8 @@ interface FabricPrewalkConfig {
   triggerEffects: Array<"none" | "workspace" | "state" | "external">;
   triggerRefs: string[];
   alwaysRearm: boolean;
+  // Arm on session start from configuration instead of requiring /fabric prewalk.
+  autoArm?: boolean;
   // Reasoning effort for the trajectory executor; unset inherits agents.thinking.
   thinking?: FabricThinking;
   verificationMode?: FabricPrewalkVerificationMode;
@@ -100,6 +102,8 @@ export interface FabricAgentConfig {
   extensions: boolean;
   defaultTools: string[];
   retainRuns: boolean;
+  // Absolute directory for agent run evidence; unset uses a managed temp root.
+  runRoot?: string;
   notifyOnComplete: boolean;
   budgetUsd: number;
   maxTokensPerChild: number;
@@ -668,6 +672,12 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
     DEFAULT_FABRIC_CONFIG.executor.runtime,
   );
   const executorRuntime = schemaMode === "enforce" ? "quickjs" : configuredExecutorRuntime;
+  // Only an absolute path is accepted: a relative run root would resolve against
+  // whichever process happened to start the agent.
+  const agentRunRootValue = stringValue(agents.runRoot)?.trim();
+  const agentRunRoot = agentRunRootValue && path.isAbsolute(agentRunRootValue)
+    ? agentRunRootValue
+    : undefined;
   const configuredTools = Array.isArray(agents.defaultTools)
     ? agents.defaultTools.filter(
         (tool): tool is string => typeof tool === "string" && Boolean(tool),
@@ -889,6 +899,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         prewalk.alwaysRearm,
         DEFAULT_FABRIC_CONFIG.prewalk.alwaysRearm,
       ),
+      ...(booleanValue(prewalk.autoArm, false) ? { autoArm: true } : {}),
     },
     agents: {
       enabled: booleanValue(agents.enabled, DEFAULT_FABRIC_CONFIG.agents.enabled),
@@ -932,6 +943,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       extensions: booleanValue(agents.extensions, DEFAULT_FABRIC_CONFIG.agents.extensions),
       defaultTools: configuredTools,
       retainRuns: booleanValue(agents.retainRuns, DEFAULT_FABRIC_CONFIG.agents.retainRuns),
+      ...(agentRunRoot ? { runRoot: agentRunRoot } : {}),
       notifyOnComplete: booleanValue(
         agents.notifyOnComplete,
         DEFAULT_FABRIC_CONFIG.agents.notifyOnComplete,

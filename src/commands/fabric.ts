@@ -3,11 +3,7 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import type { CapturedToolCatalog } from "../capture/catalog.js";
 import type { FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import type { FabricState } from "../fabric-state.js";
-import {
-  hasPrewalkArmedPrompt,
-  prewalkArmedMessageType,
-  prewalkArmedPrompt,
-} from "../prewalk/handoff.js";
+import { armPrewalk } from "../prewalk/arm.js";
 import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
 import { openFabricSettings } from "../ui/settings.js";
@@ -300,50 +296,10 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         const model = await resolvePrewalkModel(state, context);
         if (!model) return;
         const task = argumentsText.trim().slice(command.length).trim();
-        state.prewalk.arm({
-          model,
-          mode: state.config.prewalk.mode,
-          sessionId: context.sessionManager.getSessionId(),
-          ...(task ? { task } : {}),
-          ...(state.config.prewalk.thinking
-            ? { thinking: state.config.prewalk.thinking }
-            : {}),
-          ...(state.config.prewalk.verificationMode === "gated"
-            ? {
-                verificationMode: "gated" as const,
-                maxPhaseRevisions: state.config.prewalk.maxPhaseRevisions,
-              }
-            : {}),
-          alwaysRearm: state.config.prewalk.alwaysRearm,
-          returnPolicy: state.config.prewalk.returnPolicy,
-          ...(state.config.prewalk.fallbackModels
-            ? { fallbackModels: state.config.prewalk.fallbackModels }
-            : {}),
-        });
-        // Hidden advisory framing, queued for the next prompt (rules before
+        // Hidden advisory framing is queued for the next prompt (rules before
         // the task when one is submitted below). nextTurn never triggers a
         // turn; custom messages never fire `input`, so observeTask ignores it.
-        const armedPrompt = prewalkArmedPrompt(state.config.prewalk.mode, model);
-        const armedMessageType = prewalkArmedMessageType(state.config.prewalk.mode);
-        if (!hasPrewalkArmedPrompt(
-          context.sessionManager.getBranch(),
-          armedPrompt,
-          armedMessageType,
-        )) {
-          pi.sendMessage(
-            {
-              customType: armedMessageType,
-              content: armedPrompt,
-              display: false,
-              details: { mode: state.config.prewalk.mode, model },
-            },
-            { deliverAs: "nextTurn" },
-          );
-        }
-        context.ui.setStatus(
-          "fabric-prewalk",
-          `armed (${state.config.prewalk.mode}) → ${model}`,
-        );
+        armPrewalk(pi, state.prewalk, state.config.prewalk, context, model, task || undefined);
         const modeLabel =
           state.config.prewalk.mode === "trajectory"
             ? "the trajectory will move to a visible child executor"

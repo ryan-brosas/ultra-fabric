@@ -476,6 +476,7 @@ export class FabricState {
       hostId,
       identityId: identity.id,
       retention: this.#config.retention,
+      ...(this.#config.agents.runRoot ? { runRoot: this.#config.agents.runRoot } : {}),
       preparePiModel: async (modelKey) => {
         const separator = modelKey.indexOf("/");
         if (separator <= 0 || separator === modelKey.length - 1) return;
