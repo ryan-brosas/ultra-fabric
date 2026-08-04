@@ -81,7 +81,46 @@ Three isolated clean-room runs on 2026-08-04, each a fresh `pi -p` session in an
 
 Every run recorded exactly three `model_change` entries, planner, executor, planner, proving both the switch and the restore. The executor produced 45,682 of the 68,442 total output tokens (67%) across 12 of 33 requests, at roughly 2.2x the planner median generation rate.
 
-This is a three-task shape check on trivial functions, not a benchmark. It measures generation throughput and handoff mechanics only. Neither provider reported per-request cost in these runs, so no cost claim is available, and no pass-rate was measured. The technique originates with [Stencil Prewalk](https://stencil.so/blog/prewalk) and the todo-gated handoff in [oh-my-pi](https://github.com/can1357/oh-my-pi); their published SWE-Bench Pro figures describe a different model pair and workload and are **not** inherited here. Paired task-level evidence remains the job of the 20-task contract corpus in [certification and benchmarks](docs/certification.md).
+### Cost
+
+Measured tokens across the same three runs:
+
+| Model | Requests | Input | Output | Cache read | Cache write |
+| ----- | -------: | ----: | -----: | ---------: | ----------: |
+| `claude-opus-5` | 21 | 42 | 22,760 | 319,049 | 63,157 |
+| `GLM-5.2-NVFP4` | 12 | 87,151 | 45,682 | 187,456 | 0 |
+
+Priced at published API rates. Opus 5 is $5 per 1M input and $25 per 1M output ([Anthropic](https://www.anthropic.com/news/claude-opus-5)), with Anthropic standard cache ratios of 1.25x input for writes and 0.1x for reads. GLM-5.2 is $1.40 per 1M input, $0.26 per 1M cached input, and $4.40 per 1M output ([Z.AI](https://docs.z.ai/guides/overview/pricing)).
+
+| | Cost |
+| --- | ---: |
+| Planner (Opus 5) | $1.1235 |
+| Executor (GLM-5.2) | $0.3718 |
+| **Actual total** | **$1.4952** |
+| Same work all-Opus | $2.7950 |
+| **Saving** | **46.5%** |
+
+The executor produced 67% of the output for 24.9% of the spend.
+
+These are **estimates at published rates, not billed amounts**. The planner ran through an OAuth subscription bridge, so those tokens were not charged per request, and Z.AI list rates stand in for the actual GLM host. The all-Opus figure is a counterfactual that assumes identical token counts, which a different model would not reproduce exactly.
+
+### Compared to the previous Fabric prewalk
+
+Fabric previously offered three prewalk modes. Only one switched the live session; the other two handed a copied transcript to an off-session child that had no workspace tools, so it could report success having changed nothing.
+
+| | Previous `in-place` / `trajectory` | Current single path |
+| --- | --- | --- |
+| Model switches observed | 0 across 2 arms | 3 per run, 3 of 3 runs |
+| Executor tool calls | 0 | 12 requests, real edits |
+| Restores Main afterwards | no | yes, by default |
+
+No cost comparison is offered against the previous modes, because they did no work to price.
+
+### Compared to the Stencil write-up
+
+The technique originates with [Stencil Prewalk](https://stencil.so/blog/prewalk) and the todo-gated handoff in [oh-my-pi](https://github.com/can1357/oh-my-pi). Stencil reported 41% lower cost and 1.9x faster completion on SWE-Bench Pro; we estimate 46.5% lower cost and measure 2.2x generation throughput.
+
+**These are not the same measurements.** Stencil ran a real task suite with a different model pair and reported end-to-end completion time and pass rate. Ours is a three-task shape check on trivial functions measuring generation rate, with cost derived from list prices rather than invoices, and no pass rate at all. The agreement in direction is worth noting; the numbers are not comparable, and Stencil figures are **not** inherited here. Paired task-level evidence remains the job of the 20-task contract corpus in [certification and benchmarks](docs/certification.md).
 
 ## Agents
 
