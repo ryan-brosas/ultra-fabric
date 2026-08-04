@@ -7,8 +7,9 @@
     "model": "makora/zai-org/GLM-5.2-NVFP4",
     "alwaysRearm": true,
     "autoArm": true,
-    "returnPolicy": "previous",
+    "returnPolicy": "executor",
     "triggerRefs": [
+      "fabric.prewalk.checklist",
       "pi.edit",
       "pi.write",
       "schema.commit"
