@@ -1,12 +1,10 @@
 import type {
-  FabricPrewalkMode,
   FabricPrewalkReturnPolicy,
 } from "../config.js";
 import type { FabricThinking } from "../thinking.js";
 import type { FabricPrewalkChecklist } from "./checklist.js";
 
 export interface FabricPrewalkArm {
-  mode: FabricPrewalkMode;
   model: string;
   sessionId: string;
   armedAt: number;
@@ -21,7 +19,6 @@ export interface FabricPrewalkArm {
 }
 
 export interface FabricPrewalkRearmDefaults {
-  mode: FabricPrewalkMode;
   model?: string;
   alwaysRearm: boolean;
   returnPolicy: FabricPrewalkReturnPolicy;
@@ -122,7 +119,6 @@ const toArmed = (
   options: { preserveTask: boolean; attempt: number },
 ): FabricPrewalkArmedStatus => ({
   state: "armed",
-  mode: status.mode,
   model: status.model,
   sessionId: status.sessionId,
   armedAt,
@@ -152,7 +148,6 @@ const applyRearm = (
   rearm: FabricPrewalkRearmDefaults,
 ): FabricPrewalkArmedStatus => ({
   state: "armed",
-  mode: rearm.mode,
   model: rearm.model ?? armed.model,
   sessionId: armed.sessionId,
   armedAt: armed.armedAt,

@@ -709,10 +709,8 @@ export class FabricState {
     const callId = pending.audit.nestedToolCallId;
     const result = await runFabricHandoffAtBoundary(
       this.prewalk,
-      this.#agentsProvider,
       this.pi,
       pending,
-      outerToolResult,
       context,
       (update) => this.activity.updateCall(runId, callId, update),
     );

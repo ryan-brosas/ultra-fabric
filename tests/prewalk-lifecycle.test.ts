@@ -8,7 +8,6 @@ import {
 } from "../src/prewalk/lifecycle.js";
 
 const arm = (overrides: Partial<FabricPrewalkArm> = {}): FabricPrewalkArm => ({
-  mode: "in-place",
   model: "anthropic/executor",
   sessionId: "session-1",
   armedAt: 10,
@@ -169,7 +168,6 @@ describe("reducePrewalkLifecycle", () => {
       }),
     ).toEqual({
       state: "armed",
-      mode: "in-place",
       model: "anthropic/executor",
       sessionId: "session-1",
       armedAt: 30,
@@ -331,7 +329,6 @@ describe("reducePrewalkLifecycle", () => {
       sessionId: "session-1",
       at: 20,
       rearm: {
-        mode: "trajectory",
         model: "makora/executor",
         alwaysRearm: true,
         returnPolicy: "previous",
@@ -340,7 +337,6 @@ describe("reducePrewalkLifecycle", () => {
     });
     expect(next).toMatchObject({
       state: "armed",
-      mode: "trajectory",
       model: "makora/executor",
       thinking: "max",
       attempt: 0,
@@ -355,7 +351,7 @@ describe("reducePrewalkLifecycle", () => {
         kind: "task_settled",
         sessionId: "session-1",
         at: 20,
-        rearm: { mode: "in-place", alwaysRearm: false, returnPolicy: "previous" },
+        rearm: { alwaysRearm: false, returnPolicy: "previous" },
       }),
     ).toBe(pending);
   });
@@ -371,13 +367,13 @@ describe("reducePrewalkLifecycle", () => {
         kind: "continuation_settled",
         sessionId: "session-1",
         at: 20,
-        rearm: { mode: "in-place", alwaysRearm: false, returnPolicy: "previous" },
+        rearm: { alwaysRearm: false, returnPolicy: "previous" },
       }),
     ).toEqual({ state: "idle" });
   });
 
   it("records checklist readiness for any armed mode, not only research", () => {
-    const state = armed({ mode: "research" });
+    const state = armed({});
     const checklist = {
       items: Array.from({ length: 5 }, (_, index) => ({
         task: `Change target ${index + 1}`,

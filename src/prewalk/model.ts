@@ -25,13 +25,21 @@ export const requirePrewalkModel = (
 
 export type PrewalkModelRestoreResult =
   | { status: "restored"; model: string }
+  | { status: "in-progress"; model: string; error: string }
   | { status: "unavailable" | "unauthenticated" | "failed"; model: string; error: string };
+
+// A repeated settle must not switch Main twice. One restore per model key is
+// in flight at a time; a concurrent caller is told so rather than retrying.
+const restoresInFlight = new Set<string>();
 
 export const restorePrewalkModel = async (
   extension: ExtensionAPI,
   context: ExtensionContext,
   key: string,
 ): Promise<PrewalkModelRestoreResult> => {
+  if (restoresInFlight.has(key)) {
+    return { status: "in-progress", model: key, error: "restoration already in progress" };
+  }
   let model: ReturnType<ExtensionContext["modelRegistry"]["find"]>;
   try {
     model = requirePrewalkModel(key, context);
@@ -42,6 +50,7 @@ export const restorePrewalkModel = async (
       error: error instanceof Error ? error.message : String(error),
     };
   }
+  restoresInFlight.add(key);
   try {
     const restored = await extension.setModel(model);
     return restored
@@ -57,5 +66,7 @@ export const restorePrewalkModel = async (
       model: key,
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    restoresInFlight.delete(key);
   }
 };

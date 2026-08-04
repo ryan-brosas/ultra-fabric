@@ -204,7 +204,6 @@ return "complete outer result";
         config.approvals.write = "allow";
         const controller = new PrewalkController();
         controller.arm({
-          mode: "research",
           model: "anthropic/executor",
           sessionId: "session-1",
         });
@@ -262,7 +261,6 @@ return "late result";
         config.approvals.write = "allow";
         const controller = new PrewalkController();
         controller.arm({
-          mode: "research",
           model: "anthropic/executor",
           sessionId: "session-1",
         });

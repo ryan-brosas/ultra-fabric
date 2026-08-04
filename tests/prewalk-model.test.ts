@@ -72,3 +72,48 @@ describe("restorePrewalkModel", () => {
     });
   });
 });
+
+// Restoration must be idempotent under a repeated settle. Ported from the
+// qualified ildunari/hermes-prewalk _restore_and_remove contract, which refuses
+// re-entry with "restoration already in progress" instead of switching twice.
+describe("restorePrewalkModel re-entrancy", () => {
+  it("refuses a concurrent restore of the same model", async () => {
+    let release: (value: boolean) => void = () => {};
+    const gate = new Promise<boolean>((resolve) => {
+      release = resolve;
+    });
+    const setModel = vi.fn().mockReturnValue(gate);
+
+    const first = restorePrewalkModel(extension(setModel), context(), "anthropic/planner");
+    const second = await restorePrewalkModel(
+      extension(setModel),
+      context(),
+      "anthropic/planner",
+    );
+
+    expect(second).toEqual({
+      status: "in-progress",
+      model: "anthropic/planner",
+      error: "restoration already in progress",
+    });
+    expect(setModel).toHaveBeenCalledTimes(1);
+
+    release(true);
+    expect(await first).toEqual({ status: "restored", model: "anthropic/planner" });
+  });
+
+  it("allows a later restore once the previous one settled", async () => {
+    const setModel = vi.fn().mockResolvedValue(true);
+    const ext = extension(setModel);
+
+    expect(await restorePrewalkModel(ext, context(), "anthropic/planner")).toEqual({
+      status: "restored",
+      model: "anthropic/planner",
+    });
+    expect(await restorePrewalkModel(ext, context(), "anthropic/planner")).toEqual({
+      status: "restored",
+      model: "anthropic/planner",
+    });
+    expect(setModel).toHaveBeenCalledTimes(2);
+  });
+});

@@ -142,7 +142,6 @@ describe("Fabric configuration", () => {
     expect(
       normalizeFabricConfig({ prewalk: { model: "anthropic/executor" } }).prewalk,
     ).toEqual({
-      mode: "in-place",
       returnPolicy: "previous",
       model: "anthropic/executor",
       triggerRisks: [],
@@ -151,7 +150,6 @@ describe("Fabric configuration", () => {
       alwaysRearm: true,
     });
     expect(normalizeFabricConfig({ prewalk: { model: "   " } }).prewalk).toEqual({
-      mode: "in-place",
       returnPolicy: "previous",
       triggerRisks: [],
       triggerEffects: ["workspace"],
@@ -159,16 +157,12 @@ describe("Fabric configuration", () => {
       alwaysRearm: true,
     });
     expect(normalizeFabricConfig({ prewalk: { alwaysRearm: false } }).prewalk).toEqual({
-      mode: "in-place",
       returnPolicy: "previous",
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       alwaysRearm: false,
     });
-    expect(normalizeFabricConfig({ prewalk: { mode: "trajectory" } }).prewalk.mode).toBe(
-      "trajectory",
-    );
     // Auto-arm is opt-in and absent unless explicitly enabled, so existing
     // configurations keep the manual /fabric prewalk arming path.
     expect(normalizeFabricConfig({ prewalk: { autoArm: true } }).prewalk).toMatchObject({
@@ -185,20 +179,14 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ agents: { runRoot: "relative/path" } }).agents).not.toHaveProperty(
       "runRoot",
     );
-    expect(normalizeFabricConfig({ prewalk: { mode: "research" } }).prewalk.mode).toBe(
-      "research",
-    );
     expect(
       normalizeFabricConfig({
-        prewalk: { mode: "research", returnPolicy: "previous" },
+        prewalk: { returnPolicy: "previous" },
       }).prewalk.returnPolicy,
-    ).toBe("executor");
-    expect(normalizeFabricConfig({ prewalk: { mode: "child" } }).prewalk.mode).toBe(
-      "in-place",
-    );
+    ).toBe("previous");
     expect(
       normalizeFabricConfig({ prewalk: { returnPolicy: "executor" } }).prewalk,
-    ).toMatchObject({ returnPolicy: "previous" });
+    ).toMatchObject({ returnPolicy: "executor" });
     expect(
       normalizeFabricConfig({ prewalk: { returnPolicy: "planner" } }).prewalk,
     ).toMatchObject({ returnPolicy: "previous" });
@@ -694,7 +682,6 @@ describe("Fabric configuration", () => {
 
     saveFabricConfig(location, { prewalk: { model: "" } });
     expect(loadFabricConfig(location).prewalk).toEqual({
-      mode: "in-place",
       returnPolicy: "previous",
       triggerRisks: [],
       triggerEffects: ["workspace"],
@@ -757,5 +744,18 @@ describe("Fabric configuration", () => {
     expect(negative.agents.maxTokensPerChild).toBe(0);
     const huge = normalizeFabricConfig({ agents: { maxTokensPerChild: Number.MAX_VALUE } });
     expect(huge.agents.maxTokensPerChild).toBe(100_000_000);
+  });
+});
+
+describe("prewalk return policy", () => {
+  it("honors an explicit previous return policy in research mode", () => {
+    expect(
+      normalizeFabricConfig({ prewalk: { returnPolicy: "previous" } }).prewalk
+        .returnPolicy,
+    ).toBe("previous");
+  });
+
+  it("hands Main back its own model by default", () => {
+    expect(normalizeFabricConfig({ prewalk: {} }).prewalk.returnPolicy).toBe("previous");
   });
 });

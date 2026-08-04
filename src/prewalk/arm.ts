@@ -7,11 +7,6 @@ import {
   prewalkArmedPrompt,
 } from "./handoff.js";
 
-// In-place and trajectory both run their executor as an off-session child, so
-// only research can arm without agents available.
-const prewalkModeNeedsAgents = (mode: FabricConfig["prewalk"]["mode"]): boolean =>
-  mode !== "research";
-
 // One arming path for the explicit /fabric prewalk command and for configured
 // auto-arming, so both produce the same arm, advisory prompt, and status.
 export const armPrewalk = (
@@ -24,7 +19,6 @@ export const armPrewalk = (
 ): void => {
   controller.arm({
     model,
-    mode: prewalk.mode,
     sessionId: context.sessionManager.getSessionId(),
     ...(task ? { task } : {}),
     ...(prewalk.thinking ? { thinking: prewalk.thinking } : {}),
@@ -38,8 +32,8 @@ export const armPrewalk = (
     returnPolicy: prewalk.returnPolicy,
     ...(prewalk.fallbackModels ? { fallbackModels: prewalk.fallbackModels } : {}),
   });
-  const armedPrompt = prewalkArmedPrompt(prewalk.mode, model);
-  const armedMessageType = prewalkArmedMessageType(prewalk.mode);
+  const armedPrompt = prewalkArmedPrompt(model);
+  const armedMessageType = prewalkArmedMessageType();
   if (
     !hasPrewalkArmedPrompt(context.sessionManager.getBranch(), armedPrompt, armedMessageType)
   ) {
@@ -48,12 +42,12 @@ export const armPrewalk = (
         customType: armedMessageType,
         content: armedPrompt,
         display: false,
-        details: { mode: prewalk.mode, model },
+        details: { model },
       },
       { deliverAs: "nextTurn" },
     );
   }
-  context.ui.setStatus("fabric-prewalk", `armed (${prewalk.mode}) → ${model}`);
+  context.ui.setStatus("fabric-prewalk", `armed → ${model}`);
 };
 
 // Configured auto-arming: silent, non-interactive, and only when the arm can
@@ -69,7 +63,6 @@ export const autoArmPrewalk = (
   if (!prewalk.autoArm) return false;
   const model = prewalk.model?.trim();
   if (!model || !model.includes("/")) return false;
-  if (prewalkModeNeedsAgents(prewalk.mode) && !config.agents.enabled) return false;
   if (controller.isArmed(context.sessionManager.getSessionId())) return false;
   armPrewalk(extension, controller, prewalk, context, model);
   return true;

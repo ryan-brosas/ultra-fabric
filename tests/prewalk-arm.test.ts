@@ -35,19 +35,18 @@ describe("autoArmPrewalk", () => {
     expect(controller.isArmed("session-1")).toBe(true);
     expect(controller.status()).toMatchObject({
       state: "armed",
-      mode: "in-place",
       model: "anthropic/executor",
     });
     expect(ext.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         display: false,
-        details: { mode: "in-place", model: "anthropic/executor" },
+        details: { model: "anthropic/executor" },
       }),
       { deliverAs: "nextTurn" },
     );
     expect(ctx.setStatus).toHaveBeenCalledWith(
       "fabric-prewalk",
-      "armed (in-place) → anthropic/executor",
+      "armed → anthropic/executor",
     );
   });
 
@@ -72,19 +71,6 @@ describe("autoArmPrewalk", () => {
     expect(controller.isArmed()).toBe(false);
   });
 
-  it("refuses a child-executing mode when agents are unavailable", () => {
-    const controller = new PrewalkController();
-    const ext = extension();
-    for (const mode of ["in-place", "trajectory"]) {
-      const config = normalizeFabricConfig({
-        prewalk: { autoArm: true, model: "anthropic/executor", mode },
-        agents: { enabled: false },
-      });
-      expect(autoArmPrewalk(ext.value, controller, config, context().value)).toBe(false);
-    }
-    expect(controller.isArmed()).toBe(false);
-  });
-
   it("still arms research without agents because it stays in session", () => {
     const controller = new PrewalkController();
     const ext = extension();
@@ -93,7 +79,7 @@ describe("autoArmPrewalk", () => {
       agents: { enabled: false },
     });
     expect(autoArmPrewalk(ext.value, controller, config, context().value)).toBe(true);
-    expect(controller.status()).toMatchObject({ state: "armed", mode: "research" });
+    expect(controller.status()).toMatchObject({ state: "armed" });
   });
 
   it("never re-arms over a live arm", () => {

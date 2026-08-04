@@ -206,7 +206,6 @@ describe("PrewalkController", () => {
   it("gates research mutations on a host-observed checklist", () => {
     const controller = new PrewalkController();
     controller.arm({
-      mode: "research",
       model: "anthropic/executor",
       sessionId: "session-1",
       task: "Implement",
@@ -215,8 +214,7 @@ describe("PrewalkController", () => {
     const boundary = controller.executionBoundary("session-1");
     expect(boundary).toBeDefined();
     expect(controller.status()).toMatchObject({
-      mode: "research",
-      returnPolicy: "executor",
+      returnPolicy: "previous",
     });
 
     expect(() => boundary!.authorize({
@@ -245,42 +243,9 @@ describe("PrewalkController", () => {
     });
   });
 
-  it("accepts a host checklist for every armed mode, not only research", () => {
-    for (const mode of ["in-place", "trajectory"] as const) {
-      const controller = new PrewalkController();
-      controller.arm({
-        mode,
-        model: "anthropic/executor",
-        sessionId: "session-1",
-        task: "Implement",
-      });
-      const boundary = controller.executionBoundary("session-1");
-      expect(boundary).toBeDefined();
-      boundary!.registerChecklist({
-        items: Array.from({ length: 6 }, (_, index) => ({
-          task: `Change target ${index + 1}`,
-          validation: `Run check ${index + 1}`,
-        })),
-      });
-      expect(controller.status()).toMatchObject({
-        state: "armed",
-        mode,
-        checklist: { items: expect.any(Array) },
-      });
-      // Only research reserves the first mutation: other modes authorize reads
-      // and non-mutating calls without a reservation.
-      expect(boundary!.authorize({ ref: "pi.read" })).toBe(false);
-      expect(boundary!.authorize({
-        ref: "pi.write",
-        risk: "write",
-        effect: "workspace",
-      })).toBe(false);
-    }
-  });
-
   it("exposes the active checklist only while a continuation is live", () => {
     const controller = new PrewalkController();
-    controller.arm({ mode: "in-place", model: "anthropic/executor", sessionId: "session-1" });
+    controller.arm({ model: "anthropic/executor", sessionId: "session-1" });
     controller.executionBoundary("session-1")!.registerChecklist({
       items: Array.from({ length: 5 }, (_, index) => ({
         task: `Change target ${index + 1}`,
@@ -308,7 +273,7 @@ describe("PrewalkController", () => {
     // while Main has only planned.
     const controller = new PrewalkController();
     controller.configureTriggers([], ["fabric.prewalk.checklist", "pi.edit", "pi.write"], []);
-    controller.arm({ mode: "in-place", model: "anthropic/executor", sessionId: "session-1" });
+    controller.arm({ model: "anthropic/executor", sessionId: "session-1" });
 
     const claim = controller.claim(
       [audit("fabric.prewalk.checklist", true)],
@@ -322,7 +287,7 @@ describe("PrewalkController", () => {
   it("prefers the earliest matching trigger in one execution", () => {
     const controller = new PrewalkController();
     controller.configureTriggers([], ["fabric.prewalk.checklist", "pi.edit"], []);
-    controller.arm({ mode: "in-place", model: "anthropic/executor", sessionId: "session-1" });
+    controller.arm({ model: "anthropic/executor", sessionId: "session-1" });
 
     const claim = controller.claim(
       [audit("fabric.prewalk.checklist", true), audit("pi.edit", true)],
@@ -334,7 +299,7 @@ describe("PrewalkController", () => {
 
   it("bounds the checklist reminder per continuation", () => {
     const controller = new PrewalkController();
-    controller.arm({ mode: "in-place", model: "anthropic/executor", sessionId: "session-1" });
+    controller.arm({ model: "anthropic/executor", sessionId: "session-1" });
     controller.executionBoundary("session-1")!.registerChecklist({
       items: Array.from({ length: 5 }, (_, index) => ({
         task: `Change target ${index + 1}`,
@@ -361,7 +326,6 @@ describe("PrewalkController", () => {
   it("serializes the research mode first mutation reservation", () => {
     const controller = new PrewalkController();
     controller.arm({
-      mode: "research",
       model: "anthropic/executor",
       sessionId: "session-1",
     });
@@ -389,5 +353,51 @@ describe("PrewalkController", () => {
       risk: "write",
       effect: "workspace",
     })).toBe(true);
+  });
+});
+
+// A successful tool call is not automatically a mutation. Ported from the
+// qualified tiequan12345/pi-prewalk detectActionTool contract: an edit whose
+// diff and patch are both empty, or a write the host reports as unchanged,
+// left the workspace untouched and must not own the handoff boundary.
+describe("PrewalkController no-op mutations", () => {
+  const resultAudit = (ref: string, result: unknown): FabricCallAudit => ({
+    ref,
+    nestedToolCallId: "call-1",
+    startedAt: 1,
+    endedAt: 2,
+    success: true,
+    result,
+  });
+
+  const armed = () => {
+    const controller = new PrewalkController();
+    controller.arm({ model: "anthropic/executor", sessionId: "session-1" });
+    return controller;
+  };
+
+  it("does not claim an edit that changed nothing", () => {
+    const controller = armed();
+    expect(
+      controller.claim([resultAudit("pi.edit", { diff: "", patch: "" })], "session-1"),
+    ).toBeUndefined();
+    expect(controller.isArmed("session-1")).toBe(true);
+  });
+
+  it("does not claim a write the host reports as unchanged", () => {
+    const controller = armed();
+    expect(
+      controller.claim([resultAudit("pi.write", { changed: false })], "session-1"),
+    ).toBeUndefined();
+    expect(controller.isArmed("session-1")).toBe(true);
+  });
+
+  it("claims a real edit and a write with no change signal", () => {
+    expect(
+      armed().claim([resultAudit("pi.edit", { diff: "+1", patch: "@@" })], "session-1"),
+    ).toMatchObject({ mutation: { ref: "pi.edit" } });
+    expect(
+      armed().claim([resultAudit("pi.write", { ok: true })], "session-1"),
+    ).toMatchObject({ mutation: { ref: "pi.write" } });
   });
 });

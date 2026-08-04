@@ -1,5 +1,4 @@
 import type {
-  FabricPrewalkMode,
   FabricPrewalkReturnPolicy,
 } from "../config.js";
 import type { FabricCallAudit } from "../core/action-registry.js";
@@ -63,7 +62,6 @@ const normalizedTask = (value: string | undefined): string | undefined => {
 const armFromStatus = (
   status: Exclude<FabricPrewalkStatus, { state: "idle" }>,
 ): FabricPrewalkArm => ({
-  mode: status.mode,
   model: status.model,
   sessionId: status.sessionId,
   armedAt: status.armedAt,
@@ -105,6 +103,17 @@ const gateFeedback = (gate: FabricGateResult): string =>
   gate.evidence.map((evidence) => `${evidence.kind}:${evidence.ref}`).join(", ") ||
   `Verification gate ${gate.gate} requires revision`;
 
+// A successful call that left the workspace untouched is not a mutation and
+// must not own the handoff boundary. Absent signals fail open, so an unknown
+// result shape still counts as a real mutation.
+const isNoOpMutation = (audit: FabricCallAudit): boolean => {
+  const result = audit.result;
+  if (typeof result !== "object" || result === null) return false;
+  const record = result as Record<string, unknown>;
+  if (record.changed === false) return true;
+  return record.diff === "" && record.patch === "";
+};
+
 export class PrewalkController {
   #status: FabricPrewalkStatus = { state: "idle" };
   #triggerRefs = new Set(PREWALK_TRIGGER_REFS);
@@ -142,7 +151,6 @@ export class PrewalkController {
 
   #researchStatus(sessionId: string): FabricPrewalkArmedStatus | undefined {
     return this.#status.state === "armed" &&
-      this.#status.mode === "research" &&
       this.#status.sessionId === sessionId
       ? this.#status
       : undefined;
@@ -195,7 +203,6 @@ export class PrewalkController {
 
   arm(input: {
     model: string;
-    mode?: FabricPrewalkMode;
     sessionId: string;
     task?: string;
     alwaysRearm?: boolean;
@@ -212,17 +219,15 @@ export class PrewalkController {
     }
     const task = normalizedTask(input.task);
     const fallbackModels = normalizedFallbackModels(input.fallbackModels, model);
-    const mode = input.mode ?? "in-place";
     this.#researchMutationReserved = false;
     return this.#transition({
       kind: "armed",
       arm: {
-        mode,
         model,
         sessionId: input.sessionId,
         armedAt: Date.now(),
         alwaysRearm: input.alwaysRearm === true,
-        returnPolicy: mode === "research" ? "executor" : input.returnPolicy ?? "executor",
+        returnPolicy: input.returnPolicy ?? "executor",
         ...(fallbackModels.length > 0 ? { fallbackModels } : {}),
         ...(task ? { task } : {}),
         ...(input.thinking ? { thinking: input.thinking } : {}),
@@ -426,9 +431,9 @@ export class PrewalkController {
       return undefined;
     }
     const mutation = audits.find(
-      (audit) => audit.success === true && this.#matchesTrigger(audit),
+      (audit) =>
+        audit.success === true && this.#matchesTrigger(audit) && !isNoOpMutation(audit),
     );
-    if (this.#status.mode === "research" && !this.#status.checklist) return undefined;
     if (!mutation) return undefined;
     const arm = armFromStatus(this.#status);
     this.#transition({

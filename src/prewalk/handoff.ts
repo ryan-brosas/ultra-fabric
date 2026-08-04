@@ -4,7 +4,6 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type {
-  FabricPrewalkMode,
   FabricPrewalkReturnPolicy,
   FabricResultFormat,
 } from "../config.js";
@@ -13,25 +12,16 @@ import {
   type FabricCallAudit,
 } from "../core/action-registry.js";
 import type { FabricExecutionResult } from "../execution-service.js";
-import type {
-  FabricInvocationActivityUpdate,
-  FabricInvocationContext,
-} from "../protocol.js";
-import { snapshotHandoffSession } from "../agents/handoff.js";
-import type {
-  AgentSessionSeed,
-  AgentToolResultMessage,
-} from "../agents/types.js";
+import type { FabricInvocationActivityUpdate } from "../protocol.js";
 import type { PrewalkController } from "./controller.js";
 import type { FabricPrewalkChecklist } from "./checklist.js";
 import {
   PREWALK_ARMED_MESSAGE_TYPE,
   PREWALK_CONTINUE_MESSAGE_TYPE,
-  PREWALK_PLAN_MESSAGE_TYPE,
 } from "./continuation.js";
 import { requirePrewalkModel } from "./model.js";
 
-export { PREWALK_PLAN_MESSAGE_TYPE, PREWALK_ARMED_MESSAGE_TYPE } from "./continuation.js";
+export { PREWALK_ARMED_MESSAGE_TYPE } from "./continuation.js";
 
 const PREWALK_CONTINUE_PROMPT = [
   "Continue the existing task in this same session under the new executor model.",
@@ -60,18 +50,13 @@ const PREWALK_GATED_VERIFY_PROMPT = [
   "Use disposition: 'abort' only when downstream work must stop. Do not claim completion without a passing gate.",
 ].join(" ");
 
-const PREWALK_TRAJECTORY_VERIFY_PROMPT = [
-  "Prewalk trajectory handoff complete: the executor's implementation above is final — do not redo it.",
-  "Continue now: run the relevant verification (matching test module, build, or an equivalent probe) and check the changed call sites for consistency, then summarize what the executor implemented and how the checks went.",
-  "If a check fails, fix only the failing part; keep the fix scoped. If this verification already happened in this turn, respond with the summary only.",
-].join(" ");
 
 // Arm-time framing is LLM-visible, TUI-hidden, and does not fire an
 // input event. Research framing has a distinct custom type so its plan
 // message is identifiable; the context hook removes both framing types
 // before the executor's first inference.
-export const prewalkArmedMessageType = (mode: FabricPrewalkMode): string =>
-  mode === "research" ? PREWALK_PLAN_MESSAGE_TYPE : PREWALK_ARMED_MESSAGE_TYPE;
+export const prewalkArmedMessageType = (): string =>
+  PREWALK_ARMED_MESSAGE_TYPE;
 
 const researchArmedPrompt = (model: string): string => [
   `Prewalk armed → ${model} (research).`,
@@ -81,17 +66,7 @@ const researchArmedPrompt = (model: string): string => [
   "The executor owns the remaining implementation and verification through completion.",
 ].join("\n");
 
-export const prewalkArmedPrompt = (mode: FabricPrewalkMode, model: string): string =>
-  mode === "research"
-    ? researchArmedPrompt(model)
-    : [
-        `Prewalk armed → ${model} (${mode}): the first successful configured write effect inside fabric_exec (by default pi.edit / pi.write / schema.commit or any declared workspace-effect action) hands off to the executor automatically; ${
-          mode === "trajectory"
-            ? "the executor takes over the implementation there, and a hidden follow-up asks you to verify its work and summarize when it finishes."
-            : `this session switches to ${model} and keeps working.`
-        }`,
-        "Before your first edit, commit to the remaining execution plan as a host-accepted prewalk.checklist({ items }) call inside fabric_exec with 5-9 ordered items. Every item must have a concrete task and a specific validation. Only steps that change or verify code belong on the list — no reporting, bookkeeping, cleanup-ceremony, or release-note items. The checklist serves the task, never the reverse: when reality disagrees with an item, fix the actual problem rather than working the checklist. Reads never fire it.",
-      ].join("\n");
+export const prewalkArmedPrompt = (model: string): string => researchArmedPrompt(model);
 
 const customMessageText = (content: unknown): string | undefined => {
   if (typeof content === "string") return content;
@@ -127,16 +102,9 @@ export const hasPrewalkArmedPrompt = (
     );
   });
 
-export interface BoundaryHandoffRunner {
-  executeHandoff(
-    args: Record<string, unknown>,
-    context: FabricInvocationContext,
-    sessionSeed: AgentSessionSeed,
-  ): Promise<Record<string, unknown>>;
-}
 
 export interface PendingFabricHandoff {
-  kind: "explicit" | "prewalk-in-place" | "prewalk-trajectory" | "prewalk-research";
+  kind: "explicit" | "prewalk-research";
   args: Record<string, unknown>;
   audit: FabricCallAudit;
   resultFormat: FabricResultFormat;
@@ -158,7 +126,7 @@ const createPrewalkPending = (input: {
   revision?: { number: number; gate: string; feedback: string };
   returnModel?: string;
 }): PendingFabricHandoff => {
-  const mode = input.arm.mode;
+  const mode = "research" as const;
   const revisionTask = input.revision
     ? [
         input.arm.task ? `Continue the existing task: ${input.arm.task}` : "Continue the existing task.",
@@ -193,19 +161,15 @@ const createPrewalkPending = (input: {
       : {}),
   };
   const audit: FabricCallAudit = {
-    ref: mode === "research" ? "fabric.prewalk" : "agents.handoff",
+    ref: "fabric.prewalk",
     nestedToolCallId: input.nestedToolCallId,
     startedAt: Date.now(),
-    tool: mode === "research" ? "prewalk" : "handoff",
-    provider: mode === "research" ? "fabric" : "agents",
+    tool: "prewalk",
+    provider: "fabric",
     args,
   };
   return {
-    kind: mode === "research"
-      ? "prewalk-research"
-      : mode === "in-place"
-        ? "prewalk-in-place"
-        : "prewalk-trajectory",
+    kind: "prewalk-research" as const,
     args,
     audit,
     resultFormat: input.resultFormat,
@@ -243,8 +207,7 @@ export const withTrajectoryRearmDirective = (
   sessionId: string,
 ): string => {
   const status = controller.status();
-  return pending.kind === "prewalk-trajectory" &&
-    handoff.completed === true &&
+  return handoff.completed === true &&
     (status.state === "continuation_pending" ||
       status.state === "verification_pending") &&
     status.sessionId === sessionId &&
@@ -412,130 +375,40 @@ const runResearchPrewalk = async (
 
 export const runFabricHandoffAtBoundary = async (
   controller: PrewalkController,
-  runner: BoundaryHandoffRunner,
   extension: ExtensionAPI,
   pending: PendingFabricHandoff,
-  outerToolResult: AgentToolResultMessage,
   context: ExtensionContext,
   activity?: (update: FabricInvocationActivityUpdate) => void,
 ): Promise<Record<string, unknown>> => {
   const model = String(pending.args.model ?? "");
-  const research = pending.kind === "prewalk-research";
-  const inPlaceImpl = pending.kind === "prewalk-in-place";
-  const prewalkMode = research
-    ? "research"
-    : inPlaceImpl
-      ? "in-place"
-      : "trajectory";
-  context.ui.setStatus(
-    "fabric-prewalk",
-    research ? `switching Main → ${model}` : `handing off ${prewalkMode} → ${model}`,
-  );
+  context.ui.setStatus("fabric-prewalk", "switching Main to " + model);
   const returnModel = pending.returnModel ?? (
-    inPlaceImpl &&
-    pending.returnPolicy === "previous" &&
-    context.model
-      ? `${context.model.provider}/${context.model.id}`
+    pending.returnPolicy === "previous" && context.model
+      ? context.model.provider + "/" + context.model.id
       : undefined
   );
   let handoffError: string | undefined;
-  let continuationError: string | undefined;
   try {
-    if (research) {
-      const result = await runResearchPrewalk(extension, pending, context);
-      if (typeof result.model === "string") {
-        controller.selectHandoffModel(result.model);
-      }
-      pending.audit.success = true;
-      pending.audit.result = result;
-      pending.audit.endedAt = Date.now();
-      activity?.({ type: "progress", message: `Main continuing in place with ${model}` });
-      return result;
+    const result = await runResearchPrewalk(extension, pending, context);
+    if (typeof result.model === "string") {
+      controller.selectHandoffModel(result.model);
     }
-
-    const seed = snapshotHandoffSession(
-      context.sessionManager,
-      context.model,
-      outerToolResult,
-      outerToolResult.toolCallId,
-    );
-    const invocation: FabricInvocationContext = {
-      cwd: context.cwd,
-      signal: context.signal,
-      parentToolCallId: outerToolResult.toolCallId,
-      nestedToolCallId: pending.audit.nestedToolCallId,
-      extensionContext: context,
-      update(message) {
-        context.ui.setStatus("fabric-prewalk", message);
-        activity?.({ type: "progress", message });
-      },
-      ...(activity ? { activity } : {}),
-      attachPreview(preview) {
-        pending.audit.preview = preview;
-      },
-    };
-    const result = await runner.executeHandoff(pending.args, invocation, seed);
-    const completed = result.completed === true;
-    if (!completed) {
-      handoffError =
-        typeof result.error === "string" && result.error.trim()
-          ? result.error.trim()
-          : `Prewalk trajectory ${String(result.status ?? "failed")}`;
-    }
-    pending.audit.success = completed;
-    if (handoffError) pending.audit.error = handoffError;
+    pending.audit.success = true;
     pending.audit.result = result;
     pending.audit.endedAt = Date.now();
-    if (completed && (inPlaceImpl || pending.kind === "prewalk-trajectory")) {
-      // Main is never left idle after a delegated implementation: queue a hidden
-      // verify-and-summarize continuation. In-place replays its checklist/continue
-      // prompt; trajectory uses its own verify prompt. Best-effort — the
-      // executor's completed result stays authoritative.
-      try {
-        const basePrompt = inPlaceImpl
-          ? (pending.checklist ? checklistContinuationPrompt(pending.checklist) : PREWALK_CONTINUE_PROMPT)
-          : PREWALK_TRAJECTORY_VERIFY_PROMPT;
-        const content = pending.verificationMode === "gated"
-          ? (inPlaceImpl ? `${basePrompt}\n\n${PREWALK_GATED_VERIFY_PROMPT}` : PREWALK_GATED_VERIFY_PROMPT)
-          : basePrompt;
-        queuePrewalkContinuation(extension, pending, content, { mode: prewalkMode, model });
-      } catch (error) {
-        continuationError = error instanceof Error ? error.message : String(error);
-        handoffError = `Prewalk continuation delivery failed: ${continuationError}`;
-      }
-    }
-    context.ui.setStatus(
-      "fabric-prewalk",
-      completed
-        ? continuationError
-          ? `${prewalkMode} implemented; continuation delivery failed`
-          : `${prewalkMode} executor implemented`
-        : `${prewalkMode} ${String(result.status ?? "failed")}`,
-    );
-    return {
-      ...(inPlaceImpl || pending.kind === "prewalk-trajectory"
-        ? { prewalk: true, mode: prewalkMode, trigger: { ref: pending.triggerRef } }
-        : {}),
-      ...result,
-      ...(continuationError
-        ? { continuationQueued: false, continuationError }
-        : {}),
-    };
+    activity?.({ type: "progress", message: "Main continuing in place with " + model });
+    return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     handoffError = message;
     pending.audit.success = false;
     pending.audit.error = message;
     pending.audit.endedAt = Date.now();
-    context.ui.setStatus("fabric-prewalk", prewalkMode === "trajectory" ? "trajectory handoff failed" : `${prewalkMode} continuation failed`);
+    context.ui.setStatus("fabric-prewalk", "prewalk continuation failed");
     return {
-      ...(pending.kind.startsWith("prewalk-")
-        ? {
-            prewalk: true,
-            mode: prewalkMode,
-            trigger: { ref: pending.triggerRef },
-          }
-        : {}),
+      prewalk: true,
+      mode: "research",
+      trigger: { ref: pending.triggerRef },
       handedOff: false,
       continued: false,
       completed: false,

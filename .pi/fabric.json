@@ -7,9 +7,8 @@
     "model": "makora/zai-org/GLM-5.2-NVFP4",
     "alwaysRearm": true,
     "autoArm": true,
-    "mode": "in-place",
+    "returnPolicy": "previous",
     "triggerRefs": [
-      "fabric.prewalk.checklist",
       "pi.edit",
       "pi.write",
       "schema.commit"
@@ -42,5 +41,12 @@
         "timeoutMs": 120000
       }
     ]
+  },
+  "executor": {
+    "runtime": "node-process",
+    "memoryLimitBytes": 8589934592
+  },
+  "consult": {
+    "maxFindingsPerWorker": 16
   }
 }

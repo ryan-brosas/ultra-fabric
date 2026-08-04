@@ -21,7 +21,6 @@ export type FabricAgentTransport =
 export type FabricAgentRunner = "pi" | "claude";
 export type FabricUiWidgetMode = "auto" | "always" | "hidden";
 export type FabricResultFormat = "auto" | "yaml" | "json" | "text";
-export type FabricPrewalkMode = "research" | "in-place" | "trajectory";
 export type FabricPrewalkReturnPolicy = "executor" | "previous";
 type FabricPrewalkVerificationMode = "gated";
 export type FabricExecutorRuntime = "quickjs" | "node-process";
@@ -68,7 +67,6 @@ interface FabricClaudeRunnerConfig {
 }
 
 interface FabricPrewalkConfig {
-  mode: FabricPrewalkMode;
   returnPolicy: FabricPrewalkReturnPolicy;
   model?: string;
   fallbackModels?: string[];
@@ -304,7 +302,6 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     callTimeoutMs: 120_000,
   },
   prewalk: {
-    mode: "in-place",
     returnPolicy: "previous",
     triggerRisks: [],
     triggerEffects: ["workspace"],
@@ -512,14 +509,6 @@ const stringValue = (value: unknown): string | undefined =>
 
 const runnerValue = (value: unknown, fallback: FabricAgentRunner): FabricAgentRunner =>
   value === "pi" || value === "claude" ? value : fallback;
-
-const prewalkModeValue = (
-  value: unknown,
-  fallback: FabricPrewalkMode,
-): FabricPrewalkMode =>
-  value === "research" || value === "in-place" || value === "trajectory"
-    ? value
-    : fallback;
 
 const transportValue = (
   value: unknown,
@@ -729,7 +718,6 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       )].slice(0, 8)
     : [];
   const prewalkThinking = isFabricThinking(prewalk.thinking) ? prewalk.thinking : undefined;
-  const prewalkMode = prewalkModeValue(prewalk.mode, DEFAULT_FABRIC_CONFIG.prewalk.mode);
   const prewalkTriggerRisks = Array.isArray(prewalk.triggerRisks)
     ? [...new Set(prewalk.triggerRisks.filter((value): value is FabricRisk =>
         value === "read" || value === "write" || value === "execute" ||
@@ -876,11 +864,12 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       ),
     },
     prewalk: {
-      mode: prewalkMode,
       // In-place and trajectory always hand Main back its own model, so no
       // configuration can strand the main session on the executor. Research
-      // remains a deliberate permanent same-conversation switch.
-      returnPolicy: prewalkMode === "research" ? "executor" : "previous",
+      // keeps the executor unless the operator explicitly asks for Main back.
+      // Main is handed back its own model unless the operator explicitly asks
+      // the executor to keep it, so no default can strand Main on the executor.
+      returnPolicy: prewalk.returnPolicy === "executor" ? "executor" : "previous",
       ...(prewalkModel ? { model: prewalkModel } : {}),
       ...(prewalkFallbackModels.length > 0
         ? { fallbackModels: prewalkFallbackModels }

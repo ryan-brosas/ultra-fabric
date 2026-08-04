@@ -121,7 +121,7 @@ describe("prewalk prompt isolation", () => {
       path.join(process.cwd(), "src", "prewalk", "arm.ts"),
       "utf8",
     );
-    expect(source).toContain("prewalkArmedMessageType(prewalk.mode)");
+    expect(source).toContain("prewalkArmedMessageType()");
     expect(source).toContain("customType: armedMessageType");
     expect(source).toContain("hasPrewalkArmedPrompt(");
   });

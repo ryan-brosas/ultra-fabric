@@ -306,12 +306,16 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
         context,
         settledContinuation.returnModel,
       );
-      context.ui.notify(
-        restored.status === "restored"
-          ? `Prewalk restored Main → ${restored.model}`
-          : `Prewalk could not restore ${restored.model}: ${restored.error}`,
-        restored.status === "restored" ? "info" : "warning",
-      );
+      // A concurrent settle is already restoring Main; reporting it as a
+      // failure would be wrong, so leave the notice to the owning call.
+      if (restored.status !== "in-progress") {
+        context.ui.notify(
+          restored.status === "restored"
+            ? `Prewalk restored Main → ${restored.model}`
+            : `Prewalk could not restore ${restored.model}: ${restored.error}`,
+          restored.status === "restored" ? "info" : "warning",
+        );
+      }
     }
     const settledTask = state.prewalk.settleTask(sessionId, rearm);
     if (settledContinuation.settled || settledTask) {

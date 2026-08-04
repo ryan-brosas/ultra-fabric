@@ -10,7 +10,6 @@ export const prewalkRearmDefaults = (
   const prewalk = config.prewalk;
   const model = prewalk.model?.trim();
   return {
-    mode: prewalk.mode,
     alwaysRearm: prewalk.alwaysRearm,
     returnPolicy: prewalk.returnPolicy,
     ...(model ? { model } : {}),

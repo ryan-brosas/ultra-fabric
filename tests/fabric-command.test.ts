@@ -4,7 +4,6 @@ import type { CapturedToolCatalog } from "../src/capture/catalog.js";
 import { registerFabricCommand } from "../src/commands/fabric.js";
 import {
   PREWALK_ARMED_MESSAGE_TYPE,
-  PREWALK_PLAN_MESSAGE_TYPE,
   prewalkArmedPrompt,
 } from "../src/prewalk/handoff.js";
 import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
@@ -68,7 +67,6 @@ describe("/fabric command", () => {
         fullCodeMode: true,
         schema: { mode: "off" },
         prewalk: {
-          mode: "in-place",
           model: "anthropic/executor",
           verificationMode: "gated",
           maxPhaseRevisions: 3,
@@ -93,7 +91,6 @@ describe("/fabric command", () => {
 
     expect(arm).toHaveBeenCalledWith({
       model: "anthropic/executor",
-      mode: "in-place",
       sessionId: "session-1",
       task: "Implement the token guard",
       verificationMode: "gated",
@@ -103,9 +100,9 @@ describe("/fabric command", () => {
     expect(sendMessage).toHaveBeenCalledWith(
       {
         customType: PREWALK_ARMED_MESSAGE_TYPE,
-        content: prewalkArmedPrompt("in-place", "anthropic/executor"),
+        content: prewalkArmedPrompt("anthropic/executor"),
         display: false,
-        details: { mode: "in-place", model: "anthropic/executor" },
+        details: { model: "anthropic/executor" },
       },
       { deliverAs: "nextTurn" },
     );
@@ -114,17 +111,15 @@ describe("/fabric command", () => {
       sendUserMessage.mock.invocationCallOrder[0]!,
     );
 
-    state.config.prewalk.mode = "research";
-    sendMessage.mockClear();
+        sendMessage.mockClear();
     await handler!("prewalk Research the token guard", context);
     expect(arm).toHaveBeenLastCalledWith(expect.objectContaining({
-      mode: "research",
       task: "Research the token guard",
     }));
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        customType: PREWALK_PLAN_MESSAGE_TYPE,
-        content: prewalkArmedPrompt("research", "anthropic/executor"),
+        customType: PREWALK_ARMED_MESSAGE_TYPE,
+        content: prewalkArmedPrompt("anthropic/executor"),
         display: false,
       }),
       { deliverAs: "nextTurn" },
@@ -163,7 +158,7 @@ describe("/fabric command", () => {
       config: {
         fullCodeMode: true,
         schema: { mode: "off" },
-        prewalk: { mode: "in-place", model: "anthropic/executor" },
+        prewalk: { model: "anthropic/executor" },
         agents: { enabled: true },
       },
       prewalk,
@@ -183,7 +178,7 @@ describe("/fabric command", () => {
     await handler!("prewalk --status", context);
     expect(context.ui.notify).toHaveBeenCalledWith(
       [
-        "Fabric prewalk blocked (in-place) → anthropic/executor",
+        "Fabric prewalk blocked → anthropic/executor",
         "Task: Implement the token guard",
         "Error: temporary provider failure",
         "Run /fabric prewalk --retry to resume this task.",
@@ -224,7 +219,7 @@ describe("/fabric command", () => {
       config: {
         fullCodeMode: true,
         schema: { mode: "off" },
-        prewalk: { mode: "in-place" },
+        prewalk: {},
         agents: { enabled: true },
       },
       prewalk: { arm, status: vi.fn(), cancel: vi.fn() },
@@ -256,13 +251,12 @@ describe("/fabric command", () => {
     ]);
     expect(arm).toHaveBeenCalledWith({
       model: "openai/executor",
-      mode: "in-place",
       sessionId: "session-1",
     });
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         customType: PREWALK_ARMED_MESSAGE_TYPE,
-        content: prewalkArmedPrompt("in-place", "openai/executor"),
+        content: prewalkArmedPrompt("openai/executor"),
         display: false,
       }),
       { deliverAs: "nextTurn" },
@@ -285,7 +279,7 @@ describe("/fabric command", () => {
       config: {
         fullCodeMode: true,
         schema: { mode: "off" },
-        prewalk: { mode: "trajectory", model: "anthropic/executor" },
+        prewalk: { model: "anthropic/executor" },
         agents: { enabled: true },
       },
       prewalk: { arm, status: vi.fn(), cancel: vi.fn() },
@@ -297,7 +291,7 @@ describe("/fabric command", () => {
           {
             type: "custom_message",
             customType: PREWALK_ARMED_MESSAGE_TYPE,
-            content: prewalkArmedPrompt("trajectory", "anthropic/executor"),
+            content: prewalkArmedPrompt("anthropic/executor"),
           },
         ],
       },

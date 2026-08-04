@@ -72,7 +72,6 @@ const BUDGET_VALUES = [0, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10];
 const TOKEN_VALUES = [0, 50_000, 100_000, 250_000, 500_000, 1_000_000, 2_000_000];
 const PREWALK_MODEL_UNSET_LABEL = "Ask each time";
 const PREWALK_THINKING_INHERIT_LABEL = "Agents default";
-const PREWALK_MODES = ["research", "in-place", "trajectory"] as const;
 const PREWALK_VERIFICATION_MODES = ["legacy", "gated"] as const;
 const PREWALK_REVISION_LIMITS = Array.from({ length: 9 }, (_, index) => String(index));
 const ROOT_ITEM_IDS = [
@@ -273,7 +272,7 @@ const summaryFor = (id: string, config: FabricConfig): string => {
     case "mcp":
       return config.mcp.enabled ? "enabled" : "disabled";
     case "prewalk":
-      return `${config.prewalk.mode} · ${config.prewalk.model || PREWALK_MODEL_UNSET_LABEL}${config.prewalk.verificationMode === "gated" ? ` · gated/${config.prewalk.maxPhaseRevisions ?? 2}` : ""}${config.prewalk.thinking ? ` · ${thinkingLabel(config.prewalk.thinking)}` : ""}${config.prewalk.alwaysRearm ? " · repeat" : ""}`;
+      return `${config.prewalk.model || PREWALK_MODEL_UNSET_LABEL}${config.prewalk.verificationMode === "gated" ? ` · gated/${config.prewalk.maxPhaseRevisions ?? 2}` : ""}${config.prewalk.thinking ? ` · ${thinkingLabel(config.prewalk.thinking)}` : ""}${config.prewalk.alwaysRearm ? " · repeat" : ""}`;
     case "agents":
       return `${config.agents.runner}/${config.agents.transport}${config.agents.fallbackModels.length > 0 ? ` · ${config.agents.fallbackModels.length} routes` : ""}${config.agents.allowQualityDowngrade ? " · downgrade" : ""}`;
     case "consult":
@@ -809,17 +808,12 @@ export const buildFabricSettingsItems = (
       ),
     }),
     setting("prewalk", "Prewalk", summaryFor("prewalk", config), {
-      description: "Choose research-compatible first-mutation switching, legacy in-place continuation, or a child trajectory handoff.",
+      description: "Choose research-compatible first-mutation switching.",
       submenu: sectionSubmenu(
         theme,
         "Prewalk",
-        "Research mode stops at the first successful host-observed mutation; legacy modes continue at the completed outer fabric_exec boundary.",
+        "Prewalk stops at the first successful host-observed mutation and keeps the executor through verification.",
         [
-          setting("prewalk.mode", "Mode", config.prewalk.mode, {
-            description:
-              "Research requires a host-accepted 5-9 item checklist, stops after the first successful configured mutation, and keeps the executor selected through verification. In-place switches after the outer call completes. Trajectory moves a completed snapshot to a child executor.",
-            values: PREWALK_MODES,
-          }),
           setting(
             "prewalk.verificationMode",
             "Verification",

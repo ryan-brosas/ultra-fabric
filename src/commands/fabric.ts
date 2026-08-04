@@ -243,7 +243,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
             status.state === "idle"
               ? "Fabric prewalk is idle"
               : [
-                  `Fabric prewalk ${status.state} (${status.mode}) → ${status.model}`,
+                  `Fabric prewalk ${status.state} → ${status.model}`,
                   ...(status.task ? [`Task: ${status.task}`] : []),
                   ...(status.state === "blocked"
                     ? [
@@ -269,13 +269,6 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
             context.ui.notify("Fabric prewalk has no blocked task to retry", "warning");
             return;
           }
-          if (blocked.mode === "trajectory" && !state.config.agents.enabled) {
-            context.ui.notify(
-              "Trajectory prewalk requires enabled agents. Choose in-place mode or enable agents.",
-              "error",
-            );
-            return;
-          }
           const retried = state.prewalk.retry(context.sessionManager.getSessionId());
           if (retried.state !== "armed") {
             context.ui.notify("Blocked prewalk belongs to another session", "error");
@@ -286,13 +279,6 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           if (retried.task) pi.sendUserMessage(retried.task);
           return;
         }
-        if (state.config.prewalk.mode === "trajectory" && !state.config.agents.enabled) {
-          context.ui.notify(
-            "Trajectory prewalk requires enabled agents. Choose in-place mode or enable agents.",
-            "error",
-          );
-          return;
-        }
         const model = await resolvePrewalkModel(state, context);
         if (!model) return;
         const task = argumentsText.trim().slice(command.length).trim();
@@ -300,12 +286,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         // the task when one is submitted below). nextTurn never triggers a
         // turn; custom messages never fire `input`, so observeTask ignores it.
         armPrewalk(pi, state.prewalk, state.config.prewalk, context, model, task || undefined);
-        const modeLabel =
-          state.config.prewalk.mode === "trajectory"
-            ? "the trajectory will move to a visible child executor"
-            : state.config.prewalk.mode === "research"
-              ? "Main will switch in place at the first host-observed mutation"
-              : "Main will continue in place";
+        const modeLabel = "Main will switch in place at the first host-observed mutation";
         context.ui.notify(
           task
             ? `Fabric prewalk armed for the next matching Fabric boundary; ${modeLabel} with ${model}${state.config.prewalk.alwaysRearm ? "; always re-arm enabled" : ""}`
@@ -799,8 +780,8 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           (() => {
             const prewalk = state.prewalk.status();
             return prewalk.state === "idle"
-              ? `prewalk: idle · ${config.prewalk.mode} · model ${config.prewalk.model || "Ask each time"} · always re-arm ${config.prewalk.alwaysRearm ? "on" : "off"}`
-              : `prewalk: ${prewalk.state} · ${prewalk.mode} → ${prewalk.model}${prewalk.alwaysRearm ? " · always re-arm" : ""}${prewalk.state === "blocked" ? " · retry available" : ""}`;
+              ? `prewalk: idle · model ${config.prewalk.model || "Ask each time"} · always re-arm ${config.prewalk.alwaysRearm ? "on" : "off"}`
+              : `prewalk: ${prewalk.state}  ${prewalk.model}${prewalk.alwaysRearm ? " · always re-arm" : ""}${prewalk.state === "blocked" ? " · retry available" : ""}`;
           })(),
           config.fullCodeMode && config.capture.enabled
             ? `captured tools: ${capturedTools.size} · model visibility: ${config.capture.hideFromModel ? "hidden" : "visible"}`
