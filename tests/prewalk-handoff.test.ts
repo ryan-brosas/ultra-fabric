@@ -392,7 +392,6 @@ describe("outer-boundary Prewalk", () => {
     } as Parameters<PrewalkController["arm"]>[0] & { fallbackModels: string[] });
     const pending = claimFabricHandoff(controller, execution(), "session-1", "auto");
     expect(pending!.args.fallbackModels).toEqual(["openai/fallback"]);
-    expect(pending!.fallbackModels).toEqual(["openai/fallback"]);
     const ctx = context();
     const ext = extension();
     const runner = completedRunner();
@@ -972,6 +971,104 @@ describe("outer-boundary Prewalk", () => {
       "fabric-prewalk",
       "continuation pending → anthropic/executor",
     );
+  });
+});
+
+// One table for the whole mode contract. Adopted from aider's architect-mode
+// delegation tests and plandex's role/model-pack tables: assert the delegation
+// boundary per mode instead of scattering near-duplicate cases. The load-bearing
+// column is setModel — only research may ever change Main's model.
+describe("prewalk mode contract", () => {
+  const armFor = (mode: "research" | "in-place" | "trajectory") => {
+    const controller = new PrewalkController();
+    controller.arm({
+      mode,
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement the guard",
+      thinking: "high",
+      fallbackModels: ["openai/fallback"],
+    } as Parameters<PrewalkController["arm"]>[0] & {
+      thinking: string;
+      fallbackModels: string[];
+    });
+    const run = execution();
+    if (mode === "research") {
+      controller.executionBoundary("session-1")!.registerChecklist({
+        items: Array.from({ length: 5 }, (_, index) => ({
+          task: `Change target ${index + 1}`,
+          validation: `Run check ${index + 1}`,
+        })),
+      });
+      run.prewalkBoundary = { ref: "pi.edit", nestedToolCallId: "edit-one" };
+    }
+    return { controller, pending: claimFabricHandoff(controller, run, "session-1", "json")! };
+  };
+
+  const contract = [
+    {
+      mode: "research" as const,
+      kind: "prewalk-research",
+      auditRef: "fabric.prewalk",
+      switchesMain: true,
+      spawnsChild: false,
+      childArgs: false,
+    },
+    {
+      mode: "in-place" as const,
+      kind: "prewalk-in-place",
+      auditRef: "agents.handoff",
+      switchesMain: false,
+      spawnsChild: true,
+      childArgs: true,
+    },
+    {
+      mode: "trajectory" as const,
+      kind: "prewalk-trajectory",
+      auditRef: "agents.handoff",
+      switchesMain: false,
+      spawnsChild: true,
+      childArgs: true,
+    },
+  ];
+
+  for (const row of contract) {
+    it(`binds ${row.mode} to its delegation boundary`, async () => {
+      const { controller, pending } = armFor(row.mode);
+      expect(pending.kind).toBe(row.kind);
+      expect(pending.audit.ref).toBe(row.auditRef);
+
+      // Only a child executor carries its own reasoning effort and fallback chain;
+      // research reuses Main's session level.
+      if (row.childArgs) {
+        expect(pending.args).toMatchObject({ thinking: "high" });
+        expect(pending.args.fallbackModels).toEqual(["openai/fallback"]);
+      } else {
+        expect(pending.args).not.toHaveProperty("thinking");
+        expect(pending.args).not.toHaveProperty("fallbackModels");
+      }
+
+      const ctx = context();
+      const ext = extension();
+      const runner = completedRunner();
+      await runFabricHandoffAtBoundary(
+        controller,
+        runner,
+        ext.value,
+        pending,
+        outerResult(),
+        ctx.value,
+      );
+
+      expect(ext.setModel.mock.calls.length > 0).toBe(row.switchesMain);
+      expect(runner.executeHandoff.mock.calls.length > 0).toBe(row.spawnsChild);
+    });
+  }
+
+  it("lets exactly one mode change Main's model", () => {
+    expect(contract.filter((row) => row.switchesMain).map((row) => row.mode)).toEqual([
+      "research",
+    ]);
   });
 });
 

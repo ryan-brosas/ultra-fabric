@@ -158,8 +158,7 @@ const createPrewalkPending = (input: {
   revision?: { number: number; gate: string; feedback: string };
   returnModel?: string;
 }): PendingFabricHandoff => {
-  const research = input.arm.mode === "research";
-  const inPlace = input.arm.mode !== "trajectory";
+  const mode = input.arm.mode;
   const revisionTask = input.revision
     ? [
         input.arm.task ? `Continue the existing task: ${input.arm.task}` : "Continue the existing task.",
@@ -170,13 +169,13 @@ const createPrewalkPending = (input: {
     : input.arm.task;
   const args = {
     model: input.arm.model,
-    name: research
+    name: mode === "research"
       ? "Research Prewalk executor"
-      : inPlace
+      : mode === "in-place"
         ? "In-place Prewalk"
         : "Prewalk trajectory executor",
     ...(revisionTask ? { task: revisionTask } : {}),
-    ...(!research && !input.revision && input.arm.checklist
+    ...(mode !== "research" && !input.revision && input.arm.checklist
       ? {
           task: [
             input.arm.task ? `Continue the existing task: ${input.arm.task}` : "Continue the existing task in the forked session.",
@@ -188,23 +187,23 @@ const createPrewalkPending = (input: {
           ].join("\n").slice(0, 20_000),
         }
       : {}),
-    ...(!research && input.arm.thinking ? { thinking: input.arm.thinking } : {}),
-    ...(!research && input.arm.fallbackModels && input.arm.fallbackModels.length > 0
+    ...(mode !== "research" && input.arm.thinking ? { thinking: input.arm.thinking } : {}),
+    ...(mode !== "research" && input.arm.fallbackModels && input.arm.fallbackModels.length > 0
       ? { fallbackModels: [...input.arm.fallbackModels] }
       : {}),
   };
   const audit: FabricCallAudit = {
-    ref: research ? "fabric.prewalk" : "agents.handoff",
+    ref: mode === "research" ? "fabric.prewalk" : "agents.handoff",
     nestedToolCallId: input.nestedToolCallId,
     startedAt: Date.now(),
-    tool: research ? "prewalk" : "handoff",
-    provider: research ? "fabric" : "agents",
+    tool: mode === "research" ? "prewalk" : "handoff",
+    provider: mode === "research" ? "fabric" : "agents",
     args,
   };
   return {
-    kind: research
+    kind: mode === "research"
       ? "prewalk-research"
-      : inPlace
+      : mode === "in-place"
         ? "prewalk-in-place"
         : "prewalk-trajectory",
     args,
@@ -214,7 +213,7 @@ const createPrewalkPending = (input: {
     ...(input.arm.checklist
       ? { checklist: structuredClone(input.arm.checklist) }
       : {}),
-    ...(input.arm.fallbackModels
+    ...(mode === "research" && input.arm.fallbackModels
       ? { fallbackModels: [...input.arm.fallbackModels] }
       : {}),
     triggerRef: input.triggerRef,
@@ -353,7 +352,7 @@ const queuePrewalkContinuation = (
   );
 };
 
-const runInPlacePrewalk = async (
+const runResearchPrewalk = async (
   extension: ExtensionAPI,
   pending: PendingFabricHandoff,
   context: ExtensionContext,
@@ -387,7 +386,7 @@ const runInPlacePrewalk = async (
       : `Prewalk continuing Main in place with ${modelKey}${fallback ? " (fallback)" : ""}. Pi will retain this model after the task.`,
     "info",
   );
-  const mode = pending.kind === "prewalk-research" ? "research" : "in-place";
+  const mode = "research";
   const basePrompt = pending.checklist
     ? checklistContinuationPrompt(pending.checklist)
     : PREWALK_CONTINUE_PROMPT;
@@ -443,7 +442,7 @@ export const runFabricHandoffAtBoundary = async (
   let continuationError: string | undefined;
   try {
     if (research) {
-      const result = await runInPlacePrewalk(extension, pending, context);
+      const result = await runResearchPrewalk(extension, pending, context);
       if (typeof result.model === "string") {
         controller.selectHandoffModel(result.model);
       }
