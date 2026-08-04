@@ -321,8 +321,8 @@ export class FabricDashboard implements Component, Focusable {
     this.onRemoveAgentTemplate = options.onRemoveAgentTemplate;
   }
 
-  handleInput(data: string): void {
-    if (this.mode === "help") {
+  readonly #modeInputHandlers: Partial<Record<string, (data: string) => boolean>> = {
+    help: (data) => {
       if (
         data === "?" ||
         matchesKey(data, Key.escape) ||
@@ -331,38 +331,31 @@ export class FabricDashboard implements Component, Focusable {
         this.mode = this.detailId ? "detail" : "overview";
       }
       this.tui.requestRender();
-      return;
-    }
-    if (this.mode === "agentMessageEditor" && this.editor) {
-      if (getKeybindings().matches(data, "tui.select.cancel")) {
-        this.closeAgentMessageEditor();
-      } else {
-        this.editor.handleInput(data);
-      }
+      return true;
+    },
+    agentMessageEditor: (data) => {
+      if (!this.editor) return false;
+      if (getKeybindings().matches(data, "tui.select.cancel")) this.closeAgentMessageEditor();
+      else this.editor.handleInput(data);
       this.tui.requestRender();
-      return;
-    }
-    if (this.mode === "instructionsEditor" && this.editor) {
-      if (getKeybindings().matches(data, "tui.select.cancel")) {
-        this.closeInstructionsEditor();
-      } else {
-        this.editor.handleInput(data);
-      }
+      return true;
+    },
+    instructionsEditor: (data) => {
+      if (!this.editor) return false;
+      if (getKeybindings().matches(data, "tui.select.cancel")) this.closeInstructionsEditor();
+      else this.editor.handleInput(data);
       this.tui.requestRender();
-      return;
-    }
-    if (
-      (this.mode === "modelPicker" ||
-        this.mode === "thinkingPicker" ||
-        this.mode === "deliveryPicker" ||
-        this.mode === "eventsPicker" ||
-        this.mode === "toolsPicker") &&
-      this.picker
-    ) {
-      this.picker.handleInput(data);
-      this.tui.requestRender();
-      return;
-    }
+      return true;
+    },
+    modelPicker: (data) => this.#handlePickerModeInput(data),
+    thinkingPicker: (data) => this.#handlePickerModeInput(data),
+    deliveryPicker: (data) => this.#handlePickerModeInput(data),
+    eventsPicker: (data) => this.#handlePickerModeInput(data),
+    toolsPicker: (data) => this.#handlePickerModeInput(data),
+  };
+
+  handleInput(data: string): void {
+    if (this.#handleModeInput(data)) return;
 
     const snapshot = this.snapshot();
     const run = this.selectRun(snapshot);
@@ -389,136 +382,167 @@ export class FabricDashboard implements Component, Focusable {
     }
 
     if (this.detailId) {
-      if (
-        matchesKey(data, Key.escape) ||
-        matchesKey(data, Key.ctrl("c")) ||
-        matchesKey(data, Key.left) ||
-        data === "h"
-      ) {
-        this.closeDetail();
-      } else if (data === "t") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && this.hasTranscript(detail)) {
-          this.detailView = this.detailView === "summary" ? "transcript" : "summary";
-          this.detailScroll = 0;
-          this.transcriptPageAnchor = undefined;
-          this.transcriptFollowing = true;
-        }
-      } else if (
-        this.detailView === "transcript" &&
-        this.matchesTranscriptToolToggle(data)
-      ) {
-        this.transcriptToolsExpanded = !this.transcriptToolsExpanded;
-      } else if (matchesKey(data, Key.up) || data === "k") {
-        if (this.detailScroll > 0) {
-          if (this.detailView === "transcript") this.transcriptFollowing = false;
-          this.detailScroll--;
-        } else if (this.detailView === "transcript") {
-          const detail = allEntities.find((entity) => entity.id === this.detailId);
-          const target = detail ? this.transcriptTarget(detail) : undefined;
-          if (target && this.loadOlderTranscript?.(target)) {
-            this.transcriptPageAnchor = "end";
-            this.transcriptFollowing = false;
-          }
-        }
-      } else if (matchesKey(data, Key.down) || data === "j") {
-        if (this.detailScroll < this.detailMaxScroll) {
-          if (this.detailView === "transcript") this.transcriptFollowing = false;
-          this.detailScroll++;
-        } else if (this.detailView === "transcript") {
-          const detail = allEntities.find((entity) => entity.id === this.detailId);
-          const target = detail ? this.transcriptTarget(detail) : undefined;
-          if (target && this.loadNewerTranscript?.(target)) {
-            this.transcriptPageAnchor = "start";
-            this.transcriptFollowing = false;
-          }
-        }
-      } else if (data === "G" && this.detailView === "transcript") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        const target = detail ? this.transcriptTarget(detail) : undefined;
-        if (target) this.loadLatestTranscript?.(target);
-        this.transcriptPageAnchor = undefined;
-        this.transcriptFollowing = true;
-        this.detailScroll = this.detailMaxScroll;
-      } else if (matchesKey(data, Key.home) || data === "g") {
-        if (this.detailView === "transcript") {
-          this.transcriptPageAnchor = undefined;
-          this.transcriptFollowing = false;
-        }
-        this.detailScroll = 0;
-      } else if (data === "s" || data === "u") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        const delivery = data === "s" ? "steer" : "followUp";
-        if (detail && this.canMessage(detail, delivery)) {
-          this.openAgentMessageEditor(detail, delivery);
-        }
-      } else if (data === "m") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
-          this.openModelPicker(detail);
-        }
-      } else if (data === "e") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
-          this.openThinkingPicker(detail);
-        }
-      } else if (data === "y") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && (detail.kind === "persistentAgent" || detail.kind === "agentTemplate")) {
-          this.openDeliveryPicker(detail);
-        }
-      } else if (data === "v") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
-          this.openEventsPicker(detail);
-        }
-      } else if (data === "o") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
-          this.openToolsPicker(detail);
-        }
-      } else if (data === "c") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (
-          detail &&
-          detail.kind === "persistentAgent" &&
-          detail.status !== "stopped" &&
-          this.onClearMessages
-        ) {
-          this.onClearMessages(detail.value.id);
-        }
-      } else if (data === "i") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && (detail.kind === "persistentAgent" || detail.kind === "agentTemplate")) {
-          this.openInstructionsEditor(detail);
-        }
-      } else if (data === "x") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && this.canStop(detail)) {
-          this.requestParticipantStop(detail);
-        } else if (
-          detail &&
-          detail.kind === "persistentAgent" &&
-          detail.status !== "stopped" &&
-          this.onExportPersistentAgent
-        ) {
-          this.onExportPersistentAgent(detail.value.id);
-        }
-      } else if (data === "p") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "agentTemplate" && this.onImportPersistentAgent) {
-          this.onImportPersistentAgent(detail.value.id);
-        }
-      } else if (data === "d") {
-        const detail = allEntities.find((entity) => entity.id === this.detailId);
-        if (detail && detail.kind === "agentTemplate" && this.onRemoveAgentTemplate) {
-          this.onRemoveAgentTemplate(detail.value.id);
-        }
-      }
-      this.tui.requestRender();
+      this.#handleDetailInput(data, allEntities);
       return;
     }
 
+    this.#handleOverviewInput(data, { snapshot, run, panels, panel, projectMesh, entities });
+  }
+
+  #handlePickerModeInput(data: string): boolean {
+    if (!this.picker) return false;
+    this.picker.handleInput(data);
+    this.tui.requestRender();
+    return true;
+  }
+
+  #handleModeInput(data: string): boolean {
+    return this.#modeInputHandlers[this.mode]?.(data) ?? false;
+  }
+
+  #handleDetailInput(data: string, allEntities: Entity[]): void {
+    if (
+      matchesKey(data, Key.escape) ||
+      matchesKey(data, Key.ctrl("c")) ||
+      matchesKey(data, Key.left) ||
+      data === "h"
+    ) {
+      this.closeDetail();
+    } else if (data === "t") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (detail && this.hasTranscript(detail)) {
+        this.detailView = this.detailView === "summary" ? "transcript" : "summary";
+        this.detailScroll = 0;
+        this.transcriptPageAnchor = undefined;
+        this.transcriptFollowing = true;
+      }
+    } else if (
+      this.detailView === "transcript" &&
+      this.matchesTranscriptToolToggle(data)
+    ) {
+      this.transcriptToolsExpanded = !this.transcriptToolsExpanded;
+    } else if (matchesKey(data, Key.up) || data === "k") {
+      if (this.detailScroll > 0) {
+        if (this.detailView === "transcript") this.transcriptFollowing = false;
+        this.detailScroll--;
+      } else if (this.detailView === "transcript") {
+        const detail = allEntities.find((entity) => entity.id === this.detailId);
+        const target = detail ? this.transcriptTarget(detail) : undefined;
+        if (target && this.loadOlderTranscript?.(target)) {
+          this.transcriptPageAnchor = "end";
+          this.transcriptFollowing = false;
+        }
+      }
+    } else if (matchesKey(data, Key.down) || data === "j") {
+      if (this.detailScroll < this.detailMaxScroll) {
+        if (this.detailView === "transcript") this.transcriptFollowing = false;
+        this.detailScroll++;
+      } else if (this.detailView === "transcript") {
+        const detail = allEntities.find((entity) => entity.id === this.detailId);
+        const target = detail ? this.transcriptTarget(detail) : undefined;
+        if (target && this.loadNewerTranscript?.(target)) {
+          this.transcriptPageAnchor = "start";
+          this.transcriptFollowing = false;
+        }
+      }
+    } else if (data === "G" && this.detailView === "transcript") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      const target = detail ? this.transcriptTarget(detail) : undefined;
+      if (target) this.loadLatestTranscript?.(target);
+      this.transcriptPageAnchor = undefined;
+      this.transcriptFollowing = true;
+      this.detailScroll = this.detailMaxScroll;
+    } else if (matchesKey(data, Key.home) || data === "g") {
+      if (this.detailView === "transcript") {
+        this.transcriptPageAnchor = undefined;
+        this.transcriptFollowing = false;
+      }
+      this.detailScroll = 0;
+    } else if (data === "s" || data === "u") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      const delivery = data === "s" ? "steer" : "followUp";
+      if (detail && this.canMessage(detail, delivery)) {
+        this.openAgentMessageEditor(detail, delivery);
+      }
+    } else if (data === "m") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
+        this.openModelPicker(detail);
+      }
+    } else if (data === "e") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
+        this.openThinkingPicker(detail);
+      }
+    } else if (data === "y") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (detail && (detail.kind === "persistentAgent" || detail.kind === "agentTemplate")) {
+        this.openDeliveryPicker(detail);
+      }
+    } else if (data === "v") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
+        this.openEventsPicker(detail);
+      }
+    } else if (data === "o") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (detail && detail.kind === "persistentAgent" && detail.status !== "stopped") {
+        this.openToolsPicker(detail);
+      }
+    } else if (data === "c") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (
+        detail &&
+        detail.kind === "persistentAgent" &&
+        detail.status !== "stopped" &&
+        this.onClearMessages
+      ) {
+        this.onClearMessages(detail.value.id);
+      }
+    } else if (data === "i") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (detail && (detail.kind === "persistentAgent" || detail.kind === "agentTemplate")) {
+        this.openInstructionsEditor(detail);
+      }
+    } else if (data === "x") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (detail && this.canStop(detail)) {
+        this.requestParticipantStop(detail);
+      } else if (
+        detail &&
+        detail.kind === "persistentAgent" &&
+        detail.status !== "stopped" &&
+        this.onExportPersistentAgent
+      ) {
+        this.onExportPersistentAgent(detail.value.id);
+      }
+    } else if (data === "p") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (detail && detail.kind === "agentTemplate" && this.onImportPersistentAgent) {
+        this.onImportPersistentAgent(detail.value.id);
+      }
+    } else if (data === "d") {
+      const detail = allEntities.find((entity) => entity.id === this.detailId);
+      if (detail && detail.kind === "agentTemplate" && this.onRemoveAgentTemplate) {
+        this.onRemoveAgentTemplate(detail.value.id);
+      }
+    }
+    this.tui.requestRender();
+    return;
+  }
+
+  #handleOverviewInput(
+    data: string,
+    ctx: {
+      snapshot: FabricDashboardSnapshot;
+      run: FabricActivityRun | undefined;
+      panels: PhasePanel[];
+      panel: PhasePanel | undefined;
+      projectMesh: FabricProjectMeshModel | undefined;
+      entities: Entity[];
+    },
+  ): void {
+    const { snapshot, run, panels, panel, projectMesh, entities } = ctx;
     if (data === "1" || data === "2") {
       const nextOverview: OverviewView = data === "1" ? "activity" : "topology";
       if (nextOverview !== this.overviewView) {
