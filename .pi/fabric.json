@@ -1,0 +1,16 @@
+{
+  "configVersion": 1,
+  "prewalk": {
+    "thinking": "max",
+    "verificationMode": "gated",
+    "maxPhaseRevisions": 5,
+    "model": "makora/zai-org/GLM-5.2-NVFP4",
+    "alwaysRearm": true,
+    "mode": "in-place"
+  },
+  "compaction": {
+    "thresholds": {
+      "openai-codex/gpt-5.6-sol": 0.5
+    }
+  }
+}
