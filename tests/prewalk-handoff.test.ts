@@ -816,3 +816,19 @@ describe("research return policy", () => {
     });
   });
 });
+
+describe("prewalk executor args", () => {
+  it("forwards the armed thinking level to the executor", () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement the guard",
+      thinking: "max",
+    });
+
+    const pending = claimFabricHandoff(controller, execution(), "session-1", "json")!;
+
+    expect(pending.args).toMatchObject({ thinking: "max" });
+  });
+});

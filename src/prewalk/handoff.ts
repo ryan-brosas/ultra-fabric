@@ -126,7 +126,6 @@ const createPrewalkPending = (input: {
   revision?: { number: number; gate: string; feedback: string };
   returnModel?: string;
 }): PendingFabricHandoff => {
-  const mode = "research" as const;
   const revisionTask = input.revision
     ? [
         input.arm.task ? `Continue the existing task: ${input.arm.task}` : "Continue the existing task.",
@@ -137,13 +136,9 @@ const createPrewalkPending = (input: {
     : input.arm.task;
   const args = {
     model: input.arm.model,
-    name: mode === "research"
-      ? "Research Prewalk executor"
-      : mode === "in-place"
-        ? "In-place Prewalk"
-        : "Prewalk trajectory executor",
+    name: "Research Prewalk executor",
     ...(revisionTask ? { task: revisionTask } : {}),
-    ...(mode !== "research" && !input.revision && input.arm.checklist
+    ...(!input.revision && input.arm.checklist
       ? {
           task: [
             input.arm.task ? `Continue the existing task: ${input.arm.task}` : "Continue the existing task in the forked session.",
@@ -155,10 +150,7 @@ const createPrewalkPending = (input: {
           ].join("\n").slice(0, 20_000),
         }
       : {}),
-    ...(mode !== "research" && input.arm.thinking ? { thinking: input.arm.thinking } : {}),
-    ...(mode !== "research" && input.arm.fallbackModels && input.arm.fallbackModels.length > 0
-      ? { fallbackModels: [...input.arm.fallbackModels] }
-      : {}),
+    ...(input.arm.thinking ? { thinking: input.arm.thinking } : {}),
   };
   const audit: FabricCallAudit = {
     ref: "fabric.prewalk",
@@ -177,7 +169,7 @@ const createPrewalkPending = (input: {
     ...(input.arm.checklist
       ? { checklist: structuredClone(input.arm.checklist) }
       : {}),
-    ...(mode === "research" && input.arm.fallbackModels
+    ...(input.arm.fallbackModels
       ? { fallbackModels: [...input.arm.fallbackModels] }
       : {}),
     triggerRef: input.triggerRef,
@@ -349,7 +341,6 @@ const runResearchPrewalk = async (
       : `Prewalk continuing Main in place with ${modelKey}${fallback ? " (fallback)" : ""}. Pi will retain this model after the task.`,
     "info",
   );
-  const mode = "research";
   const basePrompt = pending.checklist
     ? checklistContinuationPrompt(pending.checklist)
     : PREWALK_CONTINUE_PROMPT;
@@ -359,12 +350,12 @@ const runResearchPrewalk = async (
     pending.verificationMode === "gated"
       ? `${basePrompt}\n\n${PREWALK_GATED_VERIFY_PROMPT}`
       : basePrompt,
-    { mode, model: modelKey, fallback },
+    { mode: "research", model: modelKey, fallback },
   );
   context.ui.setStatus("fabric-prewalk", `continuing Main → ${modelKey}`);
   return {
     prewalk: true,
-    mode,
+    mode: "research",
     continued: true,
     status: "continued",
     model: modelKey,
