@@ -153,7 +153,7 @@ describe("outer-boundary Prewalk", () => {
       "pi.read",
       "pi.edit",
       "pi.write",
-      "fabric.prewalk",
+      "agents.handoff",
     ]);
     expect(pending).toMatchObject({
       kind: "prewalk-in-place",
@@ -391,6 +391,7 @@ describe("outer-boundary Prewalk", () => {
       task: "Implement the guard",
     } as Parameters<PrewalkController["arm"]>[0] & { fallbackModels: string[] });
     const pending = claimFabricHandoff(controller, execution(), "session-1", "auto");
+    expect(pending!.args.fallbackModels).toEqual(["openai/fallback"]);
     expect(pending!.fallbackModels).toEqual(["openai/fallback"]);
     const ctx = context();
     const ext = extension();
@@ -760,7 +761,7 @@ describe("outer-boundary Prewalk", () => {
     expect(receivedArgs).toMatchObject({ thinking: "high" });
   });
 
-  it("keeps thinking out of in-place continuation args", () => {
+  it("threads the configured thinking level into the in-place executor args", () => {
     const controller = new PrewalkController();
     controller.arm({
       model: "anthropic/executor",
@@ -769,7 +770,7 @@ describe("outer-boundary Prewalk", () => {
     });
     const pending = claimFabricHandoff(controller, execution(), "session-1", "auto");
     expect(pending!.kind).toBe("prewalk-in-place");
-    expect(pending!.args).not.toHaveProperty("thinking");
+    expect(pending!.args).toMatchObject({ thinking: "high" });
   });
 
   it("preserves the thinking level across a re-armed trajectory handoff", async () => {

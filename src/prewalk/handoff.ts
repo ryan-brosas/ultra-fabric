@@ -188,14 +188,17 @@ const createPrewalkPending = (input: {
           ].join("\n").slice(0, 20_000),
         }
       : {}),
-    ...(!inPlace && input.arm.thinking ? { thinking: input.arm.thinking } : {}),
+    ...(!research && input.arm.thinking ? { thinking: input.arm.thinking } : {}),
+    ...(!research && input.arm.fallbackModels && input.arm.fallbackModels.length > 0
+      ? { fallbackModels: [...input.arm.fallbackModels] }
+      : {}),
   };
   const audit: FabricCallAudit = {
-    ref: inPlace ? "fabric.prewalk" : "agents.handoff",
+    ref: research ? "fabric.prewalk" : "agents.handoff",
     nestedToolCallId: input.nestedToolCallId,
     startedAt: Date.now(),
-    tool: inPlace ? "prewalk" : "handoff",
-    provider: inPlace ? "fabric" : "agents",
+    tool: research ? "prewalk" : "handoff",
+    provider: research ? "fabric" : "agents",
     args,
   };
   return {
@@ -324,6 +327,32 @@ export const claimFabricHandoff = (
   return pending;
 };
 
+// Every mode queues its hidden continuation the same way; only the prompt text
+// and the mode label differ.
+const queuePrewalkContinuation = (
+  extension: ExtensionAPI,
+  pending: PendingFabricHandoff,
+  content: string,
+  details: Record<string, unknown>,
+): void => {
+  extension.sendMessage(
+    {
+      customType: PREWALK_CONTINUE_MESSAGE_TYPE,
+      content,
+      display: false,
+      details: {
+        ...details,
+        trigger: pending.triggerRef,
+        continuationId: pending.audit.nestedToolCallId,
+        ...(pending.verificationMode === "gated"
+          ? { phase: "verify", revision: pending.revision ?? 0 }
+          : {}),
+      },
+    },
+    { deliverAs: "followUp", triggerTurn: true },
+  );
+};
+
 const runInPlacePrewalk = async (
   extension: ExtensionAPI,
   pending: PendingFabricHandoff,
@@ -362,25 +391,13 @@ const runInPlacePrewalk = async (
   const basePrompt = pending.checklist
     ? checklistContinuationPrompt(pending.checklist)
     : PREWALK_CONTINUE_PROMPT;
-  extension.sendMessage(
-    {
-      customType: PREWALK_CONTINUE_MESSAGE_TYPE,
-      content: pending.verificationMode === "gated"
-        ? basePrompt + "\n\n" + PREWALK_GATED_VERIFY_PROMPT
-        : basePrompt,
-      display: false,
-      details: {
-        mode,
-        model: modelKey,
-        fallback,
-        trigger: pending.triggerRef,
-        continuationId: pending.audit.nestedToolCallId,
-        ...(pending.verificationMode === "gated"
-          ? { phase: "verify", revision: pending.revision ?? 0 }
-          : {}),
-      },
-    },
-    { deliverAs: "followUp", triggerTurn: true },
+  queuePrewalkContinuation(
+    extension,
+    pending,
+    pending.verificationMode === "gated"
+      ? `${basePrompt}\n\n${PREWALK_GATED_VERIFY_PROMPT}`
+      : basePrompt,
+    { mode, model: modelKey, fallback },
   );
   context.ui.setStatus("fabric-prewalk", `continuing Main → ${modelKey}`);
   return {
@@ -470,61 +487,19 @@ export const runFabricHandoffAtBoundary = async (
     if (handoffError) pending.audit.error = handoffError;
     pending.audit.result = result;
     pending.audit.endedAt = Date.now();
-    if (completed && inPlaceImpl) {
-      // In-place implementation runs off-session now, so Main keeps its model.
-      // Queue the same hidden verify-and-summarize continuation in-place used to
-      // get, so Main verifies the executor's work without a model switch.
+    if (completed && (inPlaceImpl || pending.kind === "prewalk-trajectory")) {
+      // Main is never left idle after a delegated implementation: queue a hidden
+      // verify-and-summarize continuation. In-place replays its checklist/continue
+      // prompt; trajectory uses its own verify prompt. Best-effort — the
+      // executor's completed result stays authoritative.
       try {
-        const basePrompt = pending.checklist
-          ? checklistContinuationPrompt(pending.checklist)
-          : PREWALK_CONTINUE_PROMPT;
-        extension.sendMessage(
-          {
-            customType: PREWALK_CONTINUE_MESSAGE_TYPE,
-            content: pending.verificationMode === "gated"
-              ? `${basePrompt}\n\n${PREWALK_GATED_VERIFY_PROMPT}`
-              : basePrompt,
-            display: false,
-            details: {
-              mode: "in-place",
-              model,
-              trigger: pending.triggerRef,
-              continuationId: pending.audit.nestedToolCallId,
-              ...(pending.verificationMode === "gated"
-                ? { phase: "verify", revision: pending.revision ?? 0 }
-                : {}),
-            },
-          },
-          { deliverAs: "followUp", triggerTurn: true },
-        );
-      } catch (error) {
-        continuationError = error instanceof Error ? error.message : String(error);
-        handoffError = `Prewalk continuation delivery failed: ${continuationError}`;
-      }
-    } else if (pending.kind === "prewalk-trajectory" && completed) {
-      // Main is never left idle after a delegated implementation: queue a
-      // hidden verify-and-summarize continuation the same way in-place does.
-      // Best-effort — the executor's completed result stays authoritative.
-      try {
-        extension.sendMessage(
-          {
-            customType: PREWALK_CONTINUE_MESSAGE_TYPE,
-            content: pending.verificationMode === "gated"
-              ? PREWALK_GATED_VERIFY_PROMPT
-              : PREWALK_TRAJECTORY_VERIFY_PROMPT,
-            display: false,
-            details: {
-              mode: "trajectory",
-              model,
-              trigger: pending.triggerRef,
-              continuationId: pending.audit.nestedToolCallId,
-              ...(pending.verificationMode === "gated"
-                ? { phase: "verify", revision: pending.revision ?? 0 }
-                : {}),
-            },
-          },
-          { deliverAs: "followUp", triggerTurn: true },
-        );
+        const basePrompt = inPlaceImpl
+          ? (pending.checklist ? checklistContinuationPrompt(pending.checklist) : PREWALK_CONTINUE_PROMPT)
+          : PREWALK_TRAJECTORY_VERIFY_PROMPT;
+        const content = pending.verificationMode === "gated"
+          ? (inPlaceImpl ? `${basePrompt}\n\n${PREWALK_GATED_VERIFY_PROMPT}` : PREWALK_GATED_VERIFY_PROMPT)
+          : basePrompt;
+        queuePrewalkContinuation(extension, pending, content, { mode: prewalkMode, model });
       } catch (error) {
         continuationError = error instanceof Error ? error.message : String(error);
         handoffError = `Prewalk continuation delivery failed: ${continuationError}`;
