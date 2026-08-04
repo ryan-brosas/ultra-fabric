@@ -852,11 +852,11 @@ export const buildFabricSettingsItems = (
               : PREWALK_THINKING_INHERIT_LABEL,
             {
               description:
-                "Reasoning effort for the trajectory child executor. Agents default inherits Agents › Default thinking; research and in-place keep Main's session level. The level is clamped to each model's supported levels.",
+                "Reasoning effort for the in-session executor. Agents default inherits Agents › Default thinking. The level is clamped to each model's supported levels.",
               submenu: thinkingSubmenu(theme, {
                 title: "Prewalk thinking",
                 description:
-                  "Reasoning effort for the trajectory child executor. Agents default uses the Agents section's Default thinking; research and in-place keep Main's session level. Clamped to each model's supported levels (next highest if unsupported).",
+                  "Reasoning effort for the in-session executor. Agents default uses the Agents section's Default thinking. Clamped to each model's supported levels (next highest if unsupported).",
                 inheritLabel: PREWALK_THINKING_INHERIT_LABEL,
               }),
             },
@@ -867,7 +867,7 @@ export const buildFabricSettingsItems = (
             config.prewalk.model || PREWALK_MODEL_UNSET_LABEL,
             {
               description:
-                "Pi provider/model used by /fabric prewalk. Research and in-place select it for Main; trajectory uses it for the child executor. Ask each time is interactive only.",
+                "Pi provider/model used by /fabric prewalk for the in-session executor. Ask each time is interactive only.",
               submenu: modelPickerSubmenu(
                 theme,
                 options.modelSource,

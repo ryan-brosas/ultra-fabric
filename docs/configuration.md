@@ -17,7 +17,7 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
 
 ```json
 {
-  "configVersion": 1,
+  "configVersion": 3,
   "fullCodeMode": true,
   "executor": {
     "runtime": "quickjs",
@@ -59,7 +59,6 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
     "callTimeoutMs": 120000
   },
   "prewalk": {
-    "mode": "in-place",
     "alwaysRearm": true,
     "triggerRisks": [],
     "triggerEffects": ["workspace"],
@@ -157,18 +156,13 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
 
 Prewalk trigger matching is host-owned. `prewalk.triggerEffects` defaults to `["workspace"]`; `prewalk.triggerRefs` preserves `pi.edit`, `pi.write`, and `schema.commit`. Optional `prewalk.triggerRisks` is broad and defaults empty because write-risk state bookkeeping is not necessarily a workspace mutation. A successful audit triggers when any configured set matches. Captured/external mutations participate when they declare `effect: "workspace"` or are named explicitly. Bash stays opaque unless explicitly named.
 
-`prewalk.model` is the optional Pi `provider/model` selected by `/fabric prewalk`. `prewalk.mode` chooses how execution continues:
+`prewalk.model` is the optional Pi `provider/model` selected by `/fabric prewalk`. Prewalk runs one in-session path: the frontier model plans and submits a checklist, then the host hands the same Main session to the executor for implementation and verification, then restores the frontier model on settle.
 
-- `"research"` requires a host-accepted 5–9 item checklist, rejects matching mutations until it is ready, stops the current Fabric runtime after the first successful configured mutation, removes the planning instruction, and switches the same Main session permanently to the executor through implementation and verification.
-- `"in-place"` (default compatibility mode) switches Main to the executor only after the complete outer Fabric call settles and queues a hidden follow-up in the same session.
-- `"trajectory"` forks the finalized outer Fabric call/result to a visible Pi child and waits; when the child finishes, a hidden continuation turn has Main verify the work and summarize instead of going idle.
-
-Every armed mode can record a checklist with `prewalk.checklist({ items })` inside `fabric_exec`, and the arming instruction asks for 5–9 ordered items each carrying a concrete task and a specific validation. Only `"research"` rejects mutations until that checklist is accepted; the other modes treat it as advisory at the boundary but still carry it into the continuation, so the plan and its validations survive the model switch. In-place replays the checklist in its hidden follow-up, and trajectory embeds it in the child executor's task. A gated verification revision keeps its scoped feedback instead, because that revision must stay narrow.
+The arming instruction asks Main to call `prewalk.checklist({ items })` inside `fabric_exec` with 5-9 ordered items. Every item needs a concrete task and a specific validation. The host rejects matching mutations until the checklist is accepted, so the executor inherits a validated plan. A gated verification revision keeps its scoped feedback instead, because that revision must stay narrow.
 
 ```json
 {
   "prewalk": {
-    "mode": "research",
     "model": "anthropic/claude-haiku-4-5",
     "fallbackModels": ["openai/gpt-5-mini", "google/gemini-2.5-flash"],
     "thinking": "high",
@@ -177,15 +171,15 @@ Every armed mode can record a checklist with `prewalk.checklist({ items })` insi
 }
 ```
 
-`prewalk.fallbackModels` is an optional ordered list of at most eight unique Pi `provider/model` keys. In-place and trajectory modes thread the chain to the off-session child executor, which tries each model in order before the child starts. The selected fallback is visible in the result and lifecycle. Research mode tries the chain in-session before switching Main. No mode retries a child automatically once it has started, because a failed child may already have changed the workspace.
+`prewalk.fallbackModels` is an optional ordered list of at most eight unique Pi `provider/model` keys. The host tries each model in order before switching Main, so a configured fallback covers model outages without losing the session. The selected fallback is visible in the result and lifecycle. A failed switch does not retry automatically, because the executor may already have changed the workspace.
 
-`prewalk.thinking` is the optional reasoning effort (`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`) for the off-session child executor used by in-place and trajectory modes, clamped to each model's supported levels. When unset, the executor inherits `agents.thinking`; research mode keeps Main's session level.
+`prewalk.thinking` is the optional reasoning effort (`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`) for the in-session executor, clamped to each model's supported levels. When unset, the executor inherits `agents.thinking`.
 
-`prewalk.alwaysRearm` defaults to `true`. Each re-arm reads the configuration in force at that moment, so changing `prewalk.mode` or `prewalk.model` between tasks takes effect on the next arm rather than repeating the arm that just finished. When enabled (the default), prewalk returns to an armed, taskless state after the matching hidden continuation reaches `agent_settled` or after a triggerless task settles; it does not re-arm inside the continuation's own work. Set it to `false` for one-shot arming: the single arm stays armed across turns until it claims its first mutation, is superseded by an explicit handoff, or is cancelled, so a later write in the same session can still hand off. A failed same-session switch or trajectory handoff enters a blocked state that preserves its task and attempt; it never retries automatically. Use `/fabric prewalk --status` to inspect the failure and `/fabric prewalk --retry` after correcting it. The settings UI labels an unset model **Ask each time**; non-interactive sessions must configure a model. Research mode does not require a child agent. In-place and trajectory modes require `agents.enabled` and expose child spawn, progress, nested tools, metrics, and completion in Main's Fabric activity UI.
+`prewalk.alwaysRearm` defaults to `true`. Each re-arm reads the configuration in force at that moment, so changing `prewalk.model` between tasks takes effect on the next arm rather than repeating the arm that just finished. When enabled (the default), prewalk returns to an armed, taskless state after the matching hidden continuation reaches `agent_settled` or after a triggerless task settles. It does not re-arm inside the continuation's own work. Set it to `false` for one-shot arming: the single arm stays armed across turns until it claims its first mutation, is superseded by an explicit handoff, or is cancelled, so a later write in the same session can still hand off. A failed handoff enters a blocked state that preserves its task and attempt. It never retries automatically. Use `/fabric prewalk --status` to inspect the failure and `/fabric prewalk --retry` after correcting it. The settings UI labels an unset model **Ask each time**. Non-interactive sessions must configure a model. Prewalk does not spawn a child agent and does not require `agents.enabled`.
 
 Set `prewalk.verificationMode` to `"gated"` to require an identity-owned verification continuation to finish through `workflow.gate()`. A passing evidence gate settles the task; `revise` returns only scoped failure evidence to the executor; abort, crash, missing evidence, or exceeding `prewalk.maxPhaseRevisions` blocks without losing task intent. The compatibility default remains prompt-only verification when the field is omitted. `maxPhaseRevisions` defaults to 2 and is bounded to 0–8.
 
-Prewalk never leaves Main on the executor. In-place restores Main's provider/model once the identity-owned continuation settles, and trajectory never changes it, so both modes end on the model you started with. Research is the one deliberate exception: it is a permanent same-conversation switch. An unavailable or unauthenticated return model is reported visibly and the completed task is not rerun.
+Prewalk always restores Main to its original model once the identity-owned continuation settles, so the frontier and executor alternate per task. An unavailable or unauthenticated return model is reported visibly and the completed task is not rerun.
 
 ## Run context and gates
 
