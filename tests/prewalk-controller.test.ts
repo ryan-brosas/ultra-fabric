@@ -301,6 +301,37 @@ describe("PrewalkController", () => {
     expect(controller.claimChecklistReminder("session-1")).toBeUndefined();
   });
 
+  it("can hand off on checklist acceptance before the first write", () => {
+    // The default trigger is the first successful write, so Main has already
+    // designed the change and made an edit before the executor is involved.
+    // Triggering on the accepted checklist hands the whole implementation over
+    // while Main has only planned.
+    const controller = new PrewalkController();
+    controller.configureTriggers([], ["fabric.prewalk.checklist", "pi.edit", "pi.write"], []);
+    controller.arm({ mode: "in-place", model: "anthropic/executor", sessionId: "session-1" });
+
+    const claim = controller.claim(
+      [audit("fabric.prewalk.checklist", true)],
+      "session-1",
+      "handoff-1",
+    );
+    expect(claim).toBeDefined();
+    expect(claim!.mutation.ref).toBe("fabric.prewalk.checklist");
+  });
+
+  it("prefers the earliest matching trigger in one execution", () => {
+    const controller = new PrewalkController();
+    controller.configureTriggers([], ["fabric.prewalk.checklist", "pi.edit"], []);
+    controller.arm({ mode: "in-place", model: "anthropic/executor", sessionId: "session-1" });
+
+    const claim = controller.claim(
+      [audit("fabric.prewalk.checklist", true), audit("pi.edit", true)],
+      "session-1",
+      "handoff-1",
+    );
+    expect(claim!.mutation.ref).toBe("fabric.prewalk.checklist");
+  });
+
   it("bounds the checklist reminder per continuation", () => {
     const controller = new PrewalkController();
     controller.arm({ mode: "in-place", model: "anthropic/executor", sessionId: "session-1" });

@@ -7,7 +7,13 @@
     "model": "makora/zai-org/GLM-5.2-NVFP4",
     "alwaysRearm": true,
     "autoArm": true,
-    "mode": "in-place"
+    "mode": "in-place",
+    "triggerRefs": [
+      "fabric.prewalk.checklist",
+      "pi.edit",
+      "pi.write",
+      "schema.commit"
+    ]
   },
   "agents": {
     "retainRuns": true,
@@ -23,9 +29,15 @@
     "checks": [
       {
         "id": "typecheck",
-        "languages": ["typescript"],
+        "languages": [
+          "typescript"
+        ],
         "command": "pnpm",
-        "args": ["exec", "tsc", "--noEmit"],
+        "args": [
+          "exec",
+          "tsc",
+          "--noEmit"
+        ],
         "fileMode": "none",
         "timeoutMs": 120000
       }
