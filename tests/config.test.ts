@@ -142,7 +142,6 @@ describe("Fabric configuration", () => {
     expect(
       normalizeFabricConfig({ prewalk: { model: "anthropic/executor" } }).prewalk,
     ).toEqual({
-      returnPolicy: "previous",
       model: "anthropic/executor",
       triggerRisks: [],
       triggerEffects: ["workspace"],
@@ -150,14 +149,12 @@ describe("Fabric configuration", () => {
       alwaysRearm: true,
     });
     expect(normalizeFabricConfig({ prewalk: { model: "   " } }).prewalk).toEqual({
-      returnPolicy: "previous",
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       alwaysRearm: true,
     });
     expect(normalizeFabricConfig({ prewalk: { alwaysRearm: false } }).prewalk).toEqual({
-      returnPolicy: "previous",
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
@@ -179,17 +176,6 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ agents: { runRoot: "relative/path" } }).agents).not.toHaveProperty(
       "runRoot",
     );
-    expect(
-      normalizeFabricConfig({
-        prewalk: { returnPolicy: "previous" },
-      }).prewalk.returnPolicy,
-    ).toBe("previous");
-    expect(
-      normalizeFabricConfig({ prewalk: { returnPolicy: "executor" } }).prewalk,
-    ).toMatchObject({ returnPolicy: "executor" });
-    expect(
-      normalizeFabricConfig({ prewalk: { returnPolicy: "planner" } }).prewalk,
-    ).toMatchObject({ returnPolicy: "previous" });
     expect(
       normalizeFabricConfig({
         prewalk: {
@@ -637,7 +623,7 @@ describe("Fabric configuration", () => {
     expect(result.path).toBe(path.join(cwd, ".pi", "fabric.json"));
     const saved = JSON.parse(fs.readFileSync(path.join(cwd, ".pi", "fabric.json"), "utf8"));
     expect(saved).toEqual({
-      configVersion: 2,
+      configVersion: 3,
       agents: { transport: "localterm", maxConcurrent: 8 },
       fullCodeMode: false,
     });
@@ -662,7 +648,7 @@ describe("Fabric configuration", () => {
     expect(result.path).toBe(path.join(agentDir, "fabric.json"));
     expect(fs.existsSync(path.join(cwd, ".pi", "fabric.json"))).toBe(false);
     const saved = JSON.parse(fs.readFileSync(path.join(agentDir, "fabric.json"), "utf8"));
-    expect(saved).toEqual({ configVersion: 2, executor: { timeoutMs: 30_000 } });
+    expect(saved).toEqual({ configVersion: 3, executor: { timeoutMs: 30_000 } });
   });
 
   it("persists and clears the dedicated prewalk model", () => {
@@ -682,7 +668,6 @@ describe("Fabric configuration", () => {
 
     saveFabricConfig(location, { prewalk: { model: "" } });
     expect(loadFabricConfig(location).prewalk).toEqual({
-      returnPolicy: "previous",
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
@@ -744,18 +729,5 @@ describe("Fabric configuration", () => {
     expect(negative.agents.maxTokensPerChild).toBe(0);
     const huge = normalizeFabricConfig({ agents: { maxTokensPerChild: Number.MAX_VALUE } });
     expect(huge.agents.maxTokensPerChild).toBe(100_000_000);
-  });
-});
-
-describe("prewalk return policy", () => {
-  it("honors an explicit previous return policy in research mode", () => {
-    expect(
-      normalizeFabricConfig({ prewalk: { returnPolicy: "previous" } }).prewalk
-        .returnPolicy,
-    ).toBe("previous");
-  });
-
-  it("hands Main back its own model by default", () => {
-    expect(normalizeFabricConfig({ prewalk: {} }).prewalk.returnPolicy).toBe("previous");
   });
 });

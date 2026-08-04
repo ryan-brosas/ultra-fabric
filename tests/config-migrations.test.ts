@@ -38,11 +38,11 @@ describe("Fabric configuration migrations", () => {
     expect(result).toMatchObject({
       fromVersion: 0,
       toVersion: CURRENT_FABRIC_CONFIG_VERSION,
-      appliedVersions: [1, 2],
+      appliedVersions: [1, 2, 3],
       changed: true,
     });
     expect(result.document).toEqual({
-      configVersion: 2,
+      configVersion: 3,
       agents: { runner: "claude", defaultTools: ["read"] },
       ui: { enabled: false },
     });
@@ -58,7 +58,7 @@ describe("Fabric configuration migrations", () => {
     const result = migrateFabricConfigDocument(input);
 
     expect(result.document).toEqual({
-      configVersion: 2,
+      configVersion: 3,
       prewalk: { model: "provider/executor", thinking: "max" },
       agents: { runner: "pi" },
     });
@@ -68,23 +68,51 @@ describe("Fabric configuration migrations", () => {
   it("leaves a document without a prewalk section untouched apart from the version bump", () => {
     const input = { configVersion: 1, agents: { runner: "pi" } };
     const result = migrateFabricConfigDocument(input);
-    expect(result.document).toEqual({ configVersion: 2, agents: { runner: "pi" } });
+    expect(result.document).toEqual({ configVersion: 3, agents: { runner: "pi" } });
     expect(result.document).not.toHaveProperty("prewalk");
   });
 
   it("preserves prewalk keys other than mode", () => {
     const input = {
       configVersion: 1,
-      prewalk: { model: "provider/x", thinking: "max", triggerRefs: ["pi.edit"], returnPolicy: "executor" },
+      prewalk: { model: "provider/x", thinking: "max", triggerRefs: ["pi.edit"] },
     };
     const result = migrateFabricConfigDocument(input);
     expect(result.document.prewalk).toEqual({
       model: "provider/x",
       thinking: "max",
       triggerRefs: ["pi.edit"],
-      returnPolicy: "executor",
     });
     expect(result.document.prewalk).not.toHaveProperty("mode");
+    expect(result.document.prewalk).not.toHaveProperty("returnPolicy");
+  });
+
+  // returnPolicy stopped being a setting: restoring Main after a settled task
+  // is now unconditional, so the big -> small -> big loop cannot be switched off.
+  it("removes the prewalk returnPolicy field that is no longer configurable", () => {
+    const input = {
+      configVersion: 2,
+      prewalk: { returnPolicy: "executor", model: "provider/executor", thinking: "max" },
+      agents: { runner: "pi" },
+    };
+    const result = migrateFabricConfigDocument(input);
+
+    expect(result.document).toEqual({
+      configVersion: 3,
+      prewalk: { model: "provider/executor", thinking: "max" },
+      agents: { runner: "pi" },
+    });
+    expect(input.prewalk).toHaveProperty("returnPolicy");
+  });
+
+  it("removes both retired prewalk fields when migrating from version 1", () => {
+    const result = migrateFabricConfigDocument({
+      configVersion: 1,
+      prewalk: { mode: "trajectory", returnPolicy: "previous", triggerRefs: ["pi.edit"] },
+    });
+
+    expect(result.appliedVersions).toEqual([2, 3]);
+    expect(result.document.prewalk).toEqual({ triggerRefs: ["pi.edit"] });
   });
 
   it("merges both section names with the canonical section taking precedence", () => {
@@ -109,7 +137,7 @@ describe("Fabric configuration migrations", () => {
 
   it("rejects invalid, future, and legacy keys in current documents", () => {
     expect(() => migrateFabricConfigDocument({ configVersion: -1 })).toThrow(/non-negative integer/);
-    expect(() => migrateFabricConfigDocument({ configVersion: 3 })).toThrow(/newer than supported/);
+    expect(() => migrateFabricConfigDocument({ configVersion: 4 })).toThrow(/newer than supported/);
     expect(() =>
       migrateFabricConfigDocument({ configVersion: 1, subagents: {} }),
     ).toThrow(/removed key/);
@@ -122,9 +150,9 @@ describe("Fabric configuration migrations", () => {
 
     const config = loadFabricConfig({ cwd: paths.cwd, agentDir: paths.agentDir, projectTrusted: true });
     expect(config.agents).toMatchObject({ runner: "pi", transport: "tmux", maxConcurrent: 2 });
-    expect(JSON.parse(fs.readFileSync(paths.globalPath, "utf8"))).toMatchObject({ configVersion: 2, agents: { runner: "claude" } });
+    expect(JSON.parse(fs.readFileSync(paths.globalPath, "utf8"))).toMatchObject({ configVersion: 3, agents: { runner: "claude" } });
     expect(JSON.parse(fs.readFileSync(paths.projectPath, "utf8"))).toEqual({
-      configVersion: 2,
+      configVersion: 3,
       agents: { runner: "pi", transport: "tmux" },
     });
   });
@@ -141,7 +169,7 @@ describe("Fabric configuration migrations", () => {
 
   it("does not rewrite an already-current config during load", () => {
     const paths = fixture();
-    const current = JSON.stringify({ configVersion: 2, agents: { maxConcurrent: 3 } }, null, 2) + "\n";
+    const current = JSON.stringify({ configVersion: 3, agents: { maxConcurrent: 3 } }, null, 2) + "\n";
     fs.writeFileSync(paths.globalPath, current);
     const before = fs.statSync(paths.globalPath).mtimeMs;
 
@@ -161,7 +189,7 @@ describe("Fabric configuration migrations", () => {
     );
 
     expect(JSON.parse(fs.readFileSync(paths.projectPath, "utf8"))).toEqual({
-      configVersion: 2,
+      configVersion: 3,
       agents: { transport: "screen", maxConcurrent: 7 },
     });
   });
@@ -183,7 +211,7 @@ describe("Fabric configuration migrations", () => {
       expect(config.agents.maxConcurrent).toBe(5);
       expect(fs.lstatSync(paths.globalPath).isSymbolicLink()).toBe(true);
       expect(JSON.parse(fs.readFileSync(target, "utf8"))).toEqual({
-        configVersion: 2,
+        configVersion: 3,
         agents: { maxConcurrent: 5 },
       });
     },

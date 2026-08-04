@@ -237,6 +237,7 @@ return "late result";
         expect(result.value).toBeUndefined();
         expect(result.prewalkBoundary).toMatchObject({ ref: "pi.write" });
         expect(result.audits.map((audit) => [audit.ref, audit.success])).toEqual([
+          ["fabric.prewalk.checklist", true],
           ["pi.edit", false],
           ["pi.write", true],
         ]);
@@ -1922,5 +1923,49 @@ return runConsult({
     });
     expect(result.success).toBe(false);
     expect(result.error).toContain("timed out");
+  });
+
+  // The configured fabric.prewalk.checklist trigger can only fire if the
+  // checklist call is audited like any other host call. It previously ran
+  // through traceAttempt, which records to the trace recorder but never to
+  // context.audits, so claim() could never match the ref and the handoff
+  // silently fell through to the first write instead.
+  it("audits the accepted prewalk checklist so the configured trigger can claim it", async () => {
+    const registry = new ActionRegistry();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    config.approvals.read = "allow";
+    const controller = new PrewalkController();
+    controller.configureTriggers(
+      [],
+      ["fabric.prewalk.checklist", "pi.edit", "pi.write"],
+      [],
+    );
+    controller.arm({ model: "provider/executor", sessionId: "session-1" });
+    const boundary = controller.executionBoundary("session-1")!;
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: `return await prewalk.checklist({
+  items: Array.from({ length: 5 }, (_, index) => ({
+    task: "Change target " + (index + 1),
+    validation: "Run check " + (index + 1),
+  })),
+});`,
+      signal: undefined,
+      parentToolCallId: "prewalk-checklist-audit",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      prewalk: boundary,
+      onPartial() {},
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.audits.map((audit) => audit.ref)).toContain(
+      "fabric.prewalk.checklist",
+    );
+
+    // The audited checklist must be claimable, which is the whole point of
+    // listing the ref in triggerRefs.
+    const claim = controller.claim(result.audits, "session-1", "handoff-1");
+    expect(claim?.mutation.ref).toBe("fabric.prewalk.checklist");
   });
 });

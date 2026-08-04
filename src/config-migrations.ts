@@ -1,4 +1,4 @@
-export const CURRENT_FABRIC_CONFIG_VERSION = 2;
+export const CURRENT_FABRIC_CONFIG_VERSION = 3;
 
 export interface FabricConfigMigrationResult {
   document: Record<string, unknown>;
@@ -60,6 +60,20 @@ const migrations: readonly FabricConfigMigration[] = [
       if (isObject(prewalk)) {
         const next = { ...prewalk };
         delete next.mode;
+        migrated.prewalk = next;
+      }
+      return migrated;
+    },
+  },
+  {
+    from: 2,
+    to: 3,
+    migrate(document) {
+      const migrated = { ...document };
+      const prewalk = migrated.prewalk;
+      if (isObject(prewalk)) {
+        const next = { ...prewalk };
+        delete next.returnPolicy;
         migrated.prewalk = next;
       }
       return migrated;

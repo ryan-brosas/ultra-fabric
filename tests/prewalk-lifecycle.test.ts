@@ -12,7 +12,6 @@ const arm = (overrides: Partial<FabricPrewalkArm> = {}): FabricPrewalkArm => ({
   sessionId: "session-1",
   armedAt: 10,
   alwaysRearm: false,
-  returnPolicy: "executor",
   task: "Implement the guard",
   ...overrides,
 });
@@ -172,7 +171,6 @@ describe("reducePrewalkLifecycle", () => {
       sessionId: "session-1",
       armedAt: 30,
       alwaysRearm: true,
-      returnPolicy: "executor",
       attempt: 0,
     });
   });
@@ -331,7 +329,6 @@ describe("reducePrewalkLifecycle", () => {
       rearm: {
         model: "makora/executor",
         alwaysRearm: true,
-        returnPolicy: "previous",
         thinking: "max",
       },
     });
@@ -351,7 +348,7 @@ describe("reducePrewalkLifecycle", () => {
         kind: "task_settled",
         sessionId: "session-1",
         at: 20,
-        rearm: { alwaysRearm: false, returnPolicy: "previous" },
+        rearm: { alwaysRearm: false },
       }),
     ).toBe(pending);
   });
@@ -367,7 +364,7 @@ describe("reducePrewalkLifecycle", () => {
         kind: "continuation_settled",
         sessionId: "session-1",
         at: 20,
-        rearm: { alwaysRearm: false, returnPolicy: "previous" },
+        rearm: { alwaysRearm: false },
       }),
     ).toEqual({ state: "idle" });
   });

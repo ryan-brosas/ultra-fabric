@@ -209,12 +209,11 @@ describe("PrewalkController", () => {
       model: "anthropic/executor",
       sessionId: "session-1",
       task: "Implement",
-      returnPolicy: "previous",
     });
     const boundary = controller.executionBoundary("session-1");
     expect(boundary).toBeDefined();
     expect(controller.status()).toMatchObject({
-      returnPolicy: "previous",
+      state: "armed",
     });
 
     expect(() => boundary!.authorize({
@@ -266,11 +265,12 @@ describe("PrewalkController", () => {
     expect(controller.claimChecklistReminder("session-1")).toBeUndefined();
   });
 
+  // Controller-level contract: claim() matches any configured trigger ref.
+  // The fabric.prewalk.checklist audit is produced by the execution service
+  // (see tests/execution-service.test.ts "audits the accepted prewalk
+  // checklist"), not by the controller. These tests assert the matching
+  // rule only; they do not prove the audit exists at runtime.
   it("can hand off on checklist acceptance before the first write", () => {
-    // The default trigger is the first successful write, so Main has already
-    // designed the change and made an edit before the executor is involved.
-    // Triggering on the accepted checklist hands the whole implementation over
-    // while Main has only planned.
     const controller = new PrewalkController();
     controller.configureTriggers([], ["fabric.prewalk.checklist", "pi.edit", "pi.write"], []);
     controller.arm({ model: "anthropic/executor", sessionId: "session-1" });
@@ -295,6 +295,21 @@ describe("PrewalkController", () => {
       "handoff-1",
     );
     expect(claim!.mutation.ref).toBe("fabric.prewalk.checklist");
+  });
+
+  // Restoring Main after a settled task is unconditional: returnPolicy is no
+  // longer a knob. A continuation must carry its returnModel through settlement
+  // regardless of how the arm was configured.
+  it("yields a returnModel at continuation settlement without a return policy", () => {
+    const controller = new PrewalkController();
+    controller.arm({ model: "anthropic/executor", sessionId: "session-1" });
+    controller.claim([audit("pi.edit", true)], "session-1", "handoff-1");
+    controller.completeHandoff("anthropic/frontier");
+    controller.acceptContinuation("session-1", "handoff-1");
+
+    const settled = controller.settleContinuation("session-1");
+    expect(settled.settled).toBe(true);
+    expect(settled.returnModel).toBe("anthropic/frontier");
   });
 
   it("bounds the checklist reminder per continuation", () => {
@@ -399,5 +414,36 @@ describe("PrewalkController no-op mutations", () => {
     expect(
       armed().claim([resultAudit("pi.write", { ok: true })], "session-1"),
     ).toMatchObject({ mutation: { ref: "pi.write" } });
+  });
+
+  // settle owns the fabric_exec abort boundary, so it must apply the same
+  // no-op rule as claim. When the two disagree the boundary kills the run and
+  // claim then refuses the handoff, leaving the session armed with no executor.
+  it("does not settle the boundary on a no-op mutation", () => {
+    const controller = armed();
+    const boundary = controller.executionBoundary("session-1")!;
+    boundary.registerChecklist({
+      items: Array.from({ length: 5 }, (_, index) => ({
+        task: `Change target ${index + 1}`,
+        validation: `Run check ${index + 1}`,
+      })),
+    });
+    const action = { ref: "pi.edit", risk: "write", effect: "workspace" } as const;
+
+    expect(
+      boundary.settle(
+        boundary.authorize(action),
+        resultAudit("pi.edit", { diff: "", patch: "" }),
+      ),
+    ).toBe(false);
+    expect(
+      boundary.settle(
+        boundary.authorize(action),
+        resultAudit("pi.write", { changed: false }),
+      ),
+    ).toBe(false);
+
+    expect(controller.isArmed("session-1")).toBe(true);
+    expect(boundary.authorize(action)).toBe(true);
   });
 });

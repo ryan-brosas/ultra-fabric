@@ -3,10 +3,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type {
-  FabricPrewalkReturnPolicy,
-  FabricResultFormat,
-} from "../config.js";
+import type { FabricResultFormat } from "../config.js";
 import {
   NESTED_TOOL_CALL_ID_PREFIX,
   type FabricCallAudit,
@@ -62,7 +59,7 @@ const researchArmedPrompt = (model: string): string => [
   `Prewalk armed → ${model} (research).`,
   "Before any further mutation, commit to a deep, concrete remaining execution plan grounded in the context already gathered. Cover the target files or symbols, dependencies, edge cases, and proof needed for completion.",
   "In that same assistant reply, call prewalk.checklist({ items }) inside fabric_exec with 5-9 ordered items. Every item must have a concrete task and a specific validation. The host rejects mutation until this checklist is accepted.",
-  "After acceptance, continue the task immediately and make exactly one first successful mutation through a configured Prewalk trigger. Do not stop at the plan. Do not batch or start another mutation concurrently; the host ends fabric_exec immediately after that first successful mutation and switches this session to the executor model.",
+  "After the checklist is accepted, stop. Do not make any mutation yourself. The host ends fabric_exec at the accepted checklist and switches this session to the executor model.",
   "The executor owns the remaining implementation and verification through completion.",
 ].join("\n");
 
@@ -108,7 +105,6 @@ export interface PendingFabricHandoff {
   args: Record<string, unknown>;
   audit: FabricCallAudit;
   resultFormat: FabricResultFormat;
-  returnPolicy?: FabricPrewalkReturnPolicy;
   checklist?: FabricPrewalkChecklist;
   fallbackModels?: string[];
   triggerRef?: string;
@@ -165,7 +161,6 @@ const createPrewalkPending = (input: {
     args,
     audit,
     resultFormat: input.resultFormat,
-    returnPolicy: input.arm.returnPolicy,
     ...(input.arm.checklist
       ? { checklist: structuredClone(input.arm.checklist) }
       : {}),
@@ -336,9 +331,7 @@ const runResearchPrewalk = async (
   }
   const fallback = modelKey !== primaryModel;
   context.ui.notify(
-    pending.returnPolicy === "previous"
-      ? `Prewalk continuing Main in place with ${modelKey}${fallback ? " (fallback)" : ""}. Previous Main model will be restored after the task.`
-      : `Prewalk continuing Main in place with ${modelKey}${fallback ? " (fallback)" : ""}. Pi will retain this model after the task.`,
+    `Prewalk continuing Main in place with ${modelKey}${fallback ? " (fallback)" : ""}. Previous Main model will be restored after the task.`,
     "info",
   );
   const basePrompt = pending.checklist
@@ -373,8 +366,11 @@ export const runFabricHandoffAtBoundary = async (
 ): Promise<Record<string, unknown>> => {
   const model = String(pending.args.model ?? "");
   context.ui.setStatus("fabric-prewalk", "switching Main to " + model);
+  // Restore Main after the task unconditionally: the big -> small -> big
+  // loop is the design, not a setting. The verification-revision path still
+  // overrides this with its own returnModel.
   const returnModel = pending.returnModel ?? (
-    pending.returnPolicy === "previous" && context.model
+    context.model
       ? context.model.provider + "/" + context.model.id
       : undefined
   );

@@ -505,8 +505,6 @@ describe("FabricSettingsComponent", () => {
       ...DEFAULT_FABRIC_CONFIG,
       prewalk: {
         ...DEFAULT_FABRIC_CONFIG.prewalk,
-        mode: "research" as const,
-        returnPolicy: "executor" as const,
         model: "anthropic/claude-sonnet-4-5",
         alwaysRearm: false,
       },
@@ -695,15 +693,12 @@ describe("FabricSettingsComponent", () => {
             fs.readFileSync(path.join(cwd, ".pi", "fabric.json"), "utf8"),
           ) as {
             prewalk?: {
-              mode?: "research";
-              returnPolicy?: "executor" | "previous";
               model?: string;
               alwaysRearm?: boolean;
             };
           };
           config.prewalk = {
             ...config.prewalk,
-            returnPolicy: saved.prewalk?.returnPolicy ?? "previous",
             ...(saved.prewalk?.model ? { model: saved.prewalk.model } : {}),
             alwaysRearm: saved.prewalk?.alwaysRearm === true,
           };

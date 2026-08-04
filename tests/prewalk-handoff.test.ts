@@ -191,14 +191,12 @@ describe("outer-boundary Prewalk", () => {
       model: "anthropic/executor",
       sessionId: "session-1",
       task: "Implement the guard",
-      returnPolicy: "previous",
     });
     const items = Array.from({ length: 5 }, (_, index) => ({
       task: `Change target ${index + 1}`,
       validation: `Run check ${index + 1}`,
     }));
     controller.executionBoundary("session-1")!.registerChecklist({ items });
-    expect(controller.isResearchPlanning("session-1")).toBe(true);
     const run = execution();
     run.prewalkBoundary = { ref: "pi.edit", nestedToolCallId: "edit-one" };
     const pending = claimFabricHandoff(controller, run, "session-1", "json");
@@ -206,7 +204,6 @@ describe("outer-boundary Prewalk", () => {
     expect(pending).toMatchObject({
       kind: "prewalk-research",
       checklist: { items },
-      returnPolicy: "previous",
       triggerRef: "pi.edit",
     });
 
@@ -233,9 +230,7 @@ describe("outer-boundary Prewalk", () => {
     });
     expect(controller.status()).toMatchObject({
       state: "continuation_pending",
-      returnPolicy: "previous",
     });
-    expect(controller.isResearchPlanning("session-1")).toBe(false);
   });
 
   it("queues an explicit gated verification continuation", async () => {
@@ -271,14 +266,13 @@ describe("outer-boundary Prewalk", () => {
     );
   });
 
-  it("carries the previous Main model through continuation settlement when configured", async () => {
+  it("carries the previous Main model through continuation settlement unconditionally", async () => {
     const controller = new PrewalkController();
     controller.arm({
       model: "anthropic/executor",
       sessionId: "session-1",
       task: "Implement the guard",
-      returnPolicy: "previous",
-    } as Parameters<PrewalkController["arm"]>[0] & { returnPolicy: "previous" });
+    });
     const pending = claimFabricHandoff(controller, execution(), "session-1", "auto");
     const ctx = context();
     const ext = extension();
@@ -606,9 +600,8 @@ describe("prewalkArmedPrompt", () => {
     expect(text).toContain("prewalk.checklist");
     expect(text).toContain("5-9");
     expect(text).toContain("validation");
-    expect(text).toContain("first successful mutation");
-    expect(text).toContain("Do not batch");
-    expect(text).toContain("continue the task");
+    expect(text).toContain("stop. Do not make any mutation");
+    expect(text).toContain("executor model");
   });
 
 });
@@ -781,7 +774,6 @@ describe("research return policy", () => {
       model: "anthropic/executor",
       sessionId: "session-1",
       task: "Implement the guard",
-      returnPolicy: "previous",
     });
     const run = execution();
     controller.executionBoundary("session-1")!.registerChecklist({
@@ -792,7 +784,6 @@ describe("research return policy", () => {
     });
     run.prewalkBoundary = { ref: "pi.edit", nestedToolCallId: "edit-one" };
     const pending = claimFabricHandoff(controller, run, "session-1", "json")!;
-    expect(pending.returnPolicy).toBe("previous");
 
     const ctx = context();
     const ext = extension();

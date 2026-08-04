@@ -224,7 +224,17 @@ export class PiToolsProvider implements FabricProvider {
     if (!(actionName in this.#tools)) return undefined;
     const name = actionName as PiCoreToolName;
     const override = await this.#capturedTools?.describe(name, _context);
-    if (override) return { ...override, namespace: "extension-override" };
+    // CapturedToolsProvider never sets effect, so without this the workspace
+    // trigger would silently lose its second layer when an extension overrides
+    // a core write tool. Ref-matching still catches edit/write, but the effect
+    // layer must stay intact for any future risk-based trigger.
+    if (override) {
+      return {
+        ...override,
+        namespace: "extension-override",
+        ...(writeTools.has(name) ? { effect: "workspace" as const } : {}),
+      };
+    }
     const tool = this.#tools[name];
     return this.#descriptor(name, tool);
   }

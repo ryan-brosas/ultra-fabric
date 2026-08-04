@@ -258,13 +258,12 @@ describe("real Prewalk runner contract", () => {
       provider: "anthropic",
       model: "executor-model",
     }, 60_000)).toMatchObject({
-      configVersion: 2,
+      configVersion: 3,
       fullCodeMode: true,
       prewalk: {
         mode: "research",
         model: "anthropic/executor-model",
         thinking: "off",
-        returnPolicy: "executor",
       },
       executor: { runtime: "quickjs", timeoutMs: 60_000 },
       quality: { mode: "off" },

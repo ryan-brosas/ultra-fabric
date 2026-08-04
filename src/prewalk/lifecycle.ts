@@ -1,6 +1,3 @@
-import type {
-  FabricPrewalkReturnPolicy,
-} from "../config.js";
 import type { FabricThinking } from "../thinking.js";
 import type { FabricPrewalkChecklist } from "./checklist.js";
 
@@ -9,7 +6,6 @@ export interface FabricPrewalkArm {
   sessionId: string;
   armedAt: number;
   alwaysRearm: boolean;
-  returnPolicy: FabricPrewalkReturnPolicy;
   fallbackModels?: string[];
   task?: string;
   checklist?: FabricPrewalkChecklist;
@@ -21,7 +17,6 @@ export interface FabricPrewalkArm {
 export interface FabricPrewalkRearmDefaults {
   model?: string;
   alwaysRearm: boolean;
-  returnPolicy: FabricPrewalkReturnPolicy;
   fallbackModels?: string[];
   thinking?: FabricThinking;
   verificationMode?: "gated";
@@ -123,7 +118,6 @@ const toArmed = (
   sessionId: status.sessionId,
   armedAt,
   alwaysRearm: status.alwaysRearm,
-  returnPolicy: status.returnPolicy,
   ...(status.fallbackModels ? { fallbackModels: [...status.fallbackModels] } : {}),
   attempt: options.attempt,
   ...(options.preserveTask && status.task ? { task: status.task } : {}),
@@ -152,7 +146,6 @@ const applyRearm = (
   sessionId: armed.sessionId,
   armedAt: armed.armedAt,
   alwaysRearm: rearm.alwaysRearm,
-  returnPolicy: rearm.returnPolicy,
   attempt: armed.attempt,
   ...(rearm.fallbackModels && rearm.fallbackModels.length > 0
     ? { fallbackModels: [...rearm.fallbackModels] }

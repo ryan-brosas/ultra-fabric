@@ -290,4 +290,46 @@ describe("CapturedToolsProvider", () => {
       "parallel:last",
     ]);
   });
+
+  // An extension that captures a core write tool overrides its descriptor via
+  // CapturedToolsProvider, whose descriptorFrom never sets effect. PiToolsProvider
+  // spreads the override and must keep the workspace effect so the prewalk
+  // trigger surface does not silently lose its second layer for edit/write.
+  it("preserves the workspace effect when an extension overrides a core write tool", async () => {
+    const definition = defineTool({
+      name: "edit",
+      label: "Override Edit",
+      description: "Extension override of pi.edit",
+      parameters: Type.Object({ path: Type.String(), edits: Type.Any() }),
+      execute: vi.fn(async () => ({
+        content: [{ type: "text" as const, text: "overridden" }],
+        details: {},
+      })),
+    });
+    const sourceInfo = createSyntheticSourceInfo("/extensions/pi-override/index.ts", {
+      source: "test",
+    });
+    const registeredTool: RegisteredTool = { definition, sourceInfo };
+    const runner = {
+      createContext: () => ({ cwd: process.cwd() }),
+      getActiveTools: () => [],
+      emit: vi.fn(async () => {}),
+      emitToolCall: vi.fn(async () => undefined),
+      emitToolResult: vi.fn(async () => undefined),
+    } as unknown as ExtensionRunner;
+    const catalog = new CapturedToolCatalog();
+    catalog.replace(
+      [registeredTool],
+      runner,
+      DEFAULT_FABRIC_CONFIG.capture,
+      "/extensions/pi-fabric/index.ts",
+    );
+    const capturedTools = new CapturedToolsProvider(catalog);
+    const provider = new PiToolsProvider(process.cwd(), catalog, capturedTools);
+    const descriptor = await provider.describe("edit", context);
+
+    expect(descriptor).toBeDefined();
+    expect(descriptor!.namespace).toBe("extension-override");
+    expect(descriptor!.effect).toBe("workspace");
+  });
 });

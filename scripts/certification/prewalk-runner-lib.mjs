@@ -284,7 +284,7 @@ export const parsePrewalkEvaluatorResult = (value, variant) => {
 };
 
 export const buildPrewalkProjectConfig = (variant, executor, timeoutMs) => ({
-  configVersion: 2,
+  configVersion: 3,
   fullCodeMode: true,
   executor: {
     runtime: "quickjs",
@@ -298,7 +298,6 @@ export const buildPrewalkProjectConfig = (variant, executor, timeoutMs) => ({
     mode: variant,
     model: `${executor.provider}/${executor.model}`,
     thinking: "off",
-    returnPolicy: "executor",
     alwaysRearm: false,
   },
   agents: { enabled: false },

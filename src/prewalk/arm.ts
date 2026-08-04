@@ -29,7 +29,6 @@ export const armPrewalk = (
         }
       : {}),
     alwaysRearm: prewalk.alwaysRearm,
-    returnPolicy: prewalk.returnPolicy,
     ...(prewalk.fallbackModels ? { fallbackModels: prewalk.fallbackModels } : {}),
   });
   const armedPrompt = prewalkArmedPrompt(model);

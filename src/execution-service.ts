@@ -1,5 +1,6 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
 import {
   FabricExecutionTraceRecorder,
   executionOutcomeFromError,
@@ -67,6 +68,7 @@ import {
   type FabricRunEnvelopeV1,
   type FabricRunTransition,
 } from "./run/context.js";
+import { FABRIC_NESTED_TOOL_CALL_ID_PREFIX } from "./protocol.js";
 import type { FabricConsultOutcome, FabricOutcomeInput } from "./outcomes/store.js";
 import { runQualityEnforcement } from "./quality/enforcer.js";
 
@@ -1254,11 +1256,28 @@ export class FabricExecutionService {
                 "fabric.prewalk.checklist",
                 args,
                 runtimeSignal,
-                () => {
+                (setStage) => {
                   if (!options.prewalk) {
                     throw new Error("Research Prewalk is not armed for this Fabric execution");
                   }
-                  return options.prewalk.registerChecklist(args);
+                  const startedAt = Date.now();
+                  const checklist = options.prewalk.registerChecklist(args);
+                  // The checklist is a configured Prewalk trigger ref, so it
+                  // must be audited like any other host call for claim() to
+                  // match it. traceAttempt records to the trace recorder only;
+                  // it never reaches context.audits.push, which left the ref
+                  // inert and let the handoff fall through to the first write.
+                  audits.push({
+                    ref: "fabric.prewalk.checklist",
+                    nestedToolCallId: `${FABRIC_NESTED_TOOL_CALL_ID_PREFIX}${randomUUID()}`,
+                    startedAt,
+                    endedAt: Date.now(),
+                    success: true,
+                    args: args as Record<string, unknown>,
+                    result: checklist,
+                  });
+                  setStage("invoke");
+                  return checklist;
                 },
               );
 

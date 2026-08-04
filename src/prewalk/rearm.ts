@@ -11,7 +11,6 @@ export const prewalkRearmDefaults = (
   const model = prewalk.model?.trim();
   return {
     alwaysRearm: prewalk.alwaysRearm,
-    returnPolicy: prewalk.returnPolicy,
     ...(model ? { model } : {}),
     ...(prewalk.fallbackModels && prewalk.fallbackModels.length > 0
       ? { fallbackModels: [...prewalk.fallbackModels] }

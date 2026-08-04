@@ -21,7 +21,6 @@ export type FabricAgentTransport =
 export type FabricAgentRunner = "pi" | "claude";
 export type FabricUiWidgetMode = "auto" | "always" | "hidden";
 export type FabricResultFormat = "auto" | "yaml" | "json" | "text";
-export type FabricPrewalkReturnPolicy = "executor" | "previous";
 type FabricPrewalkVerificationMode = "gated";
 export type FabricExecutorRuntime = "quickjs" | "node-process";
 type FabricCompactionEngine = "pi" | "fabric";
@@ -67,7 +66,6 @@ interface FabricClaudeRunnerConfig {
 }
 
 interface FabricPrewalkConfig {
-  returnPolicy: FabricPrewalkReturnPolicy;
   model?: string;
   fallbackModels?: string[];
   triggerRisks: FabricRisk[];
@@ -76,7 +74,7 @@ interface FabricPrewalkConfig {
   alwaysRearm: boolean;
   // Arm on session start from configuration instead of requiring /fabric prewalk.
   autoArm?: boolean;
-  // Reasoning effort for the trajectory executor; unset inherits agents.thinking.
+  // Reasoning effort for the in-session executor. Unset inherits agents.thinking.
   thinking?: FabricThinking;
   verificationMode?: FabricPrewalkVerificationMode;
   maxPhaseRevisions?: number;
@@ -302,7 +300,6 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     callTimeoutMs: 120_000,
   },
   prewalk: {
-    returnPolicy: "previous",
     triggerRisks: [],
     triggerEffects: ["workspace"],
     triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
@@ -864,12 +861,6 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       ),
     },
     prewalk: {
-      // In-place and trajectory always hand Main back its own model, so no
-      // configuration can strand the main session on the executor. Research
-      // keeps the executor unless the operator explicitly asks for Main back.
-      // Main is handed back its own model unless the operator explicitly asks
-      // the executor to keep it, so no default can strand Main on the executor.
-      returnPolicy: prewalk.returnPolicy === "executor" ? "executor" : "previous",
       ...(prewalkModel ? { model: prewalkModel } : {}),
       ...(prewalkFallbackModels.length > 0
         ? { fallbackModels: prewalkFallbackModels }

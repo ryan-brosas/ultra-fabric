@@ -1,6 +1,3 @@
-import type {
-  FabricPrewalkReturnPolicy,
-} from "../config.js";
 import type { FabricCallAudit } from "../core/action-registry.js";
 import type { FabricEffect, FabricRisk } from "../protocol.js";
 import type { FabricGateResult } from "../run/context.js";
@@ -66,7 +63,6 @@ const armFromStatus = (
   sessionId: status.sessionId,
   armedAt: status.armedAt,
   alwaysRearm: status.alwaysRearm,
-  returnPolicy: status.returnPolicy,
   ...(status.fallbackModels ? { fallbackModels: [...status.fallbackModels] } : {}),
   ...(status.task ? { task: status.task } : {}),
   ...(status.checklist ? { checklist: structuredClone(status.checklist) } : {}),
@@ -186,7 +182,7 @@ export class PrewalkController {
       },
       settle: (reservation, audit) => {
         if (!reservation) return false;
-        if (audit.success === true && this.#matchesTrigger(audit)) return true;
+        if (audit.success === true && this.#matchesTrigger(audit) && !isNoOpMutation(audit)) return true;
         this.#researchMutationReserved = false;
         return false;
       },
@@ -206,7 +202,6 @@ export class PrewalkController {
     sessionId: string;
     task?: string;
     alwaysRearm?: boolean;
-    returnPolicy?: FabricPrewalkReturnPolicy;
     fallbackModels?: string[];
     thinking?: FabricThinking;
     verificationMode?: "gated";
@@ -227,7 +222,6 @@ export class PrewalkController {
         sessionId: input.sessionId,
         armedAt: Date.now(),
         alwaysRearm: input.alwaysRearm === true,
-        returnPolicy: input.returnPolicy ?? "executor",
         ...(fallbackModels.length > 0 ? { fallbackModels } : {}),
         ...(task ? { task } : {}),
         ...(input.thinking ? { thinking: input.thinking } : {}),
@@ -281,10 +275,6 @@ export class PrewalkController {
     if (this.#reminderCount >= PrewalkController.#REMINDER_LIMIT) return undefined;
     this.#reminderCount += 1;
     return structuredClone(status.checklist);
-  }
-
-  isResearchPlanning(sessionId: string): boolean {
-    return this.#researchStatus(sessionId) !== undefined;
   }
 
   settleTask(sessionId: string, rearm?: FabricPrewalkRearmDefaults): boolean {
