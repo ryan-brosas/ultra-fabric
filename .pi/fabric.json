@@ -12,5 +12,18 @@
     "thresholds": {
       "openai-codex/gpt-5.6-sol": 0.5
     }
+  },
+  "quality": {
+    "mode": "audit",
+    "checks": [
+      {
+        "id": "typecheck",
+        "languages": ["typescript"],
+        "command": "pnpm",
+        "args": ["exec", "tsc", "--noEmit"],
+        "fileMode": "none",
+        "timeoutMs": 120000
+      }
+    ]
   }
 }
