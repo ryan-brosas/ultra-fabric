@@ -134,6 +134,9 @@ const extension = () => {
 };
 
 const unusedRunner = () => ({ executeHandoff: vi.fn() });
+const completedRunner = () => ({
+  executeHandoff: vi.fn(async () => ({ handedOff: true, completed: true, status: "completed" })),
+});
 
 describe("outer-boundary Prewalk", () => {
   it("switches Main in place and queues a hidden follow-up by default", async () => {
@@ -160,7 +163,7 @@ describe("outer-boundary Prewalk", () => {
 
     const ctx = context();
     const ext = extension();
-    const runner = unusedRunner();
+    const runner = completedRunner();
     const activity = vi.fn();
     const result = await runFabricHandoffAtBoundary(
       controller,
@@ -172,11 +175,11 @@ describe("outer-boundary Prewalk", () => {
       activity,
     );
 
-    expect(runner.executeHandoff).not.toHaveBeenCalled();
-    expect(ext.setModel).toHaveBeenCalledWith(ctx.target);
-    expect(ctx.value.ui.notify).toHaveBeenCalledWith(
-      "Prewalk continuing Main in place with anthropic/executor. Pi will retain this model after the task.",
-      "info",
+    expect(ext.setModel).not.toHaveBeenCalled();
+    expect(runner.executeHandoff).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "anthropic/executor" }),
+      expect.anything(),
+      expect.anything(),
     );
     expect(ext.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -192,11 +195,9 @@ describe("outer-boundary Prewalk", () => {
     expect(result).toMatchObject({
       prewalk: true,
       mode: "in-place",
-      continued: true,
-      status: "continued",
+      completed: true,
       trigger: { ref: "pi.edit" },
     });
-    expect(activity).toHaveBeenCalledWith(expect.objectContaining({ type: "progress" }));
     expect(controller.status()).toMatchObject({
       state: "continuation_pending",
       handoffId: pending!.audit.nestedToolCallId,
@@ -207,6 +208,49 @@ describe("outer-boundary Prewalk", () => {
       "fabric-prewalk",
       "continuation pending → anthropic/executor",
     );
+  });
+
+  it("runs the in-place executor off-session so Main keeps its model", async () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement the guard",
+    });
+    const run = execution();
+    const pending = claimFabricHandoff(controller, run, "session-1", "json");
+    expect(pending).toMatchObject({ kind: "prewalk-in-place" });
+
+    const ctx = context();
+    const ext = extension();
+    const runner = {
+      executeHandoff: vi.fn(async () => ({
+        handedOff: true,
+        completed: true,
+        status: "completed",
+      })),
+    };
+    const result = await runFabricHandoffAtBoundary(
+      controller,
+      runner,
+      ext.value,
+      pending!,
+      outerResult(),
+      ctx.value,
+      vi.fn(),
+    );
+
+    expect(ext.setModel).not.toHaveBeenCalled();
+    expect(runner.executeHandoff).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "anthropic/executor" }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(ext.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ customType: "pi-fabric-prewalk-continue" }),
+      { deliverAs: "followUp", triggerTurn: true },
+    );
+    expect(result).toMatchObject({ prewalk: true, mode: "in-place" });
   });
 
   it("continues research Prewalk in place with the accepted checklist", async () => {
@@ -282,7 +326,7 @@ describe("outer-boundary Prewalk", () => {
 
     await runFabricHandoffAtBoundary(
       controller,
-      unusedRunner(),
+      completedRunner(),
       api.value,
       pending,
       outerResult(),
@@ -312,20 +356,18 @@ describe("outer-boundary Prewalk", () => {
     } as Parameters<PrewalkController["arm"]>[0] & { returnPolicy: "previous" });
     const pending = claimFabricHandoff(controller, execution(), "session-1", "auto");
     const ctx = context();
+    const ext = extension();
 
     await runFabricHandoffAtBoundary(
       controller,
-      unusedRunner(),
-      extension().value,
+      completedRunner(),
+      ext.value,
       pending!,
       outerResult(),
       ctx.value,
     );
 
-    expect(ctx.value.ui.notify).toHaveBeenCalledWith(
-      "Prewalk continuing Main in place with anthropic/executor. Previous Main model will be restored after the task.",
-      "info",
-    );
+    expect(ext.setModel).not.toHaveBeenCalled();
     expect(controller.status()).toMatchObject({
       state: "continuation_pending",
       returnModel: "anthropic/frontier",
@@ -340,7 +382,7 @@ describe("outer-boundary Prewalk", () => {
     });
   });
 
-  it("uses a bounded in-place fallback before blocking", async () => {
+  it("threads the configured fallback models to the in-place executor", async () => {
     const controller = new PrewalkController();
     controller.arm({
       model: "anthropic/executor",
@@ -349,39 +391,30 @@ describe("outer-boundary Prewalk", () => {
       task: "Implement the guard",
     } as Parameters<PrewalkController["arm"]>[0] & { fallbackModels: string[] });
     const pending = claimFabricHandoff(controller, execution(), "session-1", "auto");
+    expect(pending!.fallbackModels).toEqual(["openai/fallback"]);
     const ctx = context();
-    ctx.value.modelRegistry.find = ((provider: string, id: string) =>
-      provider === "anthropic" && id === "executor"
-        ? ctx.target
-        : provider === "openai" && id === "fallback"
-          ? { provider, id }
-          : undefined) as unknown as ExtensionContext["modelRegistry"]["find"];
     const ext = extension();
-    ext.setModel
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    const runner = completedRunner();
 
     const result = await runFabricHandoffAtBoundary(
       controller,
-      unusedRunner(),
+      runner,
       ext.value,
       pending!,
       outerResult(),
       ctx.value,
     );
 
-    expect(ext.setModel.mock.calls).toEqual([
-      [{ provider: "anthropic", id: "executor" }],
-      [{ provider: "openai", id: "fallback" }],
-    ]);
-    expect(result).toMatchObject({
-      continued: true,
-      model: "openai/fallback",
-      fallback: true,
-    });
+    expect(ext.setModel).not.toHaveBeenCalled();
+    expect(runner.executeHandoff).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "anthropic/executor" }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(result).toMatchObject({ prewalk: true, mode: "in-place", completed: true });
     expect(controller.status()).toMatchObject({
       state: "continuation_pending",
-      model: "openai/fallback",
+      model: "anthropic/executor",
       attempt: 1,
     });
   });
@@ -396,23 +429,31 @@ describe("outer-boundary Prewalk", () => {
     const pending = claimFabricHandoff(controller, execution(), "session-1", "auto");
     const ctx = context();
     const ext = extension();
-    ext.setModel.mockResolvedValue(false);
+    const runner = {
+      executeHandoff: vi.fn(async () => ({
+        handedOff: false,
+        completed: false,
+        status: "failed",
+        error: "executor authentication failed",
+      })),
+    };
 
     const result = await runFabricHandoffAtBoundary(
       controller,
-      unusedRunner(),
+      runner,
       ext.value,
       pending!,
       outerResult(),
       ctx.value,
     );
 
+    expect(ext.setModel).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       prewalk: true,
       mode: "in-place",
       completed: false,
       status: "failed",
-      error: "No available prewalk executor from 1 configured route(s): anthropic/executor: no authentication",
+      error: "executor authentication failed",
     });
     expect(controller.status()).toMatchObject({
       state: "blocked",
@@ -420,7 +461,7 @@ describe("outer-boundary Prewalk", () => {
       sessionId: "session-1",
       task: "Implement the guard",
       attempt: 1,
-      error: "No available prewalk executor from 1 configured route(s): anthropic/executor: no authentication",
+      error: "executor authentication failed",
     });
     expect(controller.isArmed("session-1")).toBe(false);
   });
@@ -777,7 +818,7 @@ describe("outer-boundary Prewalk", () => {
     const ctx = context();
     await runFabricHandoffAtBoundary(
       controller,
-      unusedRunner(),
+      completedRunner(),
       extension().value,
       pending!,
       outerResult(),
@@ -1002,7 +1043,7 @@ describe("prewalk checklist handoff", () => {
     const ext = extension();
     await runFabricHandoffAtBoundary(
       controller,
-      unusedRunner(),
+      completedRunner(),
       ext.value,
       pending,
       outerResult(),

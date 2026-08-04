@@ -176,7 +176,7 @@ const createPrewalkPending = (input: {
         ? "In-place Prewalk"
         : "Prewalk trajectory executor",
     ...(revisionTask ? { task: revisionTask } : {}),
-    ...(!inPlace && !input.revision && input.arm.checklist
+    ...(!research && !input.revision && input.arm.checklist
       ? {
           task: [
             input.arm.task ? `Continue the existing task: ${input.arm.task}` : "Continue the existing task in the forked session.",
@@ -404,19 +404,19 @@ export const runFabricHandoffAtBoundary = async (
   activity?: (update: FabricInvocationActivityUpdate) => void,
 ): Promise<Record<string, unknown>> => {
   const model = String(pending.args.model ?? "");
-  const inPlace =
-    pending.kind === "prewalk-in-place" || pending.kind === "prewalk-research";
-  const prewalkMode = pending.kind === "prewalk-research"
+  const research = pending.kind === "prewalk-research";
+  const inPlaceImpl = pending.kind === "prewalk-in-place";
+  const prewalkMode = research
     ? "research"
-    : inPlace
+    : inPlaceImpl
       ? "in-place"
       : "trajectory";
   context.ui.setStatus(
     "fabric-prewalk",
-    inPlace ? `switching Main → ${model}` : `handing off trajectory → ${model}`,
+    research ? `switching Main → ${model}` : `handing off ${prewalkMode} → ${model}`,
   );
   const returnModel = pending.returnModel ?? (
-    pending.kind === "prewalk-in-place" &&
+    inPlaceImpl &&
     pending.returnPolicy === "previous" &&
     context.model
       ? `${context.model.provider}/${context.model.id}`
@@ -425,7 +425,7 @@ export const runFabricHandoffAtBoundary = async (
   let handoffError: string | undefined;
   let continuationError: string | undefined;
   try {
-    if (inPlace) {
+    if (research) {
       const result = await runInPlacePrewalk(extension, pending, context);
       if (typeof result.model === "string") {
         controller.selectHandoffModel(result.model);
@@ -470,7 +470,38 @@ export const runFabricHandoffAtBoundary = async (
     if (handoffError) pending.audit.error = handoffError;
     pending.audit.result = result;
     pending.audit.endedAt = Date.now();
-    if (pending.kind === "prewalk-trajectory" && completed) {
+    if (completed && inPlaceImpl) {
+      // In-place implementation runs off-session now, so Main keeps its model.
+      // Queue the same hidden verify-and-summarize continuation in-place used to
+      // get, so Main verifies the executor's work without a model switch.
+      try {
+        const basePrompt = pending.checklist
+          ? checklistContinuationPrompt(pending.checklist)
+          : PREWALK_CONTINUE_PROMPT;
+        extension.sendMessage(
+          {
+            customType: PREWALK_CONTINUE_MESSAGE_TYPE,
+            content: pending.verificationMode === "gated"
+              ? `${basePrompt}\n\n${PREWALK_GATED_VERIFY_PROMPT}`
+              : basePrompt,
+            display: false,
+            details: {
+              mode: "in-place",
+              model,
+              trigger: pending.triggerRef,
+              continuationId: pending.audit.nestedToolCallId,
+              ...(pending.verificationMode === "gated"
+                ? { phase: "verify", revision: pending.revision ?? 0 }
+                : {}),
+            },
+          },
+          { deliverAs: "followUp", triggerTurn: true },
+        );
+      } catch (error) {
+        continuationError = error instanceof Error ? error.message : String(error);
+        handoffError = `Prewalk continuation delivery failed: ${continuationError}`;
+      }
+    } else if (pending.kind === "prewalk-trajectory" && completed) {
       // Main is never left idle after a delegated implementation: queue a
       // hidden verify-and-summarize continuation the same way in-place does.
       // Best-effort — the executor's completed result stays authoritative.
@@ -503,13 +534,13 @@ export const runFabricHandoffAtBoundary = async (
       "fabric-prewalk",
       completed
         ? continuationError
-          ? "trajectory implemented; continuation delivery failed"
-          : "trajectory executor implemented"
-        : `trajectory ${String(result.status ?? "failed")}`,
+          ? `${prewalkMode} implemented; continuation delivery failed`
+          : `${prewalkMode} executor implemented`
+        : `${prewalkMode} ${String(result.status ?? "failed")}`,
     );
     return {
-      ...(pending.kind === "prewalk-trajectory"
-        ? { prewalk: true, mode: "trajectory", trigger: { ref: pending.triggerRef } }
+      ...(inPlaceImpl || pending.kind === "prewalk-trajectory"
+        ? { prewalk: true, mode: prewalkMode, trigger: { ref: pending.triggerRef } }
         : {}),
       ...result,
       ...(continuationError
@@ -522,7 +553,7 @@ export const runFabricHandoffAtBoundary = async (
     pending.audit.success = false;
     pending.audit.error = message;
     pending.audit.endedAt = Date.now();
-    context.ui.setStatus("fabric-prewalk", inPlace ? "in-place continuation failed" : "trajectory handoff failed");
+    context.ui.setStatus("fabric-prewalk", prewalkMode === "trajectory" ? "trajectory handoff failed" : `${prewalkMode} continuation failed`);
     return {
       ...(pending.kind.startsWith("prewalk-")
         ? {
