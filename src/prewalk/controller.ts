@@ -111,6 +111,12 @@ export class PrewalkController {
   #triggerRisks = new Set<FabricRisk>();
   #triggerEffects = new Set<FabricEffect>(["workspace"]);
   #researchMutationReserved = false;
+  // Per-continuation bound on the checklist reminder so it steers a drifting
+  // executor without keeping Main working after the checklist is satisfied.
+  // The count is scoped to the live handoff so a new continuation starts fresh.
+  #reminderCount = 0;
+  #reminderHandoffId: string | undefined;
+  static #REMINDER_LIMIT = 3;
 
   configureTriggers(
     risks: readonly FabricRisk[],
@@ -248,11 +254,27 @@ export class PrewalkController {
   }
 
   // The executor is steered every turn from the live checklist, not once at the
-  // boundary, so a long continuation cannot drift away from its own plan.
-  activeChecklist(sessionId: string): FabricPrewalkChecklist | undefined {
+  // boundary, so a long continuation cannot drift away from its own plan. The
+  // reminder is bounded per continuation: after the limit it stops firing, so
+  // Main is not held working and replaying a growing context once the checklist
+  // is satisfied. The bound is scoped to the live handoff and resets on a new
+  // continuation, so a re-arm gets a fresh budget.
+  claimChecklistReminder(
+    sessionId: string,
+  ): FabricPrewalkChecklist | undefined {
     const status = this.#status;
-    if (status.state !== "continuing" && status.state !== "verifying") return undefined;
+    if (status.state !== "continuing" && status.state !== "verifying") {
+      this.#reminderCount = 0;
+      this.#reminderHandoffId = undefined;
+      return undefined;
+    }
     if (status.sessionId !== sessionId || !status.checklist) return undefined;
+    if (status.handoffId !== this.#reminderHandoffId) {
+      this.#reminderCount = 0;
+      this.#reminderHandoffId = status.handoffId;
+    }
+    if (this.#reminderCount >= PrewalkController.#REMINDER_LIMIT) return undefined;
+    this.#reminderCount += 1;
     return structuredClone(status.checklist);
   }
 

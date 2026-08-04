@@ -63,7 +63,9 @@ export const filterPrewalkContinuationMessages = <Message extends MessageWithRol
 
 // A per-turn reminder rendered from the live checklist so a long continuation
 // cannot drift away from its own plan. Injected by the context hook, not
-// persisted, so it steers every inference without accumulating in the session.
+// persisted, so it steers inference without accumulating in the session. The
+// controller bounds how many turns it fires per continuation, so this steers a
+// drifting executor without holding Main after the checklist is satisfied.
 export const prewalkChecklistReminder = (
   checklist: FabricPrewalkChecklist,
 ): string => [

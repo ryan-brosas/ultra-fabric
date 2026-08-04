@@ -287,18 +287,44 @@ describe("PrewalkController", () => {
         validation: `Run check ${index + 1}`,
       })),
     });
-    expect(controller.activeChecklist("session-1")).toBeUndefined();
+    expect(controller.claimChecklistReminder("session-1")).toBeUndefined();
 
     const claim = controller.claim([audit("pi.edit", true)], "session-1", "handoff-1");
     expect(claim).toBeDefined();
     controller.completeHandoff();
     controller.acceptContinuation("session-1", "handoff-1");
 
-    expect(controller.activeChecklist("session-1")?.items).toHaveLength(5);
-    expect(controller.activeChecklist("session-2")).toBeUndefined();
+    expect(controller.claimChecklistReminder("session-1")?.items).toHaveLength(5);
+    expect(controller.claimChecklistReminder("session-2")).toBeUndefined();
 
     controller.cancel();
-    expect(controller.activeChecklist("session-1")).toBeUndefined();
+    expect(controller.claimChecklistReminder("session-1")).toBeUndefined();
+  });
+
+  it("bounds the checklist reminder per continuation", () => {
+    const controller = new PrewalkController();
+    controller.arm({ mode: "in-place", model: "anthropic/executor", sessionId: "session-1" });
+    controller.executionBoundary("session-1")!.registerChecklist({
+      items: Array.from({ length: 5 }, (_, index) => ({
+        task: `Change target ${index + 1}`,
+        validation: `Run check ${index + 1}`,
+      })),
+    });
+    const claim = controller.claim([audit("pi.edit", true)], "session-1", "handoff-1");
+    expect(claim).toBeDefined();
+    controller.completeHandoff();
+    controller.acceptContinuation("session-1", "handoff-1");
+
+    // The reminder steers a drifting executor, but an unbounded reminder keeps
+    // Main working after the checklist is satisfied and replays a growing
+    // context every turn.
+    const fired: number[] = [];
+    for (let turn = 0; turn < 8; turn++) {
+      if (controller.claimChecklistReminder("session-1")) fired.push(turn);
+    }
+    expect(fired.length).toBeLessThanOrEqual(3);
+    expect(fired.length).toBeGreaterThan(0);
+    expect(controller.claimChecklistReminder("session-1")).toBeUndefined();
   });
 
   it("serializes the research mode first mutation reservation", () => {

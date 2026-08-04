@@ -499,15 +499,15 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
       });
       return messageChanged ? { ...message, content } : message;
     });
-    const activeChecklist = state.initialized
-      ? state.prewalk.activeChecklist(sessionId)
+    const liveChecklist = state.initialized
+      ? state.prewalk.claimChecklistReminder(sessionId)
       : undefined;
-    if (activeChecklist) {
+    if (liveChecklist) {
       messages = [
         ...messages,
         {
           role: "user",
-          content: [{ type: "text", text: prewalkChecklistReminder(activeChecklist) }],
+          content: [{ type: "text", text: prewalkChecklistReminder(liveChecklist) }],
         } as (typeof messages)[number],
       ];
       changed = true;
