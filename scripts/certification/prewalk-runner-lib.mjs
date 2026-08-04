@@ -284,13 +284,17 @@ export const parsePrewalkEvaluatorResult = (value, variant) => {
 };
 
 export const buildPrewalkProjectConfig = (variant, executor, timeoutMs) => ({
-  configVersion: 1,
+  configVersion: 2,
   fullCodeMode: true,
   executor: {
     runtime: "quickjs",
     timeoutMs: Math.max(1_000, Math.min(900_000, Math.floor(timeoutMs))),
   },
   prewalk: {
+    // The certification fake-pi stub reads prewalk.mode to simulate the
+    // research/in-place variants; production configs are cleaned by the
+    // 1->2 migration, but this benchmark fixture writes the raw file the
+    // fake pi inspects directly.
     mode: variant,
     model: `${executor.provider}/${executor.model}`,
     thinking: "off",

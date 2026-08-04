@@ -38,15 +38,53 @@ describe("Fabric configuration migrations", () => {
     expect(result).toMatchObject({
       fromVersion: 0,
       toVersion: CURRENT_FABRIC_CONFIG_VERSION,
-      appliedVersions: [1],
+      appliedVersions: [1, 2],
       changed: true,
     });
     expect(result.document).toEqual({
-      configVersion: 1,
+      configVersion: 2,
       agents: { runner: "claude", defaultTools: ["read"] },
       ui: { enabled: false },
     });
     expect(input).toHaveProperty("subagents");
+  });
+
+  it("removes the prewalk mode field that no longer exists in the schema", () => {
+    const input = {
+      configVersion: 1,
+      prewalk: { mode: "trajectory", model: "provider/executor", thinking: "max" },
+      agents: { runner: "pi" },
+    };
+    const result = migrateFabricConfigDocument(input);
+
+    expect(result.document).toEqual({
+      configVersion: 2,
+      prewalk: { model: "provider/executor", thinking: "max" },
+      agents: { runner: "pi" },
+    });
+    expect(input.prewalk).toHaveProperty("mode");
+  });
+
+  it("leaves a document without a prewalk section untouched apart from the version bump", () => {
+    const input = { configVersion: 1, agents: { runner: "pi" } };
+    const result = migrateFabricConfigDocument(input);
+    expect(result.document).toEqual({ configVersion: 2, agents: { runner: "pi" } });
+    expect(result.document).not.toHaveProperty("prewalk");
+  });
+
+  it("preserves prewalk keys other than mode", () => {
+    const input = {
+      configVersion: 1,
+      prewalk: { model: "provider/x", thinking: "max", triggerRefs: ["pi.edit"], returnPolicy: "executor" },
+    };
+    const result = migrateFabricConfigDocument(input);
+    expect(result.document.prewalk).toEqual({
+      model: "provider/x",
+      thinking: "max",
+      triggerRefs: ["pi.edit"],
+      returnPolicy: "executor",
+    });
+    expect(result.document.prewalk).not.toHaveProperty("mode");
   });
 
   it("merges both section names with the canonical section taking precedence", () => {
@@ -71,7 +109,7 @@ describe("Fabric configuration migrations", () => {
 
   it("rejects invalid, future, and legacy keys in current documents", () => {
     expect(() => migrateFabricConfigDocument({ configVersion: -1 })).toThrow(/non-negative integer/);
-    expect(() => migrateFabricConfigDocument({ configVersion: 2 })).toThrow(/newer than supported/);
+    expect(() => migrateFabricConfigDocument({ configVersion: 3 })).toThrow(/newer than supported/);
     expect(() =>
       migrateFabricConfigDocument({ configVersion: 1, subagents: {} }),
     ).toThrow(/removed key/);
@@ -84,9 +122,9 @@ describe("Fabric configuration migrations", () => {
 
     const config = loadFabricConfig({ cwd: paths.cwd, agentDir: paths.agentDir, projectTrusted: true });
     expect(config.agents).toMatchObject({ runner: "pi", transport: "tmux", maxConcurrent: 2 });
-    expect(JSON.parse(fs.readFileSync(paths.globalPath, "utf8"))).toMatchObject({ configVersion: 1, agents: { runner: "claude" } });
+    expect(JSON.parse(fs.readFileSync(paths.globalPath, "utf8"))).toMatchObject({ configVersion: 2, agents: { runner: "claude" } });
     expect(JSON.parse(fs.readFileSync(paths.projectPath, "utf8"))).toEqual({
-      configVersion: 1,
+      configVersion: 2,
       agents: { runner: "pi", transport: "tmux" },
     });
   });
@@ -103,7 +141,7 @@ describe("Fabric configuration migrations", () => {
 
   it("does not rewrite an already-current config during load", () => {
     const paths = fixture();
-    const current = JSON.stringify({ configVersion: 1, agents: { maxConcurrent: 3 } }, null, 2) + "\n";
+    const current = JSON.stringify({ configVersion: 2, agents: { maxConcurrent: 3 } }, null, 2) + "\n";
     fs.writeFileSync(paths.globalPath, current);
     const before = fs.statSync(paths.globalPath).mtimeMs;
 
@@ -123,7 +161,7 @@ describe("Fabric configuration migrations", () => {
     );
 
     expect(JSON.parse(fs.readFileSync(paths.projectPath, "utf8"))).toEqual({
-      configVersion: 1,
+      configVersion: 2,
       agents: { transport: "screen", maxConcurrent: 7 },
     });
   });
@@ -145,7 +183,7 @@ describe("Fabric configuration migrations", () => {
       expect(config.agents.maxConcurrent).toBe(5);
       expect(fs.lstatSync(paths.globalPath).isSymbolicLink()).toBe(true);
       expect(JSON.parse(fs.readFileSync(target, "utf8"))).toEqual({
-        configVersion: 1,
+        configVersion: 2,
         agents: { maxConcurrent: 5 },
       });
     },

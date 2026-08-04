@@ -258,7 +258,7 @@ describe("real Prewalk runner contract", () => {
       provider: "anthropic",
       model: "executor-model",
     }, 60_000)).toMatchObject({
-      configVersion: 1,
+      configVersion: 2,
       fullCodeMode: true,
       prewalk: {
         mode: "research",

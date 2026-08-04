@@ -637,7 +637,7 @@ describe("Fabric configuration", () => {
     expect(result.path).toBe(path.join(cwd, ".pi", "fabric.json"));
     const saved = JSON.parse(fs.readFileSync(path.join(cwd, ".pi", "fabric.json"), "utf8"));
     expect(saved).toEqual({
-      configVersion: 1,
+      configVersion: 2,
       agents: { transport: "localterm", maxConcurrent: 8 },
       fullCodeMode: false,
     });
@@ -662,7 +662,7 @@ describe("Fabric configuration", () => {
     expect(result.path).toBe(path.join(agentDir, "fabric.json"));
     expect(fs.existsSync(path.join(cwd, ".pi", "fabric.json"))).toBe(false);
     const saved = JSON.parse(fs.readFileSync(path.join(agentDir, "fabric.json"), "utf8"));
-    expect(saved).toEqual({ configVersion: 1, executor: { timeoutMs: 30_000 } });
+    expect(saved).toEqual({ configVersion: 2, executor: { timeoutMs: 30_000 } });
   });
 
   it("persists and clears the dedicated prewalk model", () => {
