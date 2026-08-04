@@ -1406,7 +1406,11 @@ export class FabricExecutionService {
               reason: summary,
             });
             run.transitions.record(`gate:${gate.gate}:${gate.decision}`);
-          } catch {}
+          } catch (gateError) {
+            qualityWarning += ` (gate record failed: ${
+              gateError instanceof Error ? gateError.message : String(gateError)
+            })`;
+          }
         }
       }
     }
