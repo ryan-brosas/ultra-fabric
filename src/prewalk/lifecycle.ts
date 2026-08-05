@@ -49,6 +49,7 @@ type FabricPrewalkContinuationStatus =
     attempt: number;
     handoffId: string;
     returnModel?: string;
+    returnThinking?: string;
     verificationGate?: string;
   };
 
@@ -58,6 +59,10 @@ type FabricPrewalkBlockedStatus =
     handoffId: string;
     blockedAt: number;
     error: string;
+    // A blocked task already switched Main to the executor, so it still owes a
+    // restore. The reducer carries this through both blocked paths.
+    returnModel?: string;
+    returnThinking?: string;
   } & FabricPrewalkPhaseState;
 
 export type FabricPrewalkStatus =
@@ -85,6 +90,7 @@ export type FabricPrewalkEvent =
       at: number;
       handoffId: string;
       returnModel?: string;
+      returnThinking?: string;
     }
   | { kind: "continuation_accepted"; sessionId: string; handoffId: string }
   | {
@@ -228,6 +234,7 @@ export const reducePrewalkLifecycle = (
               ? "verification_pending"
               : "continuation_pending",
             ...(event.returnModel ? { returnModel: event.returnModel } : {}),
+        ...(event.returnThinking ? { returnThinking: event.returnThinking } : {}),
           }
         : status;
     case "continuation_accepted":

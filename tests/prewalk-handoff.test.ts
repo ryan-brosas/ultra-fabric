@@ -66,7 +66,7 @@ const execution = (): FabricExecutionResult => ({
   elapsedMs: 1,
 });
 
-const context = () => {
+const context = (overrides?: { thinkingLevel?: string }) => {
   const source = SessionManager.inMemory();
   source.appendMessage({ role: "user", content: "Implement everything", timestamp: 1 });
   source.appendMessage({
@@ -98,6 +98,7 @@ const context = () => {
       cwd: process.cwd(),
       signal: undefined,
       model: { provider: "anthropic", id: "frontier" },
+      thinkingLevel: overrides?.thinkingLevel,
       modelRegistry: {
         find: (provider: string, id: string) =>
           provider === target.provider && id === target.id ? target : undefined,
@@ -110,12 +111,16 @@ const context = () => {
   };
 };
 
-const extension = () => {
+const extension = (overrides?: { getThinkingLevel?: string }) => {
   const setModel = vi.fn().mockResolvedValue(true);
+  const setThinkingLevel = vi.fn();
+  const getThinkingLevel = vi.fn().mockReturnValue(overrides?.getThinkingLevel ?? "medium");
   const sendMessage = vi.fn();
   return {
-    value: { setModel, sendMessage } as unknown as ExtensionAPI,
+    value: { setModel, setThinkingLevel, getThinkingLevel, sendMessage } as unknown as ExtensionAPI,
     setModel,
+    setThinkingLevel,
+    getThinkingLevel,
     sendMessage,
   };
 };
@@ -555,6 +560,43 @@ describe("outer-boundary Prewalk", () => {
 // column is setModel — only research may ever change Main's model.
 // The single prewalk path has no mode discriminant: it always switches Main in
 // session and never spawns a child, so the executor inherits Main tools.
+describe("prewalk thinking level is applied", () => {
+  it("calls setThinkingLevel with the arm's configured thinking level", async () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      thinking: "max",
+    } as never);
+    const pending = claimFabricHandoff(controller, execution(), "session-1", "json")!;
+    const ctx = context();
+    const ext = extension();
+    await runFabricHandoffAtBoundary(controller, ext.value, pending, ctx.value);
+    expect(ext.setThinkingLevel).toHaveBeenCalledWith("max");
+  });
+});
+
+describe("prewalk thinking round trip", () => {
+  it("applies arm thinking on handoff and captures returnThinking from the context", async () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      thinking: "max",
+    } as never);
+    const pending = claimFabricHandoff(controller, execution(), "session-1", "json")!;
+    const ctx = context({ thinkingLevel: "medium" });
+    const ext = extension({ getThinkingLevel: "medium" });
+    await runFabricHandoffAtBoundary(controller, ext.value, pending, ctx.value);
+    // Level applied on handoff
+    expect(ext.setThinkingLevel).toHaveBeenCalledWith("max");
+    // Return thinking captured from the context at handoff time
+    expect(controller.status()).toMatchObject({
+      returnThinking: "medium",
+    });
+  });
+});
+
 describe("prewalk single-path contract", () => {
   const armed = () => {
     const controller = new PrewalkController();

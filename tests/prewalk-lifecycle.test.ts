@@ -264,6 +264,51 @@ describe("reducePrewalkLifecycle", () => {
     })).toEqual({ state: "idle" });
   });
 
+  it("retains returnModel on both gated blocked paths so Main can be restored", () => {
+    const gated = arm({
+      verificationMode: "gated",
+      maxPhaseRevisions: 2,
+    } as Partial<FabricPrewalkArm>);
+    const claimed = reducePrewalkLifecycle(
+      reducePrewalkLifecycle({ state: "idle" }, { kind: "armed", arm: gated }),
+      { kind: "handoff_claimed", sessionId: "session-1", handoffId: "execute-1" },
+    );
+    const pending = reducePrewalkLifecycle(claimed, {
+      kind: "handoff_succeeded",
+      at: 20,
+      handoffId: "execute-1",
+      returnModel: "anthropic/original-main",
+    });
+    const verifying = reducePrewalkLifecycle(pending, {
+      kind: "continuation_accepted",
+      sessionId: "session-1",
+      handoffId: "execute-1",
+    });
+
+    // Path A: the task settles while still verifying (no acceptance evidence).
+    const settledBlocked = reducePrewalkLifecycle(verifying, {
+      kind: "continuation_settled",
+      sessionId: "session-1",
+      at: 30,
+    });
+    expect(settledBlocked).toMatchObject({
+      state: "blocked",
+      returnModel: "anthropic/original-main",
+    });
+
+    // Path B: an abort or crashed gate fails verification outright.
+    const failedBlocked = reducePrewalkLifecycle(verifying, {
+      kind: "verification_failed",
+      sessionId: "session-1",
+      at: 30,
+      error: "gate crashed",
+    } as never);
+    expect(failedBlocked).toMatchObject({
+      state: "blocked",
+      returnModel: "anthropic/original-main",
+    });
+  });
+
   it("blocks gated verification after its revision cap", () => {
     const state = {
       ...handingOff({

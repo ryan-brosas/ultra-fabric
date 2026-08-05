@@ -312,6 +312,67 @@ describe("PrewalkController", () => {
     expect(settled.returnModel).toBe("anthropic/frontier");
   });
 
+  // A gated task that never records acceptance evidence still switched Main to
+  // the executor, so it must still surrender its returnModel. Otherwise Main is
+  // stranded on the executor model, which setModel also persists globally.
+  it("yields a returnModel when a gated continuation settles while verifying", () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement",
+      verificationMode: "gated",
+      maxPhaseRevisions: 1,
+    } as never);
+    controller.claim([audit("pi.edit", true)], "session-1", "execute-1");
+    controller.completeHandoff("anthropic/frontier");
+    expect(controller.acceptContinuation("session-1", "execute-1")).toBe(true);
+    expect(controller.status()).toMatchObject({ state: "verifying" });
+
+    const settled = controller.settleContinuation("session-1");
+    expect(settled.returnModel).toBe("anthropic/frontier");
+    expect(settled.status).toMatchObject({ state: "blocked" });
+  });
+
+  it("surrenders a blocked returnModel exactly once", () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement",
+      verificationMode: "gated",
+      maxPhaseRevisions: 1,
+    } as never);
+    controller.claim([audit("pi.edit", true)], "session-1", "execute-1");
+    controller.completeHandoff("anthropic/frontier");
+    controller.acceptContinuation("session-1", "execute-1");
+
+    const observe = (controller as unknown as {
+      observeVerification(
+        gates: Array<Record<string, unknown>>,
+        sessionId: string,
+        handoffId: string,
+      ): unknown;
+    }).observeVerification.bind(controller);
+    observe([
+      {
+        gate: "acceptance",
+        passed: false,
+        disposition: "abort",
+        evidence: [{ kind: "command", ref: "gate:crashed" }],
+        reason: "gate crashed",
+        sequence: 1,
+        recordedAt: 20,
+        decision: "abort",
+        revision: 0,
+      },
+    ], "session-1", "abort-1");
+    expect(controller.status()).toMatchObject({ state: "blocked" });
+
+    expect(controller.takeReturnState("session-1")).toMatchObject({ model: "anthropic/frontier" });
+    expect(controller.takeReturnState("session-1")).toEqual({});
+  });
+
   it("bounds the checklist reminder per continuation", () => {
     const controller = new PrewalkController();
     controller.arm({ model: "anthropic/executor", sessionId: "session-1" });

@@ -58,6 +58,7 @@ export const prewalkArmedMessageType = (): string =>
 const researchArmedPrompt = (model: string): string => [
   `Prewalk armed → ${model} (research).`,
   "Before any further mutation, commit to a deep, concrete remaining execution plan grounded in the context already gathered. Cover the target files or symbols, dependencies, edge cases, and proof needed for completion.",
+  "Support roles back this prewalk: scout for fast codebase reconnaissance, explorer for bounded deep exploration, planner for dependency-aware sequencing, and reviewer for fresh-context review of the work and the plan. Delegate breadth-first retrieval to these roles or to consult.run partition workers so they spend their own context and return structured findings or evidence locators instead of whole files into yours. consult.run needs non-overlapping scopes or rising context pressure; the host admits at most one per fabric_exec and zero workers by default; a not_admitted result means continue inline. Do not use the worker role; the executor owns all mutation.",
   "In that same assistant reply, call prewalk.checklist({ items }) inside fabric_exec with 5-9 ordered items. Every item must have a concrete task and a specific validation. The host rejects mutation until this checklist is accepted.",
   "After the checklist is accepted, stop. Do not make any mutation yourself. The host ends fabric_exec at the accepted checklist and switches this session to the executor model.",
   "The executor owns the remaining implementation and verification through completion.",
@@ -249,6 +250,7 @@ export const claimFabricHandoff = (
         feedback: verification.feedback,
       },
       ...(verification.returnModel ? { returnModel: verification.returnModel } : {}),
+      ...(verification.returnThinking ? { returnThinking: verification.returnThinking } : {}),
     });
     execution.audits.push(pending.audit);
     return pending;
@@ -317,6 +319,9 @@ const runResearchPrewalk = async (
       const model = requirePrewalkModel(candidate, context);
       if (await extension.setModel(model)) {
         modelKey = candidate;
+        if (pending.args.thinking) {
+          extension.setThinkingLevel(pending.args.thinking as import("../thinking.js").FabricThinking);
+        }
         break;
       }
       failures.push(`${candidate}: no authentication`);
@@ -374,6 +379,7 @@ export const runFabricHandoffAtBoundary = async (
       ? context.model.provider + "/" + context.model.id
       : undefined
   );
+  const returnThinking = context.thinkingLevel;
   let handoffError: string | undefined;
   try {
     const result = await runResearchPrewalk(extension, pending, context);
@@ -405,7 +411,7 @@ export const runFabricHandoffAtBoundary = async (
   } finally {
     const status = handoffError
       ? controller.failHandoff(handoffError)
-      : controller.completeHandoff(returnModel);
+      : controller.completeHandoff(returnModel, returnThinking);
     if (status.state === "armed") {
       context.ui.setStatus("fabric-prewalk", `armed → ${status.model}`);
     } else if (

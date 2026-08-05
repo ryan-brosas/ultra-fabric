@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { FabricCallAudit } from "../core/action-registry.js";
 import type { FabricEffect, FabricRisk } from "../protocol.js";
 import type { FabricGateResult } from "../run/context.js";
@@ -32,6 +33,7 @@ interface FabricPrewalkBoundaryAction {
   ref: string;
   risk?: FabricRisk;
   effect?: FabricEffect;
+  path?: string;
 }
 
 export interface FabricPrewalkExecutionBoundary {
@@ -82,6 +84,7 @@ export type FabricPrewalkVerificationDecision =
       feedback: string;
       revision: number;
       returnModel?: string;
+      returnThinking?: string;
     }
   | { kind: "blocked"; gate: string; error: string };
 
@@ -116,6 +119,11 @@ export class PrewalkController {
   #triggerRisks = new Set<FabricRisk>();
   #triggerEffects = new Set<FabricEffect>(["workspace"]);
   #researchMutationReserved = false;
+  readonly #writeScopes = new Map<string, Set<string>>();
+  // Handoffs whose returnModel has already been surrendered. A blocked task
+  // persists across turns, so without this the restore would re-fire on every
+  // settle and fight a manual model change.
+  readonly #consumedReturnModels = new Set<string>();
   // Per-continuation bound on the checklist reminder so it steers a drifting
   // executor without keeping Main working after the checklist is satisfied.
   // The count is scoped to the live handoff so a new continuation starts fresh.
@@ -177,6 +185,7 @@ export class PrewalkController {
         if (this.#researchMutationReserved) {
           throw new Error("Research Prewalk first mutation is already in flight");
         }
+        this.#enforceWriteScope(sessionId, action);
         this.#researchMutationReserved = true;
         return true;
       },
@@ -277,8 +286,35 @@ export class PrewalkController {
     return structuredClone(status.checklist);
   }
 
+  setWriteScope(sessionId: string, paths: readonly string[]): void {
+    if (!this.isArmed(sessionId)) return;
+    this.#writeScopes.set(sessionId, new Set(paths));
+  }
+
+  clearWriteScope(sessionId: string): void {
+    this.#writeScopes.delete(sessionId);
+  }
+
+  #enforceWriteScope(sessionId: string, action: FabricPrewalkBoundaryAction): void {
+    const scope = this.#writeScopes.get(sessionId);
+    if (!scope || scope.size === 0) return;
+    if (action.effect !== "workspace") return;
+    if (!action.path) return;
+    const resolved = action.path.startsWith("/")
+      ? action.path
+      : path.resolve(process.cwd(), action.path);
+    for (const allowed of scope) {
+      const abs = allowed.startsWith("/") ? allowed : path.resolve(process.cwd(), allowed);
+      if (resolved === abs || resolved.startsWith(abs + "/")) return;
+    }
+    throw new Error(
+      "Prewalk write scope rejects path outside the current wave: " + action.path,
+    );
+  }
+
   settleTask(sessionId: string, rearm?: FabricPrewalkRearmDefaults): boolean {
     const previous = this.#status;
+    this.#writeScopes.delete(sessionId);
     this.#transition({
       kind: "task_settled",
       sessionId,
@@ -300,13 +336,14 @@ export class PrewalkController {
     return this.#transition({ kind: "executor_selected", model });
   }
 
-  completeHandoff(returnModel?: string): FabricPrewalkStatus {
+  completeHandoff(returnModel?: string, returnThinking?: string): FabricPrewalkStatus {
     if (this.#status.state !== "handing_off") return this.status();
     return this.#transition({
       kind: "handoff_succeeded",
       at: Date.now(),
       handoffId: this.#status.handoffId,
       ...(returnModel ? { returnModel } : {}),
+      ...(returnThinking ? { returnThinking } : {}),
     });
   }
 
@@ -326,12 +363,23 @@ export class PrewalkController {
     settled: boolean;
     status: FabricPrewalkStatus;
     returnModel?: string;
+    returnThinking?: string;
   } {
     const previous = this.#status;
+    // A gated task that settles while still verifying never recorded acceptance
+    // evidence, but it did switch Main to the executor. It still owes the
+    // restore, so surrender the returnModel on that path too.
     const returnModel =
-      previous.state === "continuing" && previous.sessionId === sessionId
+      (previous.state === "continuing" || previous.state === "verifying") &&
+      previous.sessionId === sessionId
         ? previous.returnModel
         : undefined;
+    const returnThinking =
+      (previous.state === "continuing" || previous.state === "verifying") &&
+      previous.sessionId === sessionId
+        ? previous.returnThinking
+        : undefined;
+    this.#writeScopes.delete(sessionId);
     const status = this.#transition({
       kind: "continuation_settled",
       sessionId,
@@ -342,7 +390,22 @@ export class PrewalkController {
       settled: previous !== this.#status,
       status,
       ...(returnModel ? { returnModel } : {}),
+      ...(returnThinking ? { returnThinking } : {}),
     };
+  }
+
+  // The verification_failed path blocks at the fabric_exec boundary rather than
+  // at settlement, so settleContinuation never sees it. Surrender the pending
+  // returnModel here instead, exactly once per handoff.
+  takeReturnState(sessionId: string): { model?: string; thinking?: string } {
+    const status = this.#status;
+    if (status.state !== "blocked" || status.sessionId !== sessionId) return {};
+    if (this.#consumedReturnModels.has(status.handoffId)) return {};
+    this.#consumedReturnModels.add(status.handoffId);
+    const result: { model?: string; thinking?: string } = {};
+    if (status.returnModel) result.model = status.returnModel;
+    if (status.returnThinking) result.thinking = status.returnThinking;
+    return result;
   }
 
   observeVerification(
@@ -367,6 +430,7 @@ export class PrewalkController {
     const revision = [...effective].reverse().find((gate) => gate.decision === "revise");
     if (revision) {
       const returnModel = this.#status.returnModel;
+      const returnThinking = this.#status.returnThinking;
       const feedback = gateFeedback(revision).slice(0, 4_096);
       const next = this.#transition({
         kind: "verification_revision",
@@ -388,6 +452,7 @@ export class PrewalkController {
         feedback,
         revision: next.revision ?? 0,
         ...(returnModel ? { returnModel } : {}),
+        ...(returnThinking ? { returnThinking } : {}),
       };
     }
     const passed = [...effective].reverse().find(

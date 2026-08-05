@@ -139,4 +139,40 @@ describe("prewalk prompt isolation", () => {
     expect(handler).toContain("restorePrewalkModel");
     expect(handler).toContain("state.prewalk.settleTask");
   });
+
+  it("surfaces bounded consult delegation in the research arm prompt", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "prewalk", "handoff.ts"),
+      "utf8",
+    );
+    const start = source.indexOf("const researchArmedPrompt");
+    const end = source.indexOf("export const prewalkArmedPrompt", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const prompt = source.slice(start, end);
+
+    // Main must know consult.run exists as a retrieval-delegation surface.
+    expect(prompt).toContain("consult.run");
+
+    // Four support roles are named for retrieval, planning, and review.
+    expect(prompt).toContain("scout");
+    expect(prompt).toContain("explorer");
+    expect(prompt).toContain("planner");
+    expect(prompt).toContain("reviewer");
+
+    // Worker is excluded because the executor owns mutation.
+    expect(prompt.toLowerCase()).toContain("worker");
+    expect(prompt).toMatch(/worker.*mutation|executor.*mutation/);
+
+    // Delegation stays conditional: non-overlapping scopes or context
+    // pressure, never mandatory. Zero agents remains the default.
+    expect(prompt).toMatch(/non-overlapping/);
+    expect(prompt).toMatch(/context pressure/);
+    expect(prompt.toLowerCase()).not.toContain("always");
+    expect(prompt.toLowerCase()).not.toContain("must delegate");
+
+    // The directive must remain token-cheap since this prompt fires once
+    // per arm and is pruned before the executor's first inference.
+    expect(prompt.length).toBeLessThanOrEqual(2_000);
+  });
 });
