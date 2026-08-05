@@ -105,8 +105,9 @@ export const deriveWorkSlug = (title: string, maxWords = 6): string => {
     .filter(Boolean)
     .slice(0, maxWords);
   const raw = words.join("-").toLowerCase();
-  const truncated = raw.length <= 80 ? raw : raw.slice(0, raw.lastIndexOf("-", 80));
-  return sanitizeWorkSlug(truncated || raw.slice(0, 80));
+  if (raw.length <= 80) return sanitizeWorkSlug(raw || "work");
+  const boundary = raw.lastIndexOf("-", 80);
+  return sanitizeWorkSlug(boundary > 0 ? raw.slice(0, boundary) : raw.slice(0, 80));
 };
 
 export const sanitizeWorkSlug = (title: string): string => {

@@ -35,7 +35,7 @@ describe("buildSymbolIndex", () => {
 
 describe("enclosingSymbol", () => {
   it("resolves a line inside completeInFlight to completeInFlight, not FabricWorkStore", () => {
-    const resolved = enclosingSymbol(index, "src/lifecycle/store.ts", 236);
+    const resolved = enclosingSymbol(index, "src/lifecycle/store.ts", 237);
     // completeInFlight may shift when deriveWorkSlug is added above it
     expect(resolved?.name).toBe("completeInFlight");
   });

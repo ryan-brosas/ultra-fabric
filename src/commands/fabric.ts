@@ -738,8 +738,8 @@ const runResearch = async (
             ?? (explicitSlug ? sanitizeWorkSlug(explicitSlug) : undefined)
             ?? deriveWorkSlug(topic);
           const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          adapter.write(workSlug, "research", result.text);
           if (slug) {
+            adapter.write(workSlug, "research", result.text);
             await state.work.update(slug, (record) => ({
               ...record,
               phase: "research",
@@ -747,14 +747,18 @@ const runResearch = async (
               evidence: [...record.evidence, { phase: "research", ref: `agent:${result.traceId ?? "scout"}`, claim: topic }],
             }));
           } else {
-            await state.work.create({
+            const created = await state.work.create({
               slug: workSlug,
               title: topic,
               phase: "research",
-              artifacts: { research: adapter.resolve(workSlug, "research") },
               evidence: [{ phase: "research", ref: `agent:${result.traceId ?? "scout"}`, claim: topic }],
             });
-            await state.work.setActive(workSlug);
+            adapter.write(created.slug, "research", result.text);
+            await state.work.update(created.slug, (record) => ({
+              ...record,
+              artifacts: { research: adapter.resolve(created.slug, "research") },
+            }));
+            await state.work.setActive(created.slug);
           }
           context.ui.notify(
             result.status === "completed"
@@ -787,20 +791,27 @@ const runCreate = async (
             timeoutMs: 600_000,
           });
           const createArgs = argumentsText.trim().slice(command.length).trim().split(/\s+/).filter(Boolean);
-          const slug = createArgs[0] === "--slug" && createArgs[1]
-            ? sanitizeWorkSlug(createArgs[1])
-            : deriveWorkSlug(description);
+          const explicitSlug = createArgs[0] === "--slug" && createArgs[1] ? createArgs[1] : undefined;
+          const cleanDescription = explicitSlug ? createArgs.slice(2).join(" ") : description;
+          const slug = explicitSlug ? sanitizeWorkSlug(explicitSlug) : deriveWorkSlug(cleanDescription);
+          if (!cleanDescription) {
+            context.ui.notify("Usage: /fabric create [--slug <name>] <description>", "warning");
+            return;
+          }
           const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          adapter.write(slug, "spec", result.text);
-          await state.work.create({
+          const created = await state.work.create({
             slug,
-            title: description,
+            title: cleanDescription,
             phase: "create",
-            artifacts: { spec: adapter.resolve(slug, "spec") },
-            evidence: [{ phase: "create", ref: `agent:${result.traceId ?? "planner"}`, claim: description }],
+            evidence: [{ phase: "create", ref: `agent:${result.traceId ?? "planner"}`, claim: cleanDescription }],
           });
-          await state.work.setActive(slug);
-          context.ui.notify(`Work record created: ${slug}. Run /fabric plan or /fabric ship.`, "info");
+          adapter.write(created.slug, "spec", result.text);
+          await state.work.update(created.slug, (record) => ({
+            ...record,
+            artifacts: { spec: adapter.resolve(created.slug, "spec") },
+          }));
+          await state.work.setActive(created.slug);
+          context.ui.notify(`Work record created: ${created.slug}. Run /fabric plan or /fabric ship.`, "info");
         } catch (error) {
           context.ui.notify(error instanceof Error ? error.message : String(error), "error");
         }

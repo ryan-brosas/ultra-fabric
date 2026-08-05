@@ -51,6 +51,22 @@ describe("FabricWorkStore", () => {
     expect(slug.includes("templat")).toBe(false);
   });
 
+  it("caps the slug at 80 characters even when a single word exceeds the limit, preferring word boundaries", () => {
+    const long = deriveWorkSlug("a".repeat(102));
+    expect(long.length).toBeLessThanOrEqual(80);
+    const withWord = deriveWorkSlug("b".repeat(85) + " second");
+    expect(withWord.length).toBeLessThanOrEqual(80);
+  });
+
+  it("escalates the suffix when both slug and slug-2 are already taken", async () => {
+    const { store } = setup();
+    await store.create(baseInput({ slug: "test", title: "First" }));
+    await store.create(baseInput({ slug: "test", title: "Second" }));
+    const third = await store.create(baseInput({ slug: "test", title: "Third" }));
+    expect(third.slug).toBe("test-3");
+    expect(third.title).toBe("Third");
+  });
+
   it("does not let punctuation or case leak into the slug", () => {
     expect(deriveWorkSlug("Fix: the parser!")).toBe("fix-the-parser");
     expect(deriveWorkSlug("feat.2026.q3")).toBe("feat-2026-q3");
