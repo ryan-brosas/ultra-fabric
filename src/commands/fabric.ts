@@ -4,9 +4,6 @@ import type { CapturedToolCatalog } from "../capture/catalog.js";
 import type { FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import type { FabricState } from "../fabric-state.js";
 import { armPrewalk } from "../prewalk/arm.js";
-import { FileArtifactAdapter } from "../lifecycle/artifacts.js";
-import { deriveWorkSlug, sanitizeWorkSlug } from "../lifecycle/store.js";
-import { parseTaskDag, selectNextWave } from "../lifecycle/task-dag.js";
 import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
 import { openFabricSettings } from "../ui/settings.js";
@@ -171,44 +168,6 @@ const runPrewalk = async (
   );
   if (task) pi.sendUserMessage(task);
 };
-
-// The lifecycle commands record the phase and point at the artifact. They no
-// longer dispatch an agent: role turn budgets are sized for narrow questions, so
-// an open-ended phase task exhausted them before it could answer. Main does the
-// work with full context and no turn ceiling.
-const LIFECYCLE_GUIDE: Readonly<Record<string, readonly string[]>> = {
-  research: [
-    "Gather evidence. Do not change code in this phase.",
-    "Write findings to {artifact}.",
-    "Cite file:line for every claim and record what you could not determine.",
-    "Next: /fabric create <description>",
-  ],
-  create: [
-    "Turn the research into a spec. Do not change code in this phase.",
-    "Write the spec to {artifact}.",
-    "Cover ordered tasks, affected paths, test seams, and rollback boundaries.",
-    "Next: /fabric plan",
-  ],
-  plan: [
-    "Turn the spec into an executable task DAG.",
-    "Write the plan to {artifact} as JSON.",
-    "Every task needs id, description, dependsOn, parallel, conflictsWith, files, and verify.",
-    "/fabric ship parses this file, so it must be valid JSON.",
-    "Next: /fabric ship",
-  ],
-  verify: [
-    "Check the shipped work against the spec.",
-    "Run the repository gate and review the diff.",
-    "Report findings by severity with file:line evidence, and record them on the work record.",
-    "Next: /fabric ship for the next wave, or close the work.",
-  ],
-};
-
-const guideFor = (phase: string, slug: string, artifact: string): string =>
-  [
-    `Fabric ${phase} phase for ${slug}.`,
-    ...(LIFECYCLE_GUIDE[phase] ?? []).map((line) => line.replace("{artifact}", artifact)),
-  ].join("\n");
 
 const runReload = async (deps: FabricCommandDeps, context: ExtensionContext): Promise<void> => {
   const { state, fabricUi, applyFabricMode, suspendToolCapture } = deps;
@@ -750,198 +709,10 @@ const runExport = async (
         return;
 };
 
-const runResearch = async (
-  state: FabricState,
-  context: ExtensionContext,
-  argumentsText: string,
-  command: string,
-): Promise<void> => {
-        const researchArgs = argumentsText.trim().slice(command.length).trim().split(/\s+/).filter(Boolean);
-        const explicitSlug = researchArgs[0] === "--slug" && researchArgs[1] ? researchArgs[1] : undefined;
-        const topic = explicitSlug ? researchArgs.slice(2).join(" ") : researchArgs.join(" ");
-        if (!topic) {
-          context.ui.notify("Usage: /fabric research [--slug <name>] <topic>", "warning");
-          return;
-        }
-        try {
-          const active = state.work.getActive();
-          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          let slug: string;
-          if (active) {
-            await state.work.update(active, (record) => ({ ...record, phase: "research" }));
-            slug = active;
-          } else {
-            const created = await state.work.create({
-              slug: explicitSlug ? sanitizeWorkSlug(explicitSlug) : deriveWorkSlug(topic),
-              title: topic,
-              phase: "research",
-            });
-            await state.work.setActive(created.slug);
-            slug = created.slug;
-          }
-          context.ui.notify(guideFor("research", slug, adapter.resolve(slug, "research")), "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
-        return;
-};
 
-const runCreate = async (
-  state: FabricState,
-  context: ExtensionContext,
-  argumentsText: string,
-  command: string,
-): Promise<void> => {
-        const description = argumentsText.trim().slice(command.length).trim();
-        if (!description) {
-          context.ui.notify("Usage: /fabric create <description>", "warning");
-          return;
-        }
-        const createArgs = argumentsText.trim().slice(command.length).trim().split(/\s+/).filter(Boolean);
-        const explicitSlug = createArgs[0] === "--slug" && createArgs[1] ? createArgs[1] : undefined;
-        const cleanDescription = explicitSlug ? createArgs.slice(2).join(" ") : description;
-        if (!cleanDescription) {
-          context.ui.notify("Usage: /fabric create [--slug <name>] <description>", "warning");
-          return;
-        }
-        try {
-          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          const created = await state.work.create({
-            slug: explicitSlug ? sanitizeWorkSlug(explicitSlug) : deriveWorkSlug(cleanDescription),
-            title: cleanDescription,
-            phase: "create",
-          });
-          await state.work.setActive(created.slug);
-          context.ui.notify(guideFor("create", created.slug, adapter.resolve(created.slug, "spec")), "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
-        return;
-};
 
-const runPlan = async (
-  state: FabricState,
-  context: ExtensionContext,
-): Promise<void> => {
-        try {
-          const slug = state.work.getActive();
-          if (!slug) {
-            context.ui.notify("No active work record. Run /fabric create <description> first.", "warning");
-            return;
-          }
-          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          const specText = adapter.read(slug, "spec");
-          if (!specText) {
-            context.ui.notify(`No spec at ${adapter.resolve(slug, "spec")}. Write it first, or run /fabric create.`, "warning");
-            return;
-          }
-          await state.work.update(slug, (r) => ({
-            ...r,
-            phase: "plan",
-            artifacts: { ...r.artifacts, spec: adapter.resolve(slug, "spec") },
-          }));
-          context.ui.notify(guideFor("plan", slug, adapter.resolve(slug, "plan")), "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
-        return;
-};
 
-const runShip = async (
-  pi: ExtensionAPI,
-  state: FabricState,
-  context: ExtensionContext,
-): Promise<void> => {
-        try {
-          if (!state.config.fullCodeMode || state.config.schema.mode === "enforce") {
-            context.ui.notify(
-              "Fabric ship requires full code mode and Schema enforce mode disabled.",
-              "error",
-            );
-            return;
-          }
-          const slug = state.work.getActive();
-          if (!slug) {
-            context.ui.notify("No active work record. Run /fabric create <description> first.", "warning");
-            return;
-          }
-          const record = state.work.get(slug);
-          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          const planText = record.artifacts.plan ? adapter.read(slug, "plan") : undefined;
-          if (!planText) {
-            context.ui.notify("Active work record has no plan artifact. Run /fabric create or /fabric plan first.", "warning");
-            return;
-          }
-          let dag;
-          try {
-            dag = parseTaskDag(JSON.parse(planText));
-          } catch {
-            context.ui.notify("Plan artifact is not a valid task DAG. Run /fabric plan to regenerate it.", "error");
-            return;
-          }
-          const completed = record.progress.slice(0, 128);
-          const wave = selectNextWave(dag, completed);
-          if (!wave || wave.length === 0) {
-            context.ui.notify(`All tasks complete for ${slug}.`, "info");
-            return;
-          }
-          const waveFiles = Array.from(new Set(wave.flatMap((t) => t.files))).slice(0, 32);
-          state.prewalk.setWriteScope(context.sessionManager.getSessionId(), waveFiles);
-          let impactPath: string | undefined;
-          const researchAgent = state.config.prewalk.researchAgent;
-          if (researchAgent) {
-            try {
-              const agentResult = await state.agents.run({
-                role: researchAgent,
-                name: "ship-impact-" + Date.now(),
-                task: "Analyze the blast radius of these files and return callers, importers, and complexity hot spots with file:line evidence: " + waveFiles.join(", "),
-                timeoutMs: 300_000,
-              });
-              if (agentResult.text) {
-                impactPath = adapter.write(slug, "impact", agentResult.text);
-              }
-            } catch {
-              // agent failed or timed out; ship without impact artifact
-            }
-          }
-          const taskSummary = wave.map((t) =>
-            "Task " + t.id + ": " + t.description + (t.verify ? " Verify: " + t.verify : "")
-          ).join("\n");
-          const model = await resolvePrewalkModel(state, context);
-          if (!model) return;
-          armPrewalk(pi, state.prewalk, state.config.prewalk, context, model, taskSummary);
-          pi.sendUserMessage(taskSummary);
-          await state.work.update(slug, (r) => ({
-            ...r,
-            phase: "ship",
-            inFlight: wave.map((t) => t.id),
-            ...(impactPath ? { artifacts: { ...r.artifacts, impact: impactPath } } : {}),
-          }));
-          context.ui.notify("Ship armed for " + slug + " wave [" + wave.map((t) => t.id).join(", ") + "] with " + model + ". Scoped to " + waveFiles.length + " paths." + (impactPath ? " Impact artifact written." : ""), "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
-        return;
-};
 
-const runVerify = async (
-  state: FabricState,
-  context: ExtensionContext,
-): Promise<void> => {
-        try {
-          const slug = state.work.getActive();
-          if (!slug) {
-            context.ui.notify("No active work record. Run /fabric create <description> first.", "warning");
-            return;
-          }
-          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          await state.work.update(slug, (r) => ({ ...r, phase: "verify" }));
-          context.ui.notify(guideFor("verify", slug, adapter.resolve(slug, "spec")), "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
-        return;
-};
 
 const runStatus = (deps: FabricCommandDeps, context: ExtensionContext): void => {
   const { state, capturedTools } = deps;
@@ -1024,11 +795,6 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         "import",
         "export",
         "kill",
-        "research",
-        "create",
-        "plan",
-        "ship",
-        "verify",
       ];
       const idCommands = new Set([
         "messages",
@@ -1140,18 +906,13 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         global: () => runGlobal(state, context),
         import: () => runImport(state, context, argumentsList),
         export: () => runExport(state, context, argumentsList),
-        research: () => runResearch(state, context, argumentsText, command),
-        create: () => runCreate(state, context, argumentsText, command),
-        plan: () => runPlan(state, context),
-        ship: () => runShip(pi, state, context),
         kill: () => runRemove(state, context, argumentsList),
-        verify: () => runVerify(state, context),
         status: () => runStatus(deps, context),
       };
       const run = handlers[command];
       if (!run) {
         context.ui.notify(
-          "Usage: /fabric [status|health|dashboard|settings|prewalk [task]|prewalk --retry|prewalk --off|reload|providers|captured [query]|leases [--release <id...>|--release-all]|outcomes|agents|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>|research <topic>|create <description>|plan|ship|verify [path|all] [--quick|--full]]",
+          "Usage: /fabric [status|health|dashboard|settings|prewalk [task]|prewalk --retry|prewalk --off|reload|providers|captured [query]|leases [--release <id...>|--release-all]|outcomes|agents|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>]",
           "warning",
         );
         return;

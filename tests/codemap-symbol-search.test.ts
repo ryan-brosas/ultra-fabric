@@ -4,15 +4,15 @@ import { buildSymbolIndex } from "../src/codemap/symbols.js";
 import { searchSymbols } from "../src/codemap/search.js";
 
 const root = process.cwd();
-const files = ["src/lifecycle/store.ts"];
+const files = ["src/workflows/durable.ts"];
 const index = buildSymbolIndex(runOutline(files, { cwd: root }));
 
 describe("searchSymbols", () => {
-  it("returns FabricWorkStore for pattern '.*Store' filtered to class", () => {
+  it("returns DurableWorkflowStore for pattern '.*Store' filtered to class", () => {
     const hits = searchSymbols(index, ".*Store", { symbolType: "class" });
-    const store = hits.find((n) => n.name === "FabricWorkStore");
+    const store = hits.find((n) => n.name === "DurableWorkflowStore");
     expect(store).toBeDefined();
-    expect(store!.file).toBe("src/lifecycle/store.ts");
+    expect(store!.file).toBe("src/workflows/durable.ts");
   });
 
   it("does not return matches occurring only inside comments or strings", () => {
@@ -29,8 +29,8 @@ describe("searchSymbols", () => {
   });
 
   it("falls back to substring matching when the pattern is not valid regex", () => {
-    const hits = searchSymbols(index, "FabricWorkStore", { symbolType: "class" });
-    expect(hits.some((n) => n.name === "FabricWorkStore")).toBe(true);
+    const hits = searchSymbols(index, "DurableWorkflowStore", { symbolType: "class" });
+    expect(hits.some((n) => n.name === "DurableWorkflowStore")).toBe(true);
     // An invalid-regex pattern with a regex meta-char is treated as a literal substring
     expect(searchSymbols(index, "(").length).toBe(0);
   });

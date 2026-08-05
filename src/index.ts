@@ -18,7 +18,6 @@ import {
 } from "./prewalk/continuation.js";
 import { restorePrewalkModel } from "./prewalk/model.js";
 import { prewalkChecklistReminder } from "./prewalk/continuation.js";
-import { phaseContract } from "./lifecycle/phase-contract.js";
 import { autoArmPrewalk } from "./prewalk/arm.js";
 import { prewalkRearmDefaults } from "./prewalk/rearm.js";
 import { withTrajectoryRearmDirective } from "./prewalk/handoff.js";
@@ -332,14 +331,6 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     }
     const settledTask = state.prewalk.settleTask(sessionId, rearm);
     if (settledContinuation.settled || settledTask) {
-      try {
-        const slug = state.work.getActive();
-        if (slug) {
-          await state.work.completeInFlight(slug);
-        }
-      } catch {
-        // work store unavailable or record missing; skip completion
-      }
       const status = state.prewalk.status();
       context.ui.setStatus(
         "fabric-prewalk",
@@ -536,26 +527,6 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
         } as (typeof messages)[number],
       ];
       changed = true;
-    }
-    if (state.initialized) {
-      try {
-        const claimedPhase = state.work.claimPhaseContract(sessionId);
-        if (claimedPhase) {
-          const contract = phaseContract(claimedPhase);
-          if (contract) {
-            messages = [
-              ...messages,
-              {
-                role: "user",
-                content: [{ type: "text", text: contract }],
-              } as (typeof messages)[number],
-            ];
-            changed = true;
-          }
-        }
-      } catch {
-        // work store unavailable or record missing; skip phase injection
-      }
     }
     return changed ? { messages } : undefined;
   });

@@ -11,7 +11,7 @@ import { runOutline } from "../src/codemap/outline.js";
 import { computeEdgeWeight } from "../src/codemap/rank.js";
 import { findSourceFiles } from "../src/codemap/lang.js";
 
-const files = runOutline(["src/lifecycle/store.ts"]);
+const files = runOutline(["src/workflows/durable.ts"]);
 const index = buildSymbolIndex(files);
 const root = process.cwd();
 
@@ -23,28 +23,27 @@ describe("buildSymbolIndex", () => {
     expect(fullIndex.nodes.length).toBeGreaterThanOrEqual(6000);
   });
 
-  it("resolves FabricWorkStore with symbolType class and non-empty members", () => {
-    const store = index.byName.get("FabricWorkStore");
+  it("resolves DurableWorkflowStore with symbolType class and non-empty members", () => {
+    const store = index.byName.get("DurableWorkflowStore");
     expect(store).toBeDefined();
-    expect(store![0]!.file).toBe("src/lifecycle/store.ts");
+    expect(store![0]!.file).toBe("src/workflows/durable.ts");
     expect(store![0]!.symbolType).toBe("class");
-    const members = index.nodes.filter((n) => n.parent === "FabricWorkStore");
+    const members = index.nodes.filter((n) => n.parent === "DurableWorkflowStore");
     expect(members.length).toBeGreaterThan(0);
   });
 });
 
 describe("enclosingSymbol", () => {
-  it("resolves a line inside completeInFlight to completeInFlight, not FabricWorkStore", () => {
-    const resolved = enclosingSymbol(index, "src/lifecycle/store.ts", 237);
-    // completeInFlight may shift when deriveWorkSlug is added above it
-    expect(resolved?.name).toBe("completeInFlight");
+  it("resolves a line inside cancel to cancel, not DurableWorkflowStore", () => {
+    const resolved = enclosingSymbol(index, "src/workflows/durable.ts", 440);
+    expect(resolved?.name).toBe("cancel");
   });
 });
 
 describe("buildContainmentEdges", () => {
-  it("has an edge from FabricWorkStore to completeInFlight", () => {
+  it("has an edge from DurableWorkflowStore to cancel", () => {
     const edges = buildContainmentEdges(index);
-    expect(edges.some((e) => e.from.includes("FabricWorkStore") && e.to.includes("completeInFlight"))).toBe(true);
+    expect(edges.some((e) => e.from.includes("DurableWorkflowStore") && e.to.includes("cancel"))).toBe(true);
   });
 
   it("has no self-edges", () => {
@@ -54,9 +53,9 @@ describe("buildContainmentEdges", () => {
 });
 
 describe("buildReferenceEdges", () => {
-  it("has a reference edge into sanitizeWorkSlug from a distinct enclosing symbol", () => {
+  it("has a reference edge into refreshReady from a distinct enclosing symbol", () => {
     const edges = buildReferenceEdges(index, root);
-    const intoSlug = edges.filter((e) => e.to.includes("sanitizeWorkSlug"));
+    const intoSlug = edges.filter((e) => e.to.includes("refreshReady"));
     expect(intoSlug.length).toBeGreaterThan(0);
     expect(intoSlug.every((e) => e.from !== e.to)).toBe(true);
   });
@@ -77,8 +76,8 @@ describe("maxDefiners threshold", () => {
 
   it("still emits edges for identifiers under the threshold", () => {
     const edges = buildReferenceEdges(index, root, { maxDefiners: 5 });
-    // sanitizeWorkSlug has 1 definition — should still produce edges
-    const slugEdges = edges.filter((e) => e.to.startsWith("sanitizeWorkSlug:"));
+    // refreshReady has 1 definition — should still produce edges
+    const slugEdges = edges.filter((e) => e.to.startsWith("refreshReady:"));
     expect(slugEdges.length).toBeGreaterThan(0);
   });
 });
@@ -103,7 +102,7 @@ describe("buildAllEdges edge kinds", () => {
 
 describe("edge weighting for common names", () => {
   it("down-weights symbols defined in more than 5 files", () => {
-    const rare = computeEdgeWeight("sanitizeWorkSlug", 1, false, false, 1);
+    const rare = computeEdgeWeight("refreshReady", 1, false, false, 1);
     const common = computeEdgeWeight("create", 1, false, false, 10);
     expect(common).toBeLessThan(rare);
   });

@@ -23,8 +23,8 @@ describe("extractImportEdges", () => {
     expect(edges.length).toBeGreaterThanOrEqual(500);
   });
 
-  it("includes a known edge from src/fabric-state.ts to src/lifecycle/store.ts", () => {
+  it("includes a known edge from src/fabric-state.ts to src/workflows/durable.ts", () => {
     const { edges } = extractImportEdges(process.cwd());
-    expect(edges.some((e) => e.from === "src/fabric-state.ts" && e.to === "src/lifecycle/store.ts")).toBe(true);
+    expect(edges.some((e) => e.from === "src/fabric-state.ts" && e.to === "src/workflows/durable.ts")).toBe(true);
   });
 });
