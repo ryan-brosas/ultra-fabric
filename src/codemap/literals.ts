@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import type { SymbolIndex } from "./symbols.js";
 import { enclosingSymbol } from "./symbols.js";
 import { groupFilesByLang } from "./lang.js";
@@ -38,13 +38,15 @@ const runAstGrep = (
   cwd: string,
 ): AstGrepMatch[] => {
   try {
-    const stdout = execFileSync(binary, args as string[], {
+    const res = crossSpawn.sync(binary, args as string[], {
       cwd,
       encoding: "utf8",
       timeout: 60_000,
       maxBuffer: 50 * 1024 * 1024,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    if (res.error || res.status !== 0) return [];
+    const stdout = res.stdout;
     if (!stdout.trim()) return [];
     const parsed = JSON.parse(stdout) as AstGrepMatch[];
     return Array.isArray(parsed) ? parsed : [];

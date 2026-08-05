@@ -30,21 +30,22 @@ export const groupFilesByLang = (files: readonly string[]): Map<string, string[]
 
 export const SUPPORTED_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".py", ".rs", ".java"];
 
-import { execFileSync } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 
-// Discover source files under `src/` for any supported language. Replaces the
-// hardcoded `find src -name "*.ts"` so the index covers a polyglot tree.
+// Discover source files under `src/` for any supported language. Paths come back
+// root-relative with forward slashes on every platform, because the code map keys
+// its graph on POSIX paths.
 export const findSourceFiles = (root: string, extensions?: readonly string[]): string[] => {
   const exts = extensions ?? SUPPORTED_EXTS;
-  const args = ["src", "-type", "f"];
-  for (let i = 0; i < exts.length; i++) {
-    args.push(i === 0 ? "(" : "-o");
-    args.push("-name", "*" + exts[i]!);
-  }
-  args.push(")");
-  return execFileSync("find", args, { encoding: "utf8", cwd: root, maxBuffer: 10 * 1024 * 1024 })
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .sort();
+  const found: string[] = [];
+  const walk = (rel: string): void => {
+    for (const entry of readdirSync(join(root, rel), { withFileTypes: true })) {
+      const childRel = rel + "/" + entry.name;
+      if (entry.isDirectory()) walk(childRel);
+      else if (exts.some((ext) => entry.name.endsWith(ext))) found.push(childRel);
+    }
+  };
+  walk("src");
+  return found.sort();
 };

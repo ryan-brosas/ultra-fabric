@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, dirname, resolve, relative } from "node:path";
+import { join, dirname, resolve, relative, posix, sep } from "node:path";
 import type { RankEdge } from "./rank.js";
 import { SUPPORTED_EXTS } from "./lang.js";
 
@@ -33,7 +33,7 @@ export interface ImportEdgeResult {
 
 export const extractImportEdges = (root: string): ImportEdgeResult => {
   const absRoot = resolve(root);
-  const toRel = (abs: string): string => relative(absRoot, abs);
+  const toRel = (abs: string): string => relative(absRoot, abs).split(sep).join("/");
   const files = walkSources(absRoot);
   const nodes = files.map(toRel);
   const nodeSet = new Set(nodes);
@@ -59,5 +59,7 @@ export const extractImportEdges = (root: string): ImportEdgeResult => {
 // Unit-testable helpers for the specifier rewrite logic.
 export const resolveSpecifier = (importerDir: string, spec: string): string | undefined => {
   if (!spec.startsWith(".") && !spec.startsWith("/")) return undefined;
-  return resolve(importerDir, spec).replace(/\.js$/, ".ts");
+  // posix.resolve keeps one graph key per file across platforms. Native resolve
+  // would emit backslashes and a drive prefix on Windows for the same input.
+  return posix.resolve(importerDir.split(sep).join("/"), spec).replace(/\.js$/, ".ts");
 };

@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import { readFileSync } from "node:fs";
 
 export interface OutlineRange {
@@ -104,13 +104,15 @@ export const runOutline = (
   const binary = options.binary ?? "ast-grep";
   const cwd = options.cwd ?? process.cwd();
   try {
-    const stdout = execFileSync(binary, ["outline", "--json=compact", ...filePaths], {
+    const res = crossSpawn.sync(binary, ["outline", "--json=compact", ...filePaths], {
       cwd,
       encoding: "utf8",
       timeout: 60_000,
       maxBuffer: 10 * 1024 * 1024,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    if (res.error || res.status !== 0) return [];
+    const stdout = res.stdout;
     if (!stdout.trim()) return [];
     const raw = JSON.parse(stdout) as RawFile[];
     if (!Array.isArray(raw)) return [];

@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import type { SymbolIndex } from "./symbols.js";
 import { enclosingSymbol } from "./symbols.js";
 import { computeEdgeWeight, type RankEdge } from "./rank.js";
@@ -49,11 +49,13 @@ export const extractCallEdges = (
   for (const [lang, langFiles] of groupFilesByLang(files)) {
     let stdout: string;
     try {
-      stdout = execFileSync(
+      const res = crossSpawn.sync(
         binary,
         ["run", "--pattern", "$F($$$)", "--lang", lang, "--json=compact", ...langFiles],
         { cwd, encoding: "utf8", timeout: 60_000, maxBuffer: 50 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] },
       );
+      if (res.error || res.status !== 0) continue;
+      stdout = res.stdout;
     } catch {
       continue;
     }
