@@ -164,6 +164,54 @@ describe("Agent role profiles", () => {
     });
   });
 
+  it("prefers a configured role model over the profile model and yields to the request model", () => {
+    const root = temporary("role-models");
+    const builtin = path.join(root, "builtin");
+    fs.mkdirSync(builtin, { recursive: true });
+    fs.writeFileSync(
+      path.join(builtin, "scout.md"),
+      profile({ model: "profile/from-markdown" }),
+    );
+    fs.writeFileSync(
+      path.join(builtin, "advisor.md"),
+      profile({ name: "advisor", lifecycle: "persistent", model: "profile/from-markdown" }),
+    );
+    const roles = new AgentRoleRegistry({
+      projectRoot: root,
+      builtinDir: builtin,
+      userDir: null,
+      roleModels: { scout: "config/chosen", advisor: "config/chosen" },
+    });
+
+    // Configured role model overrides the profile model.
+    expect(roles.applyOneShot({ role: "scout", task: "Map it." }))
+      .toMatchObject({ model: "config/chosen" });
+    expect(roles.applyPersistent({
+      name: "advisor",
+      role: "advisor",
+      instructions: "Advise.",
+    })).toMatchObject({ model: "config/chosen" });
+
+    // An explicit request model still wins over configuration.
+    expect(roles.applyOneShot({ role: "scout", task: "Map it.", model: "request/explicit" }))
+      .toMatchObject({ model: "request/explicit" });
+  });
+
+  it("falls back to the profile model when no role model is configured for that role", () => {
+    const root = temporary("role-models-absent");
+    const builtin = path.join(root, "builtin");
+    fs.mkdirSync(builtin, { recursive: true });
+    fs.writeFileSync(
+      path.join(builtin, "scout.md"),
+      profile({ model: "profile/from-markdown" }),
+    );
+    const roles = new AgentRoleRegistry({
+      projectRoot: root, builtinDir: builtin, userDir: null, roleModels: { reviewer: "config/other" } });
+
+    expect(roles.applyOneShot({ role: "scout", task: "Map it." }))
+      .toMatchObject({ model: "profile/from-markdown" });
+  });
+
   it("renders the role behavior, concrete task, goal, completion, and stop condition", () => {
     const parsed = parseAgentRoleProfile(profile(), "/roles/scout.md", "project");
     const prompt = renderAgentRolePrompt(parsed, "Trace the authentication entry point.");

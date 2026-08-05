@@ -296,6 +296,7 @@ const boundedBudget = (
 export class AgentRoleRegistry {
   readonly #profiles = new Map<string, AgentRoleProfile>();
   readonly #ambiguous = new Set<string>();
+  readonly #roleModels: Record<string, string>;
   readonly diagnostics: string[] = [];
 
   constructor(options: {
@@ -303,7 +304,9 @@ export class AgentRoleRegistry {
     builtinDir?: string | null;
     userDir?: string | null;
     projectDir?: string | null;
+    roleModels?: Record<string, string>;
   }) {
+    this.#roleModels = options.roleModels ?? {};
     const builtinDir = options.builtinDir === undefined
       ? fileURLToPath(new URL("../../agents/", import.meta.url))
       : options.builtinDir;
@@ -336,10 +339,15 @@ export class AgentRoleRegistry {
     }
   }
 
-  static createDefault(projectRoot: string, projectTrusted = true): AgentRoleRegistry {
+  static createDefault(
+    projectRoot: string,
+    projectTrusted = true,
+    roleModels?: Record<string, string>,
+  ): AgentRoleRegistry {
     return new AgentRoleRegistry({
       projectRoot,
       ...(projectTrusted ? {} : { projectDir: null }),
+      ...(roleModels ? { roleModels } : {}),
     });
   }
 
@@ -365,6 +373,13 @@ export class AgentRoleRegistry {
     return structuredClone(profile);
   }
 
+  // Precedence: an explicit request model wins, then the host-configured
+  // per-role override, then the profile model from markdown. Returning
+  // undefined lets the downstream default apply when none of the three set it.
+  #resolveModel(role: FabricAgentRole, requestModel: string | undefined, profileModel: string | undefined): string | undefined {
+    return requestModel ?? this.#roleModels[role] ?? profileModel;
+  }
+
   #applyRun(
     request: AgentRunRequest,
     lifecycle: FabricAgentLifecycle,
@@ -385,7 +400,10 @@ export class AgentRoleRegistry {
       systemPrompt: renderAgentRolePrompt(profile, request.task, request.systemPrompt),
       ...(tools ? { tools: [...tools] } : {}),
       ...(request.runner ? {} : profile.runner ? { runner: profile.runner } : {}),
-      ...(request.model ? {} : profile.model ? { model: profile.model } : {}),
+      ...(() => {
+        const model = this.#resolveModel(role, request.model, profile.model);
+        return model ? { model } : {};
+      })(),
       ...(request.thinking ? {} : profile.thinking ? { thinking: profile.thinking } : {}),
       ...(request.timeoutMs ? {} : profile.timeoutMs ? { timeoutMs: profile.timeoutMs } : {}),
       ...(request.extensions !== undefined
@@ -439,7 +457,10 @@ export class AgentRoleRegistry {
         : profile.freshness ? { validWhile: roleFreshnessPredicate(profile.freshness) } : {}),
       ...(tools ? { tools: [...tools] } : {}),
       ...(request.runner ? {} : profile.runner ? { runner: profile.runner } : {}),
-      ...(request.model ? {} : profile.model ? { model: profile.model } : {}),
+      ...(() => {
+        const model = this.#resolveModel(role, request.model, profile.model);
+        return model ? { model } : {};
+      })(),
       ...(request.thinking ? {} : profile.thinking ? { thinking: profile.thinking } : {}),
       ...(request.timeoutMs ? {} : profile.timeoutMs ? { timeoutMs: profile.timeoutMs } : {}),
       ...(request.extensions !== undefined

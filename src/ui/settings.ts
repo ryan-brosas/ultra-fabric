@@ -229,6 +229,9 @@ const coerceValue = (id: string, value: string, config: FabricConfig): unknown =
   // The model picker stores the canonical "provider/id" string, or "Inherit"
   // for no override; persist an empty string so normalizeFabricConfig drops it.
   // Agents inherit; prewalk asks interactively when it is armed.
+  if (id.startsWith("agents.roleModels.")) {
+    return value === INHERIT_VALUE ? "" : value;
+  }
   if (
     id === "approvals.model" ||
     id === "prewalk.model" ||
@@ -561,6 +564,7 @@ export const buildFabricSettingsItems = (
     modelSource: ModelSource;
     claudeModelSource?: ModelSource;
     activeModelKey?: string;
+    roleNames?: readonly string[];
   },
 ): SettingItem[] => {
   const persist = (id: string, newValue: string): void =>
@@ -984,6 +988,24 @@ export const buildFabricSettingsItems = (
               "Maximum nesting depth for recursive agent calls.",
             ),
           }),
+          ...(options.roleNames ?? []).map((role) =>
+            setting(
+              `agents.roleModels.${role}`,
+              `${role[0]?.toUpperCase()}${role.slice(1)} model`,
+              config.agents.roleModels[role] || INHERIT_VALUE,
+              {
+                description: `Model override for the ${role} agent role. Pick Inherit to use the default agent model.`,
+                submenu: modelPickerSubmenu(
+                  theme,
+                  options.modelSource,
+                  {
+                    headerText: `Model for the ${role} agent role. Pick Inherit to use the default agent model.`,
+                    inheritName: "Use the default agent model",
+                  },
+                ),
+              },
+            ),
+          ),
           setting("agents.budgetUsd", "Recursion budget", formatUsd(config.agents.budgetUsd), {
             description:
               "Maximum USD spend for agent work across the whole recursion tree. 0 disables the budget.",
@@ -1720,6 +1742,13 @@ export async function openFabricSettings(
     }
   });
 
+  let roleNames: string[] = [];
+  try {
+    roleNames = deps.state.agents.roles.list().map((role) => role.name);
+  } catch {
+    // agents not initialized; per-role model entries are omitted
+  }
+
   await context.ui.custom<void>(
     (_tui, theme, _keybindings, done) => {
       const items = buildFabricSettingsItems(theme, deps.state.config, apply, {
@@ -1727,6 +1756,7 @@ export async function openFabricSettings(
         modelSource,
         claudeModelSource,
         ...(activeModelKey ? { activeModelKey } : {}),
+        roleNames,
       });
       const component = new FabricSettingsComponent(theme, items, persist, () => done());
       rootList = component.settingsList;

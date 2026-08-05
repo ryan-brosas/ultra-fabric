@@ -78,6 +78,7 @@ interface FabricPrewalkConfig {
   thinking?: FabricThinking;
   verificationMode?: FabricPrewalkVerificationMode;
   maxPhaseRevisions?: number;
+  researchAgent?: string;
 }
 
 export interface FabricAgentConfig {
@@ -94,6 +95,7 @@ export interface FabricAgentConfig {
   maxConcurrent: number;
   maxPerExecution: number;
   maxDepth: number;
+  roleModels: Record<string, string>;
   timeoutMs: number;
   extensions: boolean;
   defaultTools: string[];
@@ -318,6 +320,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     maxConcurrent: 4,
     maxPerExecution: 100,
     maxDepth: 2,
+    roleModels: {},
     timeoutMs: DEFAULT_AGENT_TIMEOUT_MS,
     extensions: true,
     defaultTools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
@@ -625,6 +628,17 @@ const qualityOverridesValue = (value: unknown): Record<string, string> =>
     }).slice(0, 256),
   );
 
+const roleModelsValue = (value: unknown): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(objectValue(value)).flatMap(([rawRole, rawModel]) => {
+      const role = rawRole.trim().toLowerCase();
+      const model = typeof rawModel === "string" ? rawModel.trim() : "";
+      return /^[a-z][a-z0-9-]{0,31}$/.test(role) && /^[^/\s]+\/\S+$/.test(model)
+        ? [[role, model]]
+        : [];
+    }).slice(0, 64),
+  );
+
 const riskValue = (value: unknown, fallback: FabricRisk): FabricRisk =>
   value === "read" ||
   value === "write" ||
@@ -880,6 +894,10 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         DEFAULT_FABRIC_CONFIG.prewalk.alwaysRearm,
       ),
       ...(booleanValue(prewalk.autoArm, false) ? { autoArm: true } : {}),
+      ...(() => {
+        const raw = typeof prewalk.researchAgent === "string" ? prewalk.researchAgent.trim() : "";
+        return raw && /^[a-z][a-z0-9-]{0,31}$/.test(raw) ? { researchAgent: raw } : {};
+      })(),
     },
     agents: {
       enabled: booleanValue(agents.enabled, DEFAULT_FABRIC_CONFIG.agents.enabled),
@@ -914,6 +932,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         1_000,
       ),
       maxDepth: boundedInteger(agents.maxDepth, DEFAULT_FABRIC_CONFIG.agents.maxDepth, 0, 8),
+      roleModels: roleModelsValue(agents.roleModels),
       timeoutMs: boundedInteger(
         agents.timeoutMs,
         DEFAULT_FABRIC_CONFIG.agents.timeoutMs,

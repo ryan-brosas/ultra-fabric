@@ -721,6 +721,46 @@ describe("Fabric configuration", () => {
     ).toBe(1_200_000);
   });
 
+  it("parses prewalk.researchAgent, keeping valid role names and dropping invalid ones", () => {
+    expect(DEFAULT_FABRIC_CONFIG.prewalk.researchAgent).toBeUndefined();
+    const valid = normalizeFabricConfig({ prewalk: { researchAgent: "scout" } }).prewalk.researchAgent;
+    expect(valid).toBe("scout");
+    const invalid = normalizeFabricConfig({ prewalk: { researchAgent: "123bad" } }).prewalk.researchAgent;
+    expect(invalid).toBeUndefined();
+    const empty = normalizeFabricConfig({ prewalk: { researchAgent: "  " } }).prewalk.researchAgent;
+    expect(empty).toBeUndefined();
+  });
+
+  it("normalizes per-role model overrides, keeping only valid role names and provider/model strings", () => {
+    expect(DEFAULT_FABRIC_CONFIG.agents.roleModels).toEqual({});
+    const valid = normalizeFabricConfig({
+      agents: {
+        roleModels: {
+          scout: "makora/zai-org/GLM-5.2-NVFP4",
+          reviewer: "claude-bridge/claude-haiku-4-5",
+          worker: "openai/gpt-5",
+        },
+      },
+    }).agents.roleModels;
+    expect(valid).toEqual({
+      scout: "makora/zai-org/GLM-5.2-NVFP4",
+      reviewer: "claude-bridge/claude-haiku-4-5",
+      worker: "openai/gpt-5",
+    });
+
+    const filtered = normalizeFabricConfig({
+      agents: {
+        roleModels: {
+          "123start": "openai/gpt-5",
+          scout: "not-a-model",
+          explorer: "  ",
+          planner: "provider/",
+        },
+      },
+    }).agents.roleModels;
+    expect(filtered).toEqual({});
+  });
+
   it("normalizes the per-child token limit and treats zero as disabled", () => {
     expect(DEFAULT_FABRIC_CONFIG.agents.maxTokensPerChild).toBe(0);
     const set = normalizeFabricConfig({ agents: { maxTokensPerChild: 50_000 } });

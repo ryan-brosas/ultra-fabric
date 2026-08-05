@@ -796,8 +796,9 @@ export class FabricExecutionService {
             : {}),
           ...(this.authorizer || options.prewalk
             ? {
-                authorize: async (action) => {
-                  prewalkReservation = options.prewalk?.authorize(action) ?? false;
+                authorize: async (action, args) => {
+                  const path = typeof args?.path === "string" ? args.path : undefined;
+                  prewalkReservation = options.prewalk?.authorize({ ...action, ...(path ? { path } : {}) }) ?? false;
                   await this.authorizer?.authorize(action.ref, options.parentToolCallId);
                 },
               }

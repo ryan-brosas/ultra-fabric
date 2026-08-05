@@ -75,7 +75,7 @@ export type FabricRegistryActivityEvent =
     };
 
 export interface FabricRegistryInvocationContext extends FabricInvocationContext {
-  authorize?(action: ResolvedFabricAction): Promise<void>;
+  authorize?(action: ResolvedFabricAction, args: Record<string, unknown>): Promise<void>;
   approve(
     action: ResolvedFabricAction,
     args: Record<string, unknown>,
@@ -463,7 +463,7 @@ export class ActionRegistry {
 
       failureStage = "guard";
       if (context.authorize) {
-        await runAbortable(context.signal, () => context.authorize!(action));
+        await runAbortable(context.signal, () => context.authorize!(action, args));
       }
 
       failureStage = "prepare";

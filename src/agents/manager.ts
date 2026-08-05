@@ -21,6 +21,7 @@ export class AgentManager extends OneShotAgentManager {
     this.roles = AgentRoleRegistry.createDefault(
       options?.projectRoot ?? process.env.PI_FABRIC_PROJECT_ROOT ?? cwd,
       options?.projectTrusted !== false,
+      this.config.roleModels,
     );
   }
 
