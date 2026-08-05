@@ -6,6 +6,7 @@ import { MeshStore, type MeshIdentity } from "../src/mesh/store.js";
 import {
   FabricWorkStore,
   sanitizeWorkSlug,
+  deriveWorkSlug,
   type FabricWorkInput,
   type FabricWorkPhase,
   type FabricWorkStatus,
@@ -40,6 +41,21 @@ const sampleEvidence = (): FabricWorkEvidence => ({ phase: "research", ref: "src
 const sampleGate = (): FabricWorkGate => ({ gate: "test", passed: true, sequence: 1, recordedAt: Date.now() });
 
 describe("FabricWorkStore", () => {
+  it("derives a slug from words rather than characters, capped at 6 words and 80 chars on a word boundary", () => {
+    expect(deriveWorkSlug("Add Auth Refresh")).toBe("add-auth-refresh");
+    expect(deriveWorkSlug("  fix  prewalk  loop  ")).toBe("fix-prewalk-loop");
+    const long = "make the current workflow better look for arxiv";
+    const slug = deriveWorkSlug(long);
+    const words = slug.split("-");
+    expect(words.length).toBeLessThanOrEqual(6);
+    expect(slug.includes("templat")).toBe(false);
+  });
+
+  it("does not let punctuation or case leak into the slug", () => {
+    expect(deriveWorkSlug("Fix: the parser!")).toBe("fix-the-parser");
+    expect(deriveWorkSlug("feat.2026.q3")).toBe("feat-2026-q3");
+  });
+
   it("sanitizes slugs, collapsing whitespace and rejecting unsafe segments", () => {
     expect(sanitizeWorkSlug("Add Auth Refresh")).toBe("add-auth-refresh");
     expect(sanitizeWorkSlug("  fix  prewalk  loop  ")).toBe("fix-prewalk-loop");
@@ -64,6 +80,16 @@ describe("FabricWorkStore", () => {
     const second = await store.create(baseInput());
     expect(second.slug).toBe(first.slug);
     expect(second.createdAt).toBe(first.createdAt);
+  });
+
+  it("suffixes colliding slugs when the title differs but the slug matches", async () => {
+    const { store, setNow } = setup();
+    const first = await store.create(baseInput({ slug: "auth-refresh", title: "Auth Refresh" }));
+    setNow(2_000);
+    const second = await store.create(baseInput({ slug: "auth-refresh", title: "Different Title" }));
+    expect(second.slug).toBe("auth-refresh-2");
+    expect(second.title).toBe("Different Title");
+    expect(second.createdAt).toBeGreaterThan(first.createdAt);
   });
 
   it("updates a record via CAS and advances the phase", async () => {

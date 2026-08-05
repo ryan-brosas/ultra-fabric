@@ -96,6 +96,19 @@ const isRecord = (value: unknown): value is FabricWorkRecord => {
     isStatus(record.status);
 };
 
+// Derive a slug from a free-text title: take at most maxWords words, join with -,
+// lowercase, and cap at 80 characters on a word boundary so the slug never cuts
+// mid-word or produces an unwieldy path segment.
+export const deriveWorkSlug = (title: string, maxWords = 6): string => {
+  const words = title
+    .split(/[^a-z0-9]+/i)
+    .filter(Boolean)
+    .slice(0, maxWords);
+  const raw = words.join("-").toLowerCase();
+  const truncated = raw.length <= 80 ? raw : raw.slice(0, raw.lastIndexOf("-", 80));
+  return sanitizeWorkSlug(truncated || raw.slice(0, 80));
+};
+
 export const sanitizeWorkSlug = (title: string): string => {
   const slug = title
     .toLowerCase()
@@ -145,17 +158,26 @@ export class FabricWorkStore {
     const title = bounded(input.title);
     if (!title) throw new Error("Fabric work record requires a title");
     if (!isPhase(input.phase)) throw new Error(`Invalid work phase: ${input.phase}`);
-    const existing = this.#mesh.get(this.#key(slug));
-    if (existing) {
-      return this.#from(existing, slug);
+    let candidate = slug;
+    let suffix = 2;
+    for (;;) {
+      const existing = this.#mesh.get(this.#key(candidate));
+      if (!existing) break;
+      const rec = existing.value as FabricWorkRecord | undefined;
+      if (rec && rec.title === title) {
+        return this.#from(existing, candidate);
+      }
+      candidate = slug + "-" + suffix;
+      suffix++;
     }
+    const resolvedSlug = candidate;
     if (this.#mesh.listAll(WORK_PREFIX).filter((e) => isRecord(e.value)).length >= this.#maxRecords) {
       throw new Error(`Fabric work ledger capacity reached (${this.#maxRecords})`);
     }
     const now = this.#now();
     const record: FabricWorkRecord = {
       format: 1,
-      slug,
+      slug: resolvedSlug,
       title,
       phase: input.phase,
       createdAt: now,
@@ -168,9 +190,9 @@ export class FabricWorkStore {
       inFlight: [...new Set((input.inFlight ?? []).map((id) => bounded(id, 64)))],
     };
     const stored = await this.#mesh.put({
-      key: this.#key(slug), value: record, identity: this.#identity, ifVersion: 0,
+      key: this.#key(resolvedSlug), value: record, identity: this.#identity, ifVersion: 0,
     });
-    return this.#from(stored, slug);
+    return this.#from(stored, resolvedSlug);
   }
 
   get(slug: string): FabricWorkRecord {
