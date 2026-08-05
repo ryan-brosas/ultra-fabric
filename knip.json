@@ -7,6 +7,5 @@
   ],
   "project": [
     "src/**/*.ts"
-  ],
-  "ignoreBinaries": ["ast-grep"]
+  ]
 }

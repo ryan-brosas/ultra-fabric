@@ -2,6 +2,7 @@ packages:
   - "."
 
 allowBuilds:
+  '@ast-grep/cli': true
   "@google/genai": true
   protobufjs: true
 

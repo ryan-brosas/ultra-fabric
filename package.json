@@ -103,6 +103,7 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
+    "@ast-grep/cli": "^0.45.0",
     "@earendil-works/pi-ai": "0.83.0",
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@earendil-works/pi-tui": "0.83.0",
