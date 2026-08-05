@@ -132,6 +132,17 @@ await Promise.all([
     expect(result.error).toContain("timed out after 50ms");
   });
 
+  it("surfaces unbounded recursion as a runtime error", async () => {
+    const result = await new NodeProcessRuntime().execute(
+      "function f() { return f() + 1; } f();",
+      async () => undefined,
+      options,
+    );
+
+    expect(result.terminationReason).toBe("runtime_error");
+    expect(result.error).toContain("Maximum call stack size exceeded");
+  });
+
   it("terminates the child process when externally aborted", async () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(new Error("stop")), 25);

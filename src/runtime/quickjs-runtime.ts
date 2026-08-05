@@ -775,6 +775,23 @@ const jsonHandle = (
 
 const HOST_TASK_SETTLE_GRACE_MS = 250;
 
+// The release-sync WASM variant otherwise exhausts the host stack before
+// QuickJS can throw its guest-catchable InternalError.
+const QUICKJS_MAX_STACK_SIZE_BYTES = 256 * 1024;
+const QUICKJS_GC_LIST_ASSERTION = "list_empty(&rt->gc_obj_list)";
+
+// Preserve an already-computed result for this known Emscripten teardown
+// assertion while allowing every unrelated disposal failure to escape.
+const disposeQuickJsContext = (context: any): void => {
+  try {
+    context.dispose();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes(QUICKJS_GC_LIST_ASSERTION) && message.includes("JS_FreeRuntime")) return;
+    throw error;
+  }
+};
+
 export class QuickJsRuntime {
   async execute(
     code: string,
@@ -811,6 +828,7 @@ export class QuickJsRuntime {
     let executionDeadlineAt = executionStartedAt + effectiveTimeoutMs;
     let interruptedByDeadline = false;
     runtime.setMemoryLimit(options.memoryLimitBytes);
+    runtime.setMaxStackSize(QUICKJS_MAX_STACK_SIZE_BYTES);
     runtime.setInterruptHandler(() => {
       if (options.signal?.aborted === true) return true;
       if (Date.now() <= executionDeadlineAt) return false;
@@ -1118,7 +1136,7 @@ export class QuickJsRuntime {
       runtime.executePendingJobs();
       jsonParse.dispose();
       jsonObject.dispose();
-      context.dispose();
+      disposeQuickJsContext(context);
     }
   }
 }

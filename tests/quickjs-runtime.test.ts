@@ -426,6 +426,40 @@ await Promise.all([
     expect(result.error).toContain("Execution timed out after 50ms");
   });
 
+  it("surfaces unbounded recursion as a guest runtime error, not a WASM abort", async () => {
+    const result = await new QuickJsRuntime().execute(
+      "function f() { return f() + 1; } f();",
+      async () => undefined,
+      options,
+    );
+
+    expect(result.terminationReason).toBe("runtime_error");
+    expect(result.error).toContain("stack overflow");
+  });
+
+  it("makes stack overflow errors catchable inside the guest", async () => {
+    const result = await new QuickJsRuntime().execute(
+      "let depth = 0; function f() { depth += 1; return f() + 1; } try { f(); } catch (error) { return { depth, name: error.name }; }",
+      async () => undefined,
+      options,
+    );
+
+    expect(result.terminationReason).toBe("completed");
+    const value = result.value as { depth: number; name: string };
+    expect(value.name).toBe("InternalError");
+    expect(value.depth).toBeGreaterThan(0);
+  });
+
+  it("keeps executing programs after a guest stack overflow", async () => {
+    const runtime = new QuickJsRuntime();
+    await runtime.execute("function f() { return f() + 1; } f();", async () => undefined, options);
+
+    const result = await runtime.execute("return 1 + 1;", async () => undefined, options);
+
+    expect(result.terminationReason).toBe("completed");
+    expect(result.value).toBe(2);
+  });
+
   it("exposes named strings via π and throws a clear error for unprovided keys", async () => {
     const content = [
       "multiline",
