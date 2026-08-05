@@ -54,6 +54,38 @@ return {
 
 Independent calls run in parallel; only the returned object enters the model context.
 
+## Code map
+
+Fabric reads code structurally instead of scanning it as text. `ast-grep` parses each source file into an outline of symbols, signatures, and line numbers, and Fabric turns those outlines into a graph the model can walk.
+
+Measured on this repository with ast-grep 0.45.0:
+
+| Source | Size |
+| ------ | ---: |
+| 223 TypeScript files, raw | 2,493,559 chars |
+| The same tree as an ast-grep outline | 223,667 chars |
+| Compression | 11.1x |
+
+Reproduce:
+
+```sh
+cat $(find src -name '*.ts') | wc -c
+ast-grep outline $(find src -name '*.ts') | wc -c
+```
+
+The whole outline is roughly 56K tokens. That fits a modern context window but spends most of it on code the task never touches, so the `codemap` provider discloses the map in stages. Every operation takes an explicit `maxTokens` budget and reports whether it truncated.
+
+| Operation | What it returns |
+| --------- | --------------- |
+| `skeleton` | The minimal compressed map to start from |
+| `search` | A query routed to the symbol and literal index |
+| `expand` | The dependency neighborhood around named entities, upstream or downstream |
+| `cascade` | Files or symbols that have historically changed together with a seed |
+
+`cascade` blends git history with the dependency graph, so it answers which files a change will drag along rather than which files contain a string. That is the part text search cannot do.
+
+The graph is built once per root and cached on file mtime, so repeated calls within a turn stay cheap. Language coverage comes from ast-grep, so TypeScript, JavaScript, Go, Python, Rust, and Java all index through one path. `@ast-grep/cli` ships as a declared dependency, so there is nothing to install separately.
+
 ## DeepSWE smoke comparison
 
 A matched [Pier benchmark](bench/README.md) recorded on 2026-08-03 compared the published packages on the `scc-bounded-memory-spilling` DeepSWE task. Both arms used Pi 0.83.0, `openai-codex/gpt-5.6-sol` at low thinking, the same Docker task image and verifier, and three serial attempts.
@@ -212,6 +244,7 @@ See the [interface & commands reference](docs/interface.md) for every view, keyb
 - [Fork boundary](docs/adr/0001-fork-boundary.md) — what stays upstream-shaped and what becomes Ultra-native.
 - [Configuration](docs/configuration.md) — `fabric.json`, code modes, tool capture, approvals, and budgets.
 - [Quality enforcement](docs/quality.md) — trusted changed-file checks for programming languages, HTML, CSS, and custom formats.
+- [Code map research](docs/code-map-research.md) — measured compression baselines, aider's repomap algorithm, and the plan for AST-rank fusion.
 - [Certification and benchmarks](docs/certification.md) — offline certification, the 20-task Prewalk contract corpus, bounded evidence analysis, and opt-in real-model benchmarks.
 - [Interface & commands](docs/interface.md) — dashboard, settings, keybindings, slash commands, and headless runs.
 - [Agents & mesh](docs/agents.md) — Ultra Consult, agents, model handoff and `/fabric prewalk`, the Claude runner, transports, steering, persistent agents, templates, councils, recursion, and coordination.

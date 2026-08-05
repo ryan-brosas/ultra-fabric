@@ -7,7 +7,7 @@ import { expand, buildDisclosureGraph, minimalSkeleton, type Direction } from ".
 import { predictFileCascade, predictSymbolCascade } from "./cascade.js";
 
 // The codemap as an agent tool: "incremental mapping through agent discovery on
-// the tools." Three operations, each bounded by an explicit token budget:
+// the tools." Four operations, each bounded by an explicit token budget:
 //   skeleton  - the minimal compressed map to start from
 //   search    - route a query to the symbol/literal index
 //   expand    - disclose more of the graph around given entities
