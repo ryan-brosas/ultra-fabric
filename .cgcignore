@@ -7,10 +7,6 @@ venv/
 .venv/
 env/
 .env/
-dist/
-build/
-target/
-out/
 .git/
 __pycache__/
 *.png
