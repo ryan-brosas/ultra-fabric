@@ -38,4 +38,25 @@ describe("parsePrewalkChecklist", () => {
     missingValidation[0] = { task: "Change target", validation: " " };
     expect(() => parsePrewalkChecklist({ items: missingValidation })).toThrow(/validation/);
   });
+
+  // Trivial-path escape (adopted from opencode-prewalk triviality check and
+  // hermes single-edit no-handoff philosophy): a task that clearly fits in one
+  // or two small edits must not force the full 5-9 item ceremony or a model
+  // swap. The trivial disposition is recorded by the same checklist call.
+  it("accepts a trivial disposition without an item list", () => {
+    expect(parsePrewalkChecklist({ trivial: true }, 42)).toEqual({
+      items: [],
+      trivial: true,
+      readyAt: 42,
+    });
+  });
+
+  it("rejects a trivial disposition that also carries items", () => {
+    expect(() => parsePrewalkChecklist({ trivial: true, items: items(5) }))
+      .toThrow(/trivial/);
+  });
+
+  it("rejects a non-boolean trivial flag", () => {
+    expect(() => parsePrewalkChecklist({ trivial: "yes" })).toThrow(/trivial/);
+  });
 });

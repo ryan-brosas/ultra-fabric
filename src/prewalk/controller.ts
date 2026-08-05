@@ -186,6 +186,9 @@ export class PrewalkController {
           throw new Error("Research Prewalk first mutation is already in flight");
         }
         this.#enforceWriteScope(sessionId, action);
+        // Trivial escape: a trivial task never reserves the mutation boundary.
+        // Main completes the one or two small edits directly in the same turn.
+        if (status.checklist.trivial === true) return false;
         this.#researchMutationReserved = true;
         return true;
       },
@@ -481,6 +484,9 @@ export class PrewalkController {
     handoffId?: string,
   ): FabricPrewalkClaim | undefined {
     if (!this.isArmed(sessionId) || this.#status.state !== "armed") return undefined;
+    // Trivial escape: a trivial task never claims a handoff, so Main keeps its
+    // model and the settled task simply ends the one-shot arm.
+    if (this.#status.checklist?.trivial === true) return undefined;
     if (audits.some((audit) => audit.ref === "agents.handoff" && audit.success === true)) {
       this.supersedeTask();
       return undefined;

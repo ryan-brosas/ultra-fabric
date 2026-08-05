@@ -507,4 +507,43 @@ describe("PrewalkController no-op mutations", () => {
     expect(controller.isArmed("session-1")).toBe(true);
     expect(boundary.authorize(action)).toBe(true);
   });
+
+  // Trivial-path escape: a trivial checklist suppresses the mutation boundary
+  // and the executor handoff, so a one-or-two-edit task stays on Main's model.
+  it("suppresses boundary reservation and handoff claim for a trivial checklist", () => {
+    const controller = new PrewalkController();
+    controller.arm({ model: "anthropic/executor", sessionId: "session-1", task: "Fix typo" });
+    const boundary = controller.executionBoundary("session-1");
+    expect(boundary).toBeDefined();
+
+    boundary!.registerChecklist({ trivial: true });
+    const reservation = boundary!.authorize({
+      ref: "pi.write",
+      risk: "write",
+      effect: "workspace",
+    });
+    expect(reservation).toBe(false);
+
+    expect(
+      controller.claim([audit("pi.edit", true)], "session-1", "handoff-1"),
+    ).toBeUndefined();
+    expect(controller.status()).toMatchObject({
+      state: "armed",
+      checklist: { items: [], trivial: true },
+    });
+  });
+
+  it("still gates non-trivial research mutations on a full checklist", () => {
+    const controller = new PrewalkController();
+    controller.arm({ model: "anthropic/executor", sessionId: "session-1", task: "Implement" });
+    const boundary = controller.executionBoundary("session-1")!;
+    expect(() => boundary.authorize({
+      ref: "pi.write", risk: "write", effect: "workspace",
+    })).toThrow(/checklist/i);
+    boundary.registerChecklist({ trivial: false, items: Array.from({ length: 5 }, (_, index) => ({
+      task: `Change target ${index + 1}`, validation: `Run check ${index + 1}`,
+    })) });
+    const reservation = boundary.authorize({ ref: "pi.write", risk: "write", effect: "workspace" });
+    expect(reservation).toBe(true);
+  });
 });

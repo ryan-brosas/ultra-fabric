@@ -10,6 +10,11 @@ interface FabricPrewalkChecklistItem {
 export interface FabricPrewalkChecklist {
   items: FabricPrewalkChecklistItem[];
   readyAt: number;
+  // Trivial-path escape: a task that clearly fits in one or two small edits
+  // records the trivial disposition through the same checklist call, so the
+  // controller suppresses the mutation boundary and the executor handoff
+  // instead of forcing the 5-9 item ceremony and a model swap.
+  trivial?: boolean;
 }
 
 const checklistField = (
@@ -36,7 +41,20 @@ export const parsePrewalkChecklist = (
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new Error("Prewalk checklist requires an object with an items array");
   }
-  const items = (input as { items?: unknown }).items;
+  const record = input as { trivial?: unknown; items?: unknown };
+  if (record.trivial !== undefined) {
+    if (typeof record.trivial !== "boolean") {
+      throw new Error("Prewalk trivial flag must be a boolean");
+    }
+    if (record.trivial) {
+      if (record.items !== undefined) {
+        throw new Error("Prewalk trivial checklist must not carry items");
+      }
+      return { items: [], readyAt, trivial: true };
+    }
+    // trivial: false falls through to the full item contract.
+  }
+  const items = record.items;
   if (
     !Array.isArray(items) ||
     items.length < MIN_PREWALK_CHECKLIST_ITEMS ||
@@ -51,10 +69,10 @@ export const parsePrewalkChecklist = (
       if (typeof item !== "object" || item === null || Array.isArray(item)) {
         throw new Error(`Prewalk checklist item ${index + 1} must be an object`);
       }
-      const record = item as Record<string, unknown>;
+      const entry = item as Record<string, unknown>;
       return {
-        task: checklistField(record.task, "task", index),
-        validation: checklistField(record.validation, "validation", index),
+        task: checklistField(entry.task, "task", index),
+        validation: checklistField(entry.validation, "validation", index),
       };
     }),
     readyAt,
