@@ -35,6 +35,10 @@
   },
   "quality": {
     "mode": "audit",
+    "ignoredLanguages": [
+      "binary",
+      "markdown"
+    ],
     "checks": [
       {
         "id": "typecheck",
@@ -49,6 +53,32 @@
         ],
         "fileMode": "none",
         "timeoutMs": 120000
+      },
+      {
+        "id": "json-syntax",
+        "languages": [
+          "json"
+        ],
+        "command": "node",
+        "args": [
+          "-e",
+          "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))"
+        ],
+        "fileMode": "append",
+        "timeoutMs": 15000
+      },
+      {
+        "id": "yaml-syntax",
+        "languages": [
+          "yaml"
+        ],
+        "command": "node",
+        "args": [
+          "-e",
+          "require('yaml').parse(require('fs').readFileSync(process.argv[1],'utf8'))"
+        ],
+        "fileMode": "append",
+        "timeoutMs": 15000
       }
     ]
   },
