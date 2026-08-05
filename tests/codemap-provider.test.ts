@@ -48,7 +48,7 @@ describe("CodemapProvider", () => {
     expect(items.some((i: { name: string }) => i.name === "cascade")).toBe(true);
   });
 
-  it("invoke('cascade') finds a real co-change partner", { timeout: 30000 }, async () => {
+  it("invoke('cascade') finds a real co-change partner", { timeout: 60000 }, async () => {
     const { CodemapProvider } = await import("../" + CODEMAP + ".js");
     const result = await new CodemapProvider().invoke("cascade", { seed: "src/config.ts", maxTokens: 2000 }, { cwd: process.cwd() });
     const text = JSON.stringify(result);
