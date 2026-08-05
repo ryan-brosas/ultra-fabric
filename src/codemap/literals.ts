@@ -89,7 +89,9 @@ export const buildLiteralIndex = (
       entries.push({ file: m.file, line: line1, kind: "string", text: m.text, enclosing: enclosing(index, m.file, line1) });
     }
     // Comments: ast-grep inline rule with kind: comment.
-    const commentRule = "id: c\nlanguage: " + lang + "\nrule:\n  kind: comment";
+    // Flow-style YAML on one line: a multi-line argv entry does not survive the
+    // Windows cmd shim that wraps the ast-grep binary.
+    const commentRule = "{id: c, language: " + lang + ", rule: {kind: comment}}";
     const commentMatches = runAstGrep(binary, ["scan", "--inline-rules", commentRule, "--json=compact", ...langFiles], cwd);
     for (const m of commentMatches) {
       const line1 = m.range.start.line + 1;

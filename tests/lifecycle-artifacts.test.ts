@@ -25,7 +25,7 @@ describe("FileArtifactAdapter", () => {
   it("writes and reads back artifact content", () => {
     const adapter = setup();
     const written = adapter.write("add-auth-refresh", "spec", "# Spec\n\nTest content");
-    expect(written).toContain(".artifact/add-auth-refresh/spec.md");
+    expect(written.replace(/\\/g, "/")).toContain(".artifact/add-auth-refresh/spec.md");
     expect(adapter.read("add-auth-refresh", "spec")).toBe("# Spec\n\nTest content");
   });
 

@@ -9,7 +9,7 @@ import {
 import { extractImportEdges } from "../src/codemap/imports.js";
 import { runOutline } from "../src/codemap/outline.js";
 import { computeEdgeWeight } from "../src/codemap/rank.js";
-import { execFileSync } from "node:child_process";
+import { findSourceFiles } from "../src/codemap/lang.js";
 
 const files = runOutline(["src/lifecycle/store.ts"]);
 const index = buildSymbolIndex(files);
@@ -17,7 +17,7 @@ const root = process.cwd();
 
 describe("buildSymbolIndex", () => {
   it("contains at least 6000 symbols across the full src tree", () => {
-    const find = execFileSync("find", ["src", "-name", "*.ts"], { encoding: "utf8" }).trim().split("\n");
+    const find = findSourceFiles(process.cwd(), [".ts"]);
     const fullFiles = runOutline(find);
     const fullIndex = buildSymbolIndex(fullFiles);
     expect(fullIndex.nodes.length).toBeGreaterThanOrEqual(6000);
@@ -84,7 +84,7 @@ describe("maxDefiners threshold", () => {
 
 describe("buildAllEdges edge kinds", () => {
   it("produces all four LocAgent edge kinds over the full src tree", () => {
-    const find = execFileSync("find", ["src", "-name", "*.ts"], { encoding: "utf8" }).trim().split("\n");
+    const find = findSourceFiles(process.cwd(), [".ts"]);
     const fullIndex = buildSymbolIndex(runOutline(find));
     // The codemap has two graph layers: a symbol-level graph (buildAllEdges:
     // contains/invokes/inherits) and a file-level import graph (extractImportEdges:
