@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.31.1-ultra.4 - 2026-08-05
+
+- **Codemap AST provider.** Expose the code map as a Fabric provider with four operations
+  (skeleton, search, expand, cascade) backed by an AST-compressed graph with progressive
+  disclosure. Add benchmark and stress harnesses.
+- **Lifecycle durable work store.** Add a persistent task DAG, phase contract, and review
+  surface for multi-turn work tracking.
+- **Agent role profiles.** Extend role profiles, config surface, and fabric command for
+  agent declarations.
+- **Prewalk control loop.** Close the control loop by making the model oscillation
+  structural; never leave Main on the executor model and restore Main's model and thinking
+  level on every terminal path. Retain the executor model and hand off at the accepted
+  checklist, steering the executor from the live checklist every turn.
+- **Prewalk auto-arm.** Auto-arm from configuration, keep durable run evidence, and
+  re-arm from current configuration across turn boundaries.
+- **Prewalk in-place executor.** Run the in-place executor off-session with correct
+  thinking, fallback, and provenance. Consolidate to one in-session executor path and
+  clean up off-session in-place with a mode-contract test.
+- **Prewalk fixes.** Bound the per-turn checklist reminder per continuation. Forward the
+  armed thinking level to the executor. Surface a failed quality gate record in execution.
+  Migrate away the removed prewalk mode field.
+- **Host wiring.** Wire codemap and lifecycle into the host, update tooling config.
+- **Config.** Enable the fabric compaction engine and context QoS window. Enable the audit
+  quality gate with typecheck. Track the project Fabric configuration.
+- **Agents fix.** Isolate a Consult worker from ambient project resources.
+- **Codemap fix.** Remove self-invalidating history-rate assertion in the cascade test.
+- **UI.** Dispatch dashboard input through a mode-keyed map.
+- **Worker.** Lift main's event handlers to module scope.
+- **Test harness.** Isolate HOME and the Pi agent directory per worker.
+- **Bench scripts.** Add the makora DeepSWE and Pier harness scripts.
+- **Documentation.** Retire the removed three-mode prewalk narrative. Describe model
+  ownership after the return-policy removal. Add measured Prewalk cost, comparisons,
+  and handoff results to the README. Centralize durable project context under .pi.
+- **Chores.** Ignore the runtime agent run directory and hindsight directory. Drop the
+  knip ignore for relocated inspiration clones. Document the code graph context boundary.
+
 ## 0.31.1-ultra.3 - 2026-08-04
 
 - Default `prewalk.returnPolicy` to `previous` so in-place returns Main to its own model once the continuation settles, matching trajectory.
