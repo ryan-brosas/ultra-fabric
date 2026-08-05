@@ -103,8 +103,882 @@ const resolvePrewalkModel = async (
   return context.ui.select("Prewalk executor model", keys);
 };
 
+const runPrewalk = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  args: readonly string[],
+  task: string,
+): Promise<void> => {
+  const option = args[0];
+  if (option === "--off" || option === "--cancel") {
+    state.prewalk.cancel();
+    context.ui.setStatus("fabric-prewalk", undefined);
+    context.ui.notify("Fabric prewalk cancelled", "info");
+    return;
+  }
+  if (option === "--status") {
+    const status = state.prewalk.status();
+    context.ui.notify(
+      status.state === "idle"
+        ? "Fabric prewalk is idle"
+        : [
+            `Fabric prewalk ${status.state} → ${status.model}`,
+            ...(status.task ? [`Task: ${status.task}`] : []),
+            ...(status.state === "blocked"
+              ? [`Error: ${status.error}`, "Run /fabric prewalk --retry to resume this task."]
+              : []),
+          ].join("\n"),
+      "info",
+    );
+    return;
+  }
+  if (!state.config.fullCodeMode || state.config.schema.mode === "enforce") {
+    context.ui.notify(
+      "Fabric prewalk requires full code mode and Schema enforce mode disabled.",
+      "error",
+    );
+    return;
+  }
+  if (option === "--retry") {
+    const blocked = state.prewalk.status();
+    if (blocked.state !== "blocked") {
+      context.ui.notify("Fabric prewalk has no blocked task to retry", "warning");
+      return;
+    }
+    const retried = state.prewalk.retry(context.sessionManager.getSessionId());
+    if (retried.state !== "armed") {
+      context.ui.notify("Blocked prewalk belongs to another session", "error");
+      return;
+    }
+    context.ui.setStatus("fabric-prewalk", `armed retry → ${retried.model}`);
+    context.ui.notify("Fabric prewalk retry armed with preserved task", "info");
+    if (retried.task) pi.sendUserMessage(retried.task);
+    return;
+  }
+  const model = await resolvePrewalkModel(state, context);
+  if (!model) return;
+  // Hidden advisory framing is queued for the next prompt (rules before
+  // the task when one is submitted below). nextTurn never triggers a
+  // turn; custom messages never fire `input`, so observeTask ignores it.
+  armPrewalk(pi, state.prewalk, state.config.prewalk, context, model, task || undefined);
+  const modeLabel = "Main will switch in place at the first host-observed mutation";
+  const rearm = state.config.prewalk.alwaysRearm ? "; always re-arm enabled" : "";
+  context.ui.notify(
+    task
+      ? `Fabric prewalk armed for the next matching Fabric boundary; ${modeLabel} with ${model}${rearm}`
+      : `Fabric prewalk armed for the next task; ${modeLabel} with ${model}${rearm}`,
+    "info",
+  );
+  if (task) pi.sendUserMessage(task);
+};
+
+const runReload = async (deps: FabricCommandDeps, context: ExtensionContext): Promise<void> => {
+  const { state, fabricUi, applyFabricMode, suspendToolCapture } = deps;
+  fabricUi.stop();
+  suspendToolCapture();
+  await state.initialize(context);
+  applyFabricMode();
+  fabricUi.start(context);
+  context.ui.notify("Pi Fabric reloaded", "info");
+};
+
+const runProviders = (state: FabricState, context: ExtensionContext): void => {
+  const providers = state.registry.providers();
+  context.ui.notify(
+    providers.map((provider) => `${provider.name} — ${provider.description}`).join("\n"),
+    "info",
+  );
+};
+
+const runCaptured = (
+  capturedTools: CapturedToolCatalog,
+  context: ExtensionContext,
+  args: readonly string[],
+): void => {
+  const query = args.join(" ").toLowerCase();
+  const tools = capturedTools
+    .list()
+    .filter(
+      (tool) =>
+        !query ||
+        `${tool.name} ${tool.definition.description} ${tool.sourceInfo.path}`
+          .toLowerCase()
+          .includes(query),
+    );
+  const shown = tools.slice(0, 100);
+  context.ui.notify(
+    shown.length > 0
+      ? [
+          ...shown.map((tool) => `${tool.name} [${tool.risk}] — ${tool.sourceInfo.path}`),
+          ...(tools.length > shown.length
+            ? [`… ${tools.length - shown.length} more captured tools`]
+            : []),
+        ].join("\n")
+      : query
+        ? `No captured extension tools matching ${JSON.stringify(query)}`
+        : "No extension tools captured",
+    "info",
+  );
+};
+
+const runLeases = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        if (!state.config.mesh.enabled) {
+          context.ui.notify("Path leases require mesh coordination to be enabled", "warning");
+          return;
+        }
+        const releaseAll = argumentsList.includes("--release-all");
+        const releaseIndex = argumentsList.indexOf("--release");
+        try {
+          if (releaseAll || releaseIndex >= 0) {
+            const ids = releaseAll ? undefined : argumentsList.slice(releaseIndex + 1);
+            if (!releaseAll && (!ids || ids.length === 0)) {
+              context.ui.notify("Usage: /fabric leases --release <id...> | --release-all", "warning");
+              return;
+            }
+            const { released } = await state.pathLeases.forceRelease(ids);
+            context.ui.notify(
+              released.length > 0
+                ? `Released ${released.length} path lease(s): ${released.join(", ")}`
+                : "No matching path leases; lease state reset",
+              "info",
+            );
+            return;
+          }
+          const leases = await state.pathLeases.list();
+          context.ui.notify(
+            leases.length > 0
+              ? [
+                  ...leases.map((lease) => {
+                    const remaining = Math.max(0, lease.expiresAt - Date.now());
+                    return `${lease.id.slice(0, 8)} ${lease.scope} ${lease.path} — owner ${lease.ownerRunId} · expires in ${Math.round(remaining / 1_000)}s`;
+                  }),
+                  "Release with /fabric leases --release <id> or --release-all",
+                ].join("\n")
+              : "No active path leases",
+            "info",
+          );
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runOutcomes = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        if (!state.config.outcomes.enabled) {
+          context.ui.notify(
+            "Outcome recording is disabled; enable outcomes in /fabric settings",
+            "warning",
+          );
+          return;
+        }
+        try {
+          const report = await state.outcomes.recommend();
+          const summary = state.outcomes.summary();
+          const header = `${summary.records} records · ${summary.succeeded} succeeded · ${summary.verified} verified · ${summary.downgraded} downgraded · ${summary.evaluated} evaluated`;
+          const percent = (value: number): string => `${Math.round(value * 100)}%`;
+          const rows = report.candidates.map((candidate) => {
+            const marker = candidate.model === report.recommendedModel ? "★ " : "  ";
+            const score = candidate.averageScore === undefined
+              ? ""
+              : ` · score ${candidate.averageScore.toFixed(2)}`;
+            return `${marker}${candidate.model}: ${percent(candidate.verifiedRate)} verified [${percent(candidate.verifiedConfidence.low)}-${percent(candidate.verifiedConfidence.high)}] · ${percent(candidate.successRate)} success · ${candidate.samples} samples · ${Math.round(candidate.averageDurationMs)}ms · ${candidate.averageCost.toFixed(4)}${score}`;
+          });
+          const pending = report.excluded.map(
+            (entry) =>
+              `  ${entry.model}: needs ${report.minimumSamples - entry.samples} more sample(s)`,
+          );
+          context.ui.notify(
+            [
+              header,
+              ...(rows.length > 0
+                ? [`ranked by verified-rate lower bound (minimum ${report.minimumSamples} samples)`, ...rows]
+                : [`no model has reached ${report.minimumSamples} samples yet`]),
+              ...(pending.length > 0 ? ["pending:", ...pending] : []),
+              "Advisory only; Fabric never rewrites configured model defaults.",
+            ].join("\n"),
+            "info",
+          );
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runHealth = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const config = state.config;
+        const qos = state.contextQosTelemetry;
+        const lines: string[] = [];
+        try {
+          const budgets = state.persistentAgents.telemetry();
+          lines.push(
+            `persistent agents: ${budgets.persistentAgents} tracked · ${budgets.open} open · ${budgets.rejectedActivations} rejected · ${budgets.queueRejected} queue-rejected`,
+            `dead letters: ${budgets.activationDeadLetters} activation · ${budgets.deliveryDeadLetters} delivery`,
+          );
+        } catch {
+          lines.push("persistent agents: unavailable");
+        }
+        lines.push(
+          qos
+            ? `context QoS: ${qos.passes} passes · ${qos.retiredResults} retired results · ${qos.protectedResults} protected`
+            : "context QoS: no passes yet",
+        );
+        if (config.outcomes.enabled) {
+          try {
+            const summary = state.outcomes.summary();
+            lines.push(
+              `outcomes: ${summary.records} records · ${summary.verified} verified · ${summary.downgraded} downgraded (see /fabric outcomes)`,
+            );
+          } catch {
+            lines.push("outcomes: unavailable");
+          }
+        } else {
+          lines.push("outcomes: disabled");
+        }
+        if (config.mesh.enabled) {
+          try {
+            const leases = await state.pathLeases.list();
+            lines.push(`path leases: ${leases.length} active (see /fabric leases)`);
+          } catch (error) {
+            lines.push(
+              `path leases: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        } else {
+          lines.push("path leases: mesh disabled");
+        }
+        context.ui.notify(lines.join("\n"), "info");
+        return;
+};
+
+const runAgents = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const oneShot = state.agents.list();
+        const persistent = state.persistentAgents.list();
+        const rows = [
+          ...oneShot.map(
+            (agent) =>
+              `one-shot   ${agent.id.slice(0, 8)} ${agent.status} ${agent.runner}/${agent.transport} — ${agent.name}`,
+          ),
+          ...persistent.map(
+            (agent) =>
+              `persistent ${agent.id.slice(0, 8)} ${agent.status} ${agent.runner} q:${agent.queued} — ${agent.name}`,
+          ),
+        ];
+        context.ui.notify(rows.length > 0 ? rows.join("\n") : "No Fabric agents", "info");
+        return;
+};
+
+const runMessages = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const id = argumentsList[0];
+        if (!id) {
+          context.ui.notify("Usage: /fabric messages <persistent-agent-id>", "warning");
+          return;
+        }
+        try {
+          const persistentAgent = state.persistentAgents.status(id);
+          const messages = state.persistentAgents.messages(persistentAgent.id, 20);
+          const shortId = persistentAgent.id.slice(0, 8);
+          const body =
+            messages.length > 0
+              ? messages
+                  .map((message) => {
+                    const value = message.text ?? message.error ?? message.action ?? "data";
+                    const summary = truncateMiddle(value.replace(/\s+/g, " "), 500);
+                    const runTag = message.runId ? ` [${message.runId.slice(0, 8)}]` : "";
+                    const usageTag = message.usage
+                      ? ` · ${message.usage.input + message.usage.output} tok`
+                      : "";
+                    return `${message.direction === "in" ? "→" : "←"} ${message.source}${runTag}: ${summary}${usageTag}`;
+                  })
+                  .join("\n")
+              : `No messages for ${persistentAgent.name}`;
+          const footer = `\nInspect LLM I/O: /fabric log ${shortId} · Export: /fabric export-log ${persistentAgent.name}`;
+          context.ui.notify(`${body}${footer}`, "info");
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runLog = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const id = argumentsList[0];
+        if (!id) {
+          context.ui.notify(
+            "Usage: /fabric log <id> [session|run|all] [--lines N] [--run <runId>]",
+            "warning",
+          );
+          return;
+        }
+        let type: "session" | "run" | "all" = "session";
+        let lines = 40;
+        let runId: string | undefined;
+        for (let i = 1; i < argumentsList.length; i++) {
+          const arg = argumentsList[i]!;
+          if (arg === "session" || arg === "run" || arg === "all") type = arg;
+          else if ((arg === "--lines" || arg === "-n") && i + 1 < argumentsList.length) {
+            const n = Number(argumentsList[++i]);
+            if (n > 0) lines = Math.min(n, 5000);
+          } else if (arg === "--run" && i + 1 < argumentsList.length) {
+            runId = argumentsList[++i];
+          }
+        }
+        try {
+          const persistentAgent = state.persistentAgents.status(id);
+          const log = state.persistentAgents.readLog(persistentAgent.id, { type, lines, ...(runId ? { runId } : {}) });
+          const parts: string[] = [`Persistent agent ${persistentAgent.name} · ${log.sessionFile}`];
+          if (log.session.length > 0) {
+            parts.push(`── session (last ${log.session.length} lines) ──`);
+            for (const line of log.session) parts.push(summarizeLogLine(line.parsed ?? line.raw));
+          }
+          if (log.run) {
+            parts.push(
+              `── run ${log.run.runId.slice(0, 8)} (${log.run.status?.status ?? "?"}) ──`,
+            );
+            for (const line of log.run.events) parts.push(summarizeLogLine(line.parsed ?? line.raw));
+          }
+          if (log.retainedRuns.length > 0) {
+            parts.push(
+              `retained runs: ${log.retainedRuns.map((r) => r.slice(0, 8)).join(" ")}`,
+            );
+          }
+          context.ui.notify(
+            parts.length > 1 ? truncateMiddle(parts.join("\n"), 8000) : `No log found for ${persistentAgent.name}`,
+            "info",
+          );
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runExportLog = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const id = argumentsList[0];
+        const destArg = argumentsList.slice(1).join(" ");
+        if (!id) {
+          context.ui.notify("Usage: /fabric export-log <id> [path]", "warning");
+          return;
+        }
+        try {
+          const dest = path.resolve(
+            destArg || path.join("fabric-logs", `export-${Date.now()}`),
+          );
+          fs.mkdirSync(dest, { recursive: true });
+          const persistentAgent = state.persistentAgents
+            .list()
+            .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
+          let label: string;
+          let copied: string[] = [];
+          if (persistentAgent) {
+            const full = state.persistentAgents.status(persistentAgent.id);
+            label = persistentAgent.name;
+            if (full.sessionFile && fs.existsSync(full.sessionFile)) {
+              fs.copyFileSync(full.sessionFile, path.join(dest, "session.jsonl"));
+              copied.push("session.jsonl");
+            }
+            if (full.logDir && fs.existsSync(full.logDir)) {
+              fs.cpSync(full.logDir, path.join(dest, "runs"), { recursive: true });
+              copied.push("runs/");
+            }
+          } else {
+            const runDir = state.agents.runDirectory(id);
+            const status = state.agents.status(id);
+            label = status.name;
+            if (runDir && fs.existsSync(runDir)) {
+              fs.cpSync(runDir, dest, { recursive: true });
+              copied.push("run/");
+            }
+          }
+          if (copied.length === 0) {
+            context.ui.notify(`No log files found for ${label}`, "warning");
+            return;
+          }
+          context.ui.notify(`Exported ${label} log → ${dest} (${copied.join(", ")})`, "info");
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runClearMessages = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const id = argumentsList[0];
+        if (!id) {
+          context.ui.notify("Usage: /fabric clear-messages <persistent-agent-id>", "warning");
+          return;
+        }
+        try {
+          const persistentAgent = state.persistentAgents.status(id);
+          await state.persistentAgents.clearMessages(persistentAgent.id);
+          context.ui.notify(`Cleared message history for ${persistentAgent.name}`, "info");
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runEvents = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const id = argumentsList[0];
+        if (!id) {
+          context.ui.notify("Usage: /fabric events <persistent-agent-id> [event...]", "warning");
+          return;
+        }
+        try {
+          const persistentAgent = state.persistentAgents.status(id);
+          const events = argumentsList.slice(1) as FabricPersistentAgentHostEvent[];
+          await state.persistentAgents.setEvents(persistentAgent.id, events);
+          context.ui.notify(
+            `Set ${persistentAgent.name} events: ${events.join(", ") || "(none)"}`,
+            "info",
+          );
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runStop = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const id = argumentsList[0];
+        if (!id) {
+          context.ui.notify("Usage: /fabric stop <id>", "warning");
+          return;
+        }
+        const persistentAgent = state.persistentAgents
+          .list()
+          .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
+        if (persistentAgent) {
+          await state.persistentAgents.stop(persistentAgent.id);
+          context.ui.notify(`Stopped persistent Fabric agent ${persistentAgent.id.slice(0, 8)}`, "info");
+          return;
+        }
+        const agent = state.agents.list().find((candidate) => candidate.id.startsWith(id));
+        if (!agent) {
+          context.ui.notify(`Unknown Fabric agent: ${id}`, "error");
+          return;
+        }
+        await state.agents.stop(agent.id);
+        context.ui.notify(`Stopped Fabric agent ${agent.id.slice(0, 8)}`, "info");
+        return;
+};
+
+const runRemove = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const id = argumentsList[0];
+        if (!id) {
+          context.ui.notify("Usage: /fabric remove <id>", "warning");
+          return;
+        }
+        const persistentAgent = state.persistentAgents
+          .list()
+          .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
+        if (persistentAgent) {
+          await state.persistentAgents.remove(persistentAgent.id);
+          context.ui.notify(`Removed persistent Fabric agent ${persistentAgent.id.slice(0, 8)} (${persistentAgent.name})`, "info");
+          return;
+        }
+        const agent = state.agents.list().find((candidate) => candidate.id.startsWith(id));
+        if (!agent) {
+          context.ui.notify(`Unknown Fabric agent: ${id}`, "error");
+          return;
+        }
+        await state.agents.stop(agent.id);
+        await state.agents.cleanup(agent.id);
+        context.ui.notify(`Removed Fabric agent ${agent.id.slice(0, 8)}`, "info");
+        return;
+};
+
+const runAttach = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const id = argumentsList[0];
+        const agent = id
+          ? state.agents.list().find((candidate) => candidate.id.startsWith(id))
+          : undefined;
+        if (!agent?.attachCommand) {
+          context.ui.notify("No attachable Fabric agent found", "warning");
+          return;
+        }
+        context.ui.notify(agent.attachCommand, "info");
+        return;
+};
+
+const runGlobal = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const templates = state.templates.list();
+        context.ui.notify(
+          templates.length > 0
+            ? templates
+                .map((template) => `${template.id.slice(0, 8)} global ${template.runner} — ${template.name}`)
+                .join("\n")
+            : "No global Fabric agent templates",
+          "info",
+        );
+        return;
+};
+
+const runImport = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const key = argumentsList[0];
+        if (!key) {
+          context.ui.notify("Usage: /fabric import <agent-template-name-or-id> [as <new-name>]", "warning");
+          return;
+        }
+        try {
+          const def = state.templates.resolve(key);
+          if (!def) {
+            context.ui.notify(`Unknown Agent template: ${key}`, "error");
+            return;
+          }
+          const asIndex = argumentsList.indexOf("as");
+          const as =
+            asIndex >= 0 && argumentsList[asIndex + 1] ? argumentsList[asIndex + 1] : undefined;
+          const persistentAgent = await state.agents.importTemplate(def.id, as);
+          context.ui.notify(`Imported Agent template "${def.name}" as ${persistentAgent.name}`, "info");
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runExport = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const id = argumentsList[0];
+        const overwrite = argumentsList.includes("--overwrite") || argumentsList.includes("-f");
+        if (!id) {
+          context.ui.notify("Usage: /fabric export <persistent-agent-id> [--overwrite]", "warning");
+          return;
+        }
+        try {
+          const persistentAgent = state.persistentAgents
+            .list()
+            .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
+          if (!persistentAgent) {
+            context.ui.notify(`Unknown persistent Fabric agent: ${id}`, "error");
+            return;
+          }
+          const def = state.persistentAgents.definition(persistentAgent.id);
+          const template = state.templates.create(def, overwrite);
+          context.ui.notify(`Exported "${template.name}" to global agent templates`, "info");
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runResearch = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const topic = argumentsText.trim().slice(command.length).trim();
+        if (!topic) {
+          context.ui.notify("Usage: /fabric research <topic>", "warning");
+          return;
+        }
+        try {
+          const result = await state.agents.run({
+            role: "scout",
+            name: `research-${Date.now()}`,
+            task: `Research this topic and return evidence-backed findings with file:line references: ${topic}`,
+            timeoutMs: 600_000,
+          });
+          const slug = state.work.getActive();
+          const workSlug = slug ?? sanitizeWorkSlug(topic.slice(0, 64) || "research");
+          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
+          adapter.write(workSlug, "research", result.text);
+          if (slug) {
+            await state.work.update(slug, (record) => ({
+              ...record,
+              phase: "research",
+              artifacts: { ...record.artifacts, research: adapter.resolve(workSlug, "research") },
+              evidence: [...record.evidence, { phase: "research", ref: `agent:${result.traceId ?? "scout"}`, claim: topic }],
+            }));
+          } else {
+            await state.work.create({
+              slug: workSlug,
+              title: topic,
+              phase: "research",
+              artifacts: { research: adapter.resolve(workSlug, "research") },
+              evidence: [{ phase: "research", ref: `agent:${result.traceId ?? "scout"}`, claim: topic }],
+            });
+            await state.work.setActive(workSlug);
+          }
+          context.ui.notify(
+            result.status === "completed"
+              ? `Research complete: ${result.text.slice(0, 200)}${result.text.length > 200 ? "..." : ""}`
+              : `Research ${result.status}: ${result.text.slice(0, 200)}`,
+            result.status === "completed" ? "info" : "warning",
+          );
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runCreate = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        const description = argumentsText.trim().slice(command.length).trim();
+        if (!description) {
+          context.ui.notify("Usage: /fabric create <description>", "warning");
+          return;
+        }
+        try {
+          const result = await state.agents.run({
+            role: "planner",
+            name: `create-${Date.now()}`,
+            task: `Inspect the current source and produce a dependency-aware spec for this change. Return ordered tasks, affected paths, test seams, and rollback boundaries: ${description}`,
+            timeoutMs: 600_000,
+          });
+          const slug = sanitizeWorkSlug(description.slice(0, 64) || "work");
+          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
+          adapter.write(slug, "spec", result.text);
+          await state.work.create({
+            slug,
+            title: description,
+            phase: "create",
+            artifacts: { spec: adapter.resolve(slug, "spec") },
+            evidence: [{ phase: "create", ref: `agent:${result.traceId ?? "planner"}`, claim: description }],
+          });
+          await state.work.setActive(slug);
+          context.ui.notify(`Work record created: ${slug}. Run /fabric plan or /fabric ship.`, "info");
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runPlan = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        try {
+          const slug = state.work.getActive();
+          if (!slug) {
+            context.ui.notify("No active work record. Run /fabric create <description> first.", "warning");
+            return;
+          }
+          const record = state.work.get(slug);
+          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
+          const specText = record.artifacts.spec ? adapter.read(slug, "spec") : undefined;
+          if (!specText) {
+            context.ui.notify("Active work record has no spec artifact. Run /fabric create first.", "warning");
+            return;
+          }
+          const result = await state.agents.run({
+            role: "planner",
+            name: `plan-${Date.now()}`,
+            task: `Based on this spec, create a detailed implementation plan with TDD steps. Return a tasks array where each task has id, description, dependsOn, parallel, conflictsWith, files, and verify. Spec: ${specText}`,
+            schema: taskDagSchema as Record<string, unknown>,
+            timeoutMs: 600_000,
+          });
+          const planContent = result.value
+            ? JSON.stringify(result.value, null, 2)
+            : result.text;
+          adapter.write(slug, "plan", planContent);
+          await state.work.update(slug, (r) => ({
+            ...r,
+            phase: "plan",
+            artifacts: { ...r.artifacts, plan: adapter.resolve(slug, "plan") },
+          }));
+          context.ui.notify(`Plan created for ${slug}. Run /fabric ship to execute.`, "info");
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runShip = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        try {
+          if (!state.config.fullCodeMode || state.config.schema.mode === "enforce") {
+            context.ui.notify(
+              "Fabric ship requires full code mode and Schema enforce mode disabled.",
+              "error",
+            );
+            return;
+          }
+          const slug = state.work.getActive();
+          if (!slug) {
+            context.ui.notify("No active work record. Run /fabric create <description> first.", "warning");
+            return;
+          }
+          const record = state.work.get(slug);
+          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
+          const planText = record.artifacts.plan ? adapter.read(slug, "plan") : undefined;
+          if (!planText) {
+            context.ui.notify("Active work record has no plan artifact. Run /fabric create or /fabric plan first.", "warning");
+            return;
+          }
+          let dag;
+          try {
+            dag = parseTaskDag(JSON.parse(planText));
+          } catch {
+            context.ui.notify("Plan artifact is not a valid task DAG. Run /fabric plan to regenerate it.", "error");
+            return;
+          }
+          const completed = record.progress.slice(0, 128);
+          const wave = selectNextWave(dag, completed);
+          if (!wave || wave.length === 0) {
+            context.ui.notify(`All tasks complete for ${slug}.`, "info");
+            return;
+          }
+          const waveFiles = Array.from(new Set(wave.flatMap((t) => t.files))).slice(0, 32);
+          state.prewalk.setWriteScope(context.sessionManager.getSessionId(), waveFiles);
+          let impactPath: string | undefined;
+          const researchAgent = state.config.prewalk.researchAgent;
+          if (researchAgent) {
+            try {
+              const agentResult = await state.agents.run({
+                role: researchAgent,
+                name: "ship-impact-" + Date.now(),
+                task: "Analyze the blast radius of these files and return callers, importers, and complexity hot spots with file:line evidence: " + waveFiles.join(", "),
+                timeoutMs: 300_000,
+              });
+              if (agentResult.text) {
+                impactPath = adapter.write(slug, "impact", agentResult.text);
+              }
+            } catch {
+              // agent failed or timed out; ship without impact artifact
+            }
+          }
+          const taskSummary = wave.map((t) =>
+            "Task " + t.id + ": " + t.description + (t.verify ? " Verify: " + t.verify : "")
+          ).join("\n");
+          const model = await resolvePrewalkModel(state, context);
+          if (!model) return;
+          armPrewalk(pi, state.prewalk, state.config.prewalk, context, model, taskSummary);
+          pi.sendUserMessage(taskSummary);
+          await state.work.update(slug, (r) => ({
+            ...r,
+            phase: "ship",
+            inFlight: wave.map((t) => t.id),
+            ...(impactPath ? { artifacts: { ...r.artifacts, impact: impactPath } } : {}),
+          }));
+          context.ui.notify("Ship armed for " + slug + " wave [" + wave.map((t) => t.id).join(", ") + "] with " + model + ". Scoped to " + waveFiles.length + " paths." + (impactPath ? " Impact artifact written." : ""), "info");
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
 export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps): void {
-  const { state, fabricUi, capturedTools, applyFabricMode, suspendToolCapture } = deps;
+  const { state, fabricUi, capturedTools, applyFabricMode } = deps;
   pi.registerCommand("fabric", {
     description: "Open Fabric, arm prewalk, reload, or manage agents across both lifecycles",
     getArgumentCompletions: (argumentPrefix: string): AutocompleteItem[] | null => {
@@ -226,12 +1100,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         .split(/\s+/)
         .filter(Boolean);
       if (command === "reload") {
-        fabricUi.stop();
-        suspendToolCapture();
-        await state.initialize(context);
-        applyFabricMode();
-        fabricUi.start(context);
-        context.ui.notify("Pi Fabric reloaded", "info");
+        await runReload(deps, context);
         return;
       }
       if (command === "settings") {
@@ -239,70 +1108,8 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         return;
       }
       if (command === "prewalk") {
-        const option = argumentsList[0];
-        if (option === "--off" || option === "--cancel") {
-          state.prewalk.cancel();
-          context.ui.setStatus("fabric-prewalk", undefined);
-          context.ui.notify("Fabric prewalk cancelled", "info");
-          return;
-        }
-        if (option === "--status") {
-          const status = state.prewalk.status();
-          context.ui.notify(
-            status.state === "idle"
-              ? "Fabric prewalk is idle"
-              : [
-                  `Fabric prewalk ${status.state} → ${status.model}`,
-                  ...(status.task ? [`Task: ${status.task}`] : []),
-                  ...(status.state === "blocked"
-                    ? [
-                        `Error: ${status.error}`,
-                        "Run /fabric prewalk --retry to resume this task.",
-                      ]
-                    : []),
-                ].join("\n"),
-            "info",
-          );
-          return;
-        }
-        if (!state.config.fullCodeMode || state.config.schema.mode === "enforce") {
-          context.ui.notify(
-            "Fabric prewalk requires full code mode and Schema enforce mode disabled.",
-            "error",
-          );
-          return;
-        }
-        if (option === "--retry") {
-          const blocked = state.prewalk.status();
-          if (blocked.state !== "blocked") {
-            context.ui.notify("Fabric prewalk has no blocked task to retry", "warning");
-            return;
-          }
-          const retried = state.prewalk.retry(context.sessionManager.getSessionId());
-          if (retried.state !== "armed") {
-            context.ui.notify("Blocked prewalk belongs to another session", "error");
-            return;
-          }
-          context.ui.setStatus("fabric-prewalk", `armed retry → ${retried.model}`);
-          context.ui.notify("Fabric prewalk retry armed with preserved task", "info");
-          if (retried.task) pi.sendUserMessage(retried.task);
-          return;
-        }
-        const model = await resolvePrewalkModel(state, context);
-        if (!model) return;
         const task = argumentsText.trim().slice(command.length).trim();
-        // Hidden advisory framing is queued for the next prompt (rules before
-        // the task when one is submitted below). nextTurn never triggers a
-        // turn; custom messages never fire `input`, so observeTask ignores it.
-        armPrewalk(pi, state.prewalk, state.config.prewalk, context, model, task || undefined);
-        const modeLabel = "Main will switch in place at the first host-observed mutation";
-        context.ui.notify(
-          task
-            ? `Fabric prewalk armed for the next matching Fabric boundary; ${modeLabel} with ${model}${state.config.prewalk.alwaysRearm ? "; always re-arm enabled" : ""}`
-            : `Fabric prewalk armed for the next task; ${modeLabel} with ${model}${state.config.prewalk.alwaysRearm ? "; always re-arm enabled" : ""}`,
-          "info",
-        );
-        if (task) pi.sendUserMessage(task);
+        await runPrewalk(pi, state, context, argumentsList, task);
         return;
       }
       if (command === "dashboard" || command === "ui") {
@@ -310,645 +1117,91 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         return;
       }
       if (command === "providers") {
-        const providers = state.registry.providers();
-        context.ui.notify(
-          providers.map((provider) => `${provider.name} — ${provider.description}`).join("\n"),
-          "info",
-        );
+        runProviders(state, context);
         return;
       }
       if (command === "captured") {
-        const query = argumentsList.join(" ").toLowerCase();
-        const tools = capturedTools
-          .list()
-          .filter(
-            (tool) =>
-              !query ||
-              `${tool.name} ${tool.definition.description} ${tool.sourceInfo.path}`
-                .toLowerCase()
-                .includes(query),
-          );
-        const shown = tools.slice(0, 100);
-        context.ui.notify(
-          shown.length > 0
-            ? [
-                ...shown.map((tool) => `${tool.name} [${tool.risk}] — ${tool.sourceInfo.path}`),
-                ...(tools.length > shown.length
-                  ? [`… ${tools.length - shown.length} more captured tools`]
-                  : []),
-              ].join("\n")
-            : query
-              ? `No captured extension tools matching ${JSON.stringify(query)}`
-              : "No extension tools captured",
-          "info",
-        );
+        runCaptured(capturedTools, context, argumentsList);
         return;
       }
       if (command === "leases") {
-        if (!state.config.mesh.enabled) {
-          context.ui.notify("Path leases require mesh coordination to be enabled", "warning");
-          return;
-        }
-        const releaseAll = argumentsList.includes("--release-all");
-        const releaseIndex = argumentsList.indexOf("--release");
-        try {
-          if (releaseAll || releaseIndex >= 0) {
-            const ids = releaseAll ? undefined : argumentsList.slice(releaseIndex + 1);
-            if (!releaseAll && (!ids || ids.length === 0)) {
-              context.ui.notify("Usage: /fabric leases --release <id...> | --release-all", "warning");
-              return;
-            }
-            const { released } = await state.pathLeases.forceRelease(ids);
-            context.ui.notify(
-              released.length > 0
-                ? `Released ${released.length} path lease(s): ${released.join(", ")}`
-                : "No matching path leases; lease state reset",
-              "info",
-            );
-            return;
-          }
-          const leases = await state.pathLeases.list();
-          context.ui.notify(
-            leases.length > 0
-              ? [
-                  ...leases.map((lease) => {
-                    const remaining = Math.max(0, lease.expiresAt - Date.now());
-                    return `${lease.id.slice(0, 8)} ${lease.scope} ${lease.path} — owner ${lease.ownerRunId} · expires in ${Math.round(remaining / 1_000)}s`;
-                  }),
-                  "Release with /fabric leases --release <id> or --release-all",
-                ].join("\n")
-              : "No active path leases",
-            "info",
-          );
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runLeases(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "outcomes") {
-        if (!state.config.outcomes.enabled) {
-          context.ui.notify(
-            "Outcome recording is disabled; enable outcomes in /fabric settings",
-            "warning",
-          );
-          return;
-        }
-        try {
-          const report = await state.outcomes.recommend();
-          const summary = state.outcomes.summary();
-          const header = `${summary.records} records · ${summary.succeeded} succeeded · ${summary.verified} verified · ${summary.downgraded} downgraded · ${summary.evaluated} evaluated`;
-          const percent = (value: number): string => `${Math.round(value * 100)}%`;
-          const rows = report.candidates.map((candidate) => {
-            const marker = candidate.model === report.recommendedModel ? "★ " : "  ";
-            const score = candidate.averageScore === undefined
-              ? ""
-              : ` · score ${candidate.averageScore.toFixed(2)}`;
-            return `${marker}${candidate.model}: ${percent(candidate.verifiedRate)} verified [${percent(candidate.verifiedConfidence.low)}-${percent(candidate.verifiedConfidence.high)}] · ${percent(candidate.successRate)} success · ${candidate.samples} samples · ${Math.round(candidate.averageDurationMs)}ms · $${candidate.averageCost.toFixed(4)}${score}`;
-          });
-          const pending = report.excluded.map(
-            (entry) =>
-              `  ${entry.model}: needs ${report.minimumSamples - entry.samples} more sample(s)`,
-          );
-          context.ui.notify(
-            [
-              header,
-              ...(rows.length > 0
-                ? [`ranked by verified-rate lower bound (minimum ${report.minimumSamples} samples)`, ...rows]
-                : [`no model has reached ${report.minimumSamples} samples yet`]),
-              ...(pending.length > 0 ? ["pending:", ...pending] : []),
-              "Advisory only; Fabric never rewrites configured model defaults.",
-            ].join("\n"),
-            "info",
-          );
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runOutcomes(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "health") {
-        const config = state.config;
-        const qos = state.contextQosTelemetry;
-        const lines: string[] = [];
-        try {
-          const budgets = state.persistentAgents.telemetry();
-          lines.push(
-            `persistent agents: ${budgets.persistentAgents} tracked · ${budgets.open} open · ${budgets.rejectedActivations} rejected · ${budgets.queueRejected} queue-rejected`,
-            `dead letters: ${budgets.activationDeadLetters} activation · ${budgets.deliveryDeadLetters} delivery`,
-          );
-        } catch {
-          lines.push("persistent agents: unavailable");
-        }
-        lines.push(
-          qos
-            ? `context QoS: ${qos.passes} passes · ${qos.retiredResults} retired results · ${qos.protectedResults} protected`
-            : "context QoS: no passes yet",
-        );
-        if (config.outcomes.enabled) {
-          try {
-            const summary = state.outcomes.summary();
-            lines.push(
-              `outcomes: ${summary.records} records · ${summary.verified} verified · ${summary.downgraded} downgraded (see /fabric outcomes)`,
-            );
-          } catch {
-            lines.push("outcomes: unavailable");
-          }
-        } else {
-          lines.push("outcomes: disabled");
-        }
-        if (config.mesh.enabled) {
-          try {
-            const leases = await state.pathLeases.list();
-            lines.push(`path leases: ${leases.length} active (see /fabric leases)`);
-          } catch (error) {
-            lines.push(
-              `path leases: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          }
-        } else {
-          lines.push("path leases: mesh disabled");
-        }
-        context.ui.notify(lines.join("\n"), "info");
+        await runHealth(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "agents") {
-        const oneShot = state.agents.list();
-        const persistent = state.persistentAgents.list();
-        const rows = [
-          ...oneShot.map(
-            (agent) =>
-              `one-shot   ${agent.id.slice(0, 8)} ${agent.status} ${agent.runner}/${agent.transport} — ${agent.name}`,
-          ),
-          ...persistent.map(
-            (agent) =>
-              `persistent ${agent.id.slice(0, 8)} ${agent.status} ${agent.runner} q:${agent.queued} — ${agent.name}`,
-          ),
-        ];
-        context.ui.notify(rows.length > 0 ? rows.join("\n") : "No Fabric agents", "info");
+        await runAgents(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "messages") {
-        const id = argumentsList[0];
-        if (!id) {
-          context.ui.notify("Usage: /fabric messages <persistent-agent-id>", "warning");
-          return;
-        }
-        try {
-          const persistentAgent = state.persistentAgents.status(id);
-          const messages = state.persistentAgents.messages(persistentAgent.id, 20);
-          const shortId = persistentAgent.id.slice(0, 8);
-          const body =
-            messages.length > 0
-              ? messages
-                  .map((message) => {
-                    const value = message.text ?? message.error ?? message.action ?? "data";
-                    const summary = truncateMiddle(value.replace(/\s+/g, " "), 500);
-                    const runTag = message.runId ? ` [${message.runId.slice(0, 8)}]` : "";
-                    const usageTag = message.usage
-                      ? ` · ${message.usage.input + message.usage.output} tok`
-                      : "";
-                    return `${message.direction === "in" ? "→" : "←"} ${message.source}${runTag}: ${summary}${usageTag}`;
-                  })
-                  .join("\n")
-              : `No messages for ${persistentAgent.name}`;
-          const footer = `\nInspect LLM I/O: /fabric log ${shortId} · Export: /fabric export-log ${persistentAgent.name}`;
-          context.ui.notify(`${body}${footer}`, "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runMessages(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "log") {
-        const id = argumentsList[0];
-        if (!id) {
-          context.ui.notify(
-            "Usage: /fabric log <id> [session|run|all] [--lines N] [--run <runId>]",
-            "warning",
-          );
-          return;
-        }
-        let type: "session" | "run" | "all" = "session";
-        let lines = 40;
-        let runId: string | undefined;
-        for (let i = 1; i < argumentsList.length; i++) {
-          const arg = argumentsList[i]!;
-          if (arg === "session" || arg === "run" || arg === "all") type = arg;
-          else if ((arg === "--lines" || arg === "-n") && i + 1 < argumentsList.length) {
-            const n = Number(argumentsList[++i]);
-            if (n > 0) lines = Math.min(n, 5000);
-          } else if (arg === "--run" && i + 1 < argumentsList.length) {
-            runId = argumentsList[++i];
-          }
-        }
-        try {
-          const persistentAgent = state.persistentAgents.status(id);
-          const log = state.persistentAgents.readLog(persistentAgent.id, { type, lines, ...(runId ? { runId } : {}) });
-          const parts: string[] = [`Persistent agent ${persistentAgent.name} · ${log.sessionFile}`];
-          if (log.session.length > 0) {
-            parts.push(`── session (last ${log.session.length} lines) ──`);
-            for (const line of log.session) parts.push(summarizeLogLine(line.parsed ?? line.raw));
-          }
-          if (log.run) {
-            parts.push(
-              `── run ${log.run.runId.slice(0, 8)} (${log.run.status?.status ?? "?"}) ──`,
-            );
-            for (const line of log.run.events) parts.push(summarizeLogLine(line.parsed ?? line.raw));
-          }
-          if (log.retainedRuns.length > 0) {
-            parts.push(
-              `retained runs: ${log.retainedRuns.map((r) => r.slice(0, 8)).join(" ")}`,
-            );
-          }
-          context.ui.notify(
-            parts.length > 1 ? truncateMiddle(parts.join("\n"), 8000) : `No log found for ${persistentAgent.name}`,
-            "info",
-          );
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runLog(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "export-log") {
-        const id = argumentsList[0];
-        const destArg = argumentsList.slice(1).join(" ");
-        if (!id) {
-          context.ui.notify("Usage: /fabric export-log <id> [path]", "warning");
-          return;
-        }
-        try {
-          const dest = path.resolve(
-            destArg || path.join("fabric-logs", `export-${Date.now()}`),
-          );
-          fs.mkdirSync(dest, { recursive: true });
-          const persistentAgent = state.persistentAgents
-            .list()
-            .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
-          let label: string;
-          let copied: string[] = [];
-          if (persistentAgent) {
-            const full = state.persistentAgents.status(persistentAgent.id);
-            label = persistentAgent.name;
-            if (full.sessionFile && fs.existsSync(full.sessionFile)) {
-              fs.copyFileSync(full.sessionFile, path.join(dest, "session.jsonl"));
-              copied.push("session.jsonl");
-            }
-            if (full.logDir && fs.existsSync(full.logDir)) {
-              fs.cpSync(full.logDir, path.join(dest, "runs"), { recursive: true });
-              copied.push("runs/");
-            }
-          } else {
-            const runDir = state.agents.runDirectory(id);
-            const status = state.agents.status(id);
-            label = status.name;
-            if (runDir && fs.existsSync(runDir)) {
-              fs.cpSync(runDir, dest, { recursive: true });
-              copied.push("run/");
-            }
-          }
-          if (copied.length === 0) {
-            context.ui.notify(`No log files found for ${label}`, "warning");
-            return;
-          }
-          context.ui.notify(`Exported ${label} log → ${dest} (${copied.join(", ")})`, "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runExportLog(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "clear-messages") {
-        const id = argumentsList[0];
-        if (!id) {
-          context.ui.notify("Usage: /fabric clear-messages <persistent-agent-id>", "warning");
-          return;
-        }
-        try {
-          const persistentAgent = state.persistentAgents.status(id);
-          await state.persistentAgents.clearMessages(persistentAgent.id);
-          context.ui.notify(`Cleared message history for ${persistentAgent.name}`, "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runClearMessages(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "events") {
-        const id = argumentsList[0];
-        if (!id) {
-          context.ui.notify("Usage: /fabric events <persistent-agent-id> [event...]", "warning");
-          return;
-        }
-        try {
-          const persistentAgent = state.persistentAgents.status(id);
-          const events = argumentsList.slice(1) as FabricPersistentAgentHostEvent[];
-          await state.persistentAgents.setEvents(persistentAgent.id, events);
-          context.ui.notify(
-            `Set ${persistentAgent.name} events: ${events.join(", ") || "(none)"}`,
-            "info",
-          );
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runEvents(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "stop") {
-        const id = argumentsList[0];
-        if (!id) {
-          context.ui.notify("Usage: /fabric stop <id>", "warning");
-          return;
-        }
-        const persistentAgent = state.persistentAgents
-          .list()
-          .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
-        if (persistentAgent) {
-          await state.persistentAgents.stop(persistentAgent.id);
-          context.ui.notify(`Stopped persistent Fabric agent ${persistentAgent.id.slice(0, 8)}`, "info");
-          return;
-        }
-        const agent = state.agents.list().find((candidate) => candidate.id.startsWith(id));
-        if (!agent) {
-          context.ui.notify(`Unknown Fabric agent: ${id}`, "error");
-          return;
-        }
-        await state.agents.stop(agent.id);
-        context.ui.notify(`Stopped Fabric agent ${agent.id.slice(0, 8)}`, "info");
+        await runStop(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "remove" || command === "kill") {
-        const id = argumentsList[0];
-        if (!id) {
-          context.ui.notify("Usage: /fabric remove <id>", "warning");
-          return;
-        }
-        const persistentAgent = state.persistentAgents
-          .list()
-          .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
-        if (persistentAgent) {
-          await state.persistentAgents.remove(persistentAgent.id);
-          context.ui.notify(`Removed persistent Fabric agent ${persistentAgent.id.slice(0, 8)} (${persistentAgent.name})`, "info");
-          return;
-        }
-        const agent = state.agents.list().find((candidate) => candidate.id.startsWith(id));
-        if (!agent) {
-          context.ui.notify(`Unknown Fabric agent: ${id}`, "error");
-          return;
-        }
-        await state.agents.stop(agent.id);
-        await state.agents.cleanup(agent.id);
-        context.ui.notify(`Removed Fabric agent ${agent.id.slice(0, 8)}`, "info");
+        await runRemove(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "attach") {
-        const id = argumentsList[0];
-        const agent = id
-          ? state.agents.list().find((candidate) => candidate.id.startsWith(id))
-          : undefined;
-        if (!agent?.attachCommand) {
-          context.ui.notify("No attachable Fabric agent found", "warning");
-          return;
-        }
-        context.ui.notify(agent.attachCommand, "info");
+        await runAttach(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "global") {
-        const templates = state.templates.list();
-        context.ui.notify(
-          templates.length > 0
-            ? templates
-                .map((template) => `${template.id.slice(0, 8)} global ${template.runner} — ${template.name}`)
-                .join("\n")
-            : "No global Fabric agent templates",
-          "info",
-        );
+        await runGlobal(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "import") {
-        const key = argumentsList[0];
-        if (!key) {
-          context.ui.notify("Usage: /fabric import <agent-template-name-or-id> [as <new-name>]", "warning");
-          return;
-        }
-        try {
-          const def = state.templates.resolve(key);
-          if (!def) {
-            context.ui.notify(`Unknown Agent template: ${key}`, "error");
-            return;
-          }
-          const asIndex = argumentsList.indexOf("as");
-          const as =
-            asIndex >= 0 && argumentsList[asIndex + 1] ? argumentsList[asIndex + 1] : undefined;
-          const persistentAgent = await state.agents.importTemplate(def.id, as);
-          context.ui.notify(`Imported Agent template "${def.name}" as ${persistentAgent.name}`, "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runImport(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
       if (command === "export") {
-        const id = argumentsList[0];
-        const overwrite = argumentsList.includes("--overwrite") || argumentsList.includes("-f");
-        if (!id) {
-          context.ui.notify("Usage: /fabric export <persistent-agent-id> [--overwrite]", "warning");
-          return;
-        }
-        try {
-          const persistentAgent = state.persistentAgents
-            .list()
-            .find((candidate) => candidate.id.startsWith(id) || candidate.name === id);
-          if (!persistentAgent) {
-            context.ui.notify(`Unknown persistent Fabric agent: ${id}`, "error");
-            return;
-          }
-          const def = state.persistentAgents.definition(persistentAgent.id);
-          const template = state.templates.create(def, overwrite);
-          context.ui.notify(`Exported "${template.name}" to global agent templates`, "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runExport(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
 
       if (command === "research") {
-        const topic = argumentsText.trim().slice(command.length).trim();
-        if (!topic) {
-          context.ui.notify("Usage: /fabric research <topic>", "warning");
-          return;
-        }
-        try {
-          const result = await state.agents.run({
-            role: "scout",
-            name: `research-${Date.now()}`,
-            task: `Research this topic and return evidence-backed findings with file:line references: ${topic}`,
-            timeoutMs: 600_000,
-          });
-          const slug = state.work.getActive();
-          const workSlug = slug ?? sanitizeWorkSlug(topic.slice(0, 64) || "research");
-          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          adapter.write(workSlug, "research", result.text);
-          if (slug) {
-            await state.work.update(slug, (record) => ({
-              ...record,
-              phase: "research",
-              artifacts: { ...record.artifacts, research: adapter.resolve(workSlug, "research") },
-              evidence: [...record.evidence, { phase: "research", ref: `agent:${result.traceId ?? "scout"}`, claim: topic }],
-            }));
-          } else {
-            await state.work.create({
-              slug: workSlug,
-              title: topic,
-              phase: "research",
-              artifacts: { research: adapter.resolve(workSlug, "research") },
-              evidence: [{ phase: "research", ref: `agent:${result.traceId ?? "scout"}`, claim: topic }],
-            });
-            await state.work.setActive(workSlug);
-          }
-          context.ui.notify(
-            result.status === "completed"
-              ? `Research complete: ${result.text.slice(0, 200)}${result.text.length > 200 ? "..." : ""}`
-              : `Research ${result.status}: ${result.text.slice(0, 200)}`,
-            result.status === "completed" ? "info" : "warning",
-          );
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runResearch(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
 
       if (command === "create") {
-        const description = argumentsText.trim().slice(command.length).trim();
-        if (!description) {
-          context.ui.notify("Usage: /fabric create <description>", "warning");
-          return;
-        }
-        try {
-          const result = await state.agents.run({
-            role: "planner",
-            name: `create-${Date.now()}`,
-            task: `Inspect the current source and produce a dependency-aware spec for this change. Return ordered tasks, affected paths, test seams, and rollback boundaries: ${description}`,
-            timeoutMs: 600_000,
-          });
-          const slug = sanitizeWorkSlug(description.slice(0, 64) || "work");
-          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          adapter.write(slug, "spec", result.text);
-          await state.work.create({
-            slug,
-            title: description,
-            phase: "create",
-            artifacts: { spec: adapter.resolve(slug, "spec") },
-            evidence: [{ phase: "create", ref: `agent:${result.traceId ?? "planner"}`, claim: description }],
-          });
-          await state.work.setActive(slug);
-          context.ui.notify(`Work record created: ${slug}. Run /fabric plan or /fabric ship.`, "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runCreate(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
 
       if (command === "plan") {
-        try {
-          const slug = state.work.getActive();
-          if (!slug) {
-            context.ui.notify("No active work record. Run /fabric create <description> first.", "warning");
-            return;
-          }
-          const record = state.work.get(slug);
-          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          const specText = record.artifacts.spec ? adapter.read(slug, "spec") : undefined;
-          if (!specText) {
-            context.ui.notify("Active work record has no spec artifact. Run /fabric create first.", "warning");
-            return;
-          }
-          const result = await state.agents.run({
-            role: "planner",
-            name: `plan-${Date.now()}`,
-            task: `Based on this spec, create a detailed implementation plan with TDD steps. Return a tasks array where each task has id, description, dependsOn, parallel, conflictsWith, files, and verify. Spec: ${specText}`,
-            schema: taskDagSchema as Record<string, unknown>,
-            timeoutMs: 600_000,
-          });
-          const planContent = result.value
-            ? JSON.stringify(result.value, null, 2)
-            : result.text;
-          adapter.write(slug, "plan", planContent);
-          await state.work.update(slug, (r) => ({
-            ...r,
-            phase: "plan",
-            artifacts: { ...r.artifacts, plan: adapter.resolve(slug, "plan") },
-          }));
-          context.ui.notify(`Plan created for ${slug}. Run /fabric ship to execute.`, "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runPlan(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
 
       if (command === "ship") {
-        try {
-          if (!state.config.fullCodeMode || state.config.schema.mode === "enforce") {
-            context.ui.notify(
-              "Fabric ship requires full code mode and Schema enforce mode disabled.",
-              "error",
-            );
-            return;
-          }
-          const slug = state.work.getActive();
-          if (!slug) {
-            context.ui.notify("No active work record. Run /fabric create <description> first.", "warning");
-            return;
-          }
-          const record = state.work.get(slug);
-          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          const planText = record.artifacts.plan ? adapter.read(slug, "plan") : undefined;
-          if (!planText) {
-            context.ui.notify("Active work record has no plan artifact. Run /fabric create or /fabric plan first.", "warning");
-            return;
-          }
-          let dag;
-          try {
-            dag = parseTaskDag(JSON.parse(planText));
-          } catch {
-            context.ui.notify("Plan artifact is not a valid task DAG. Run /fabric plan to regenerate it.", "error");
-            return;
-          }
-          const completed = record.progress.slice(0, 128);
-          const wave = selectNextWave(dag, completed);
-          if (!wave || wave.length === 0) {
-            context.ui.notify(`All tasks complete for ${slug}.`, "info");
-            return;
-          }
-          const waveFiles = Array.from(new Set(wave.flatMap((t) => t.files))).slice(0, 32);
-          state.prewalk.setWriteScope(context.sessionManager.getSessionId(), waveFiles);
-          let impactPath: string | undefined;
-          const researchAgent = state.config.prewalk.researchAgent;
-          if (researchAgent) {
-            try {
-              const agentResult = await state.agents.run({
-                role: researchAgent,
-                name: "ship-impact-" + Date.now(),
-                task: "Analyze the blast radius of these files and return callers, importers, and complexity hot spots with file:line evidence: " + waveFiles.join(", "),
-                timeoutMs: 300_000,
-              });
-              if (agentResult.text) {
-                impactPath = adapter.write(slug, "impact", agentResult.text);
-              }
-            } catch {
-              // agent failed or timed out; ship without impact artifact
-            }
-          }
-          const taskSummary = wave.map((t) =>
-            "Task " + t.id + ": " + t.description + (t.verify ? " Verify: " + t.verify : "")
-          ).join("\n");
-          const model = await resolvePrewalkModel(state, context);
-          if (!model) return;
-          armPrewalk(pi, state.prewalk, state.config.prewalk, context, model, taskSummary);
-          pi.sendUserMessage(taskSummary);
-          await state.work.update(slug, (r) => ({
-            ...r,
-            phase: "ship",
-            inFlight: wave.map((t) => t.id),
-            ...(impactPath ? { artifacts: { ...r.artifacts, impact: impactPath } } : {}),
-          }));
-          context.ui.notify("Ship armed for " + slug + " wave [" + wave.map((t) => t.id).join(", ") + "] with " + model + ". Scoped to " + waveFiles.length + " paths." + (impactPath ? " Impact artifact written." : ""), "info");
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
+        await runShip(pi, state, context, argumentsList, argumentsText, command);
         return;
       }
 
