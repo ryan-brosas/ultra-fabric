@@ -825,3 +825,151 @@ return { done: true };
     expect(calls).toEqual(["agents.setEvents", "agents.setInstructions"]);
   });
 });
+
+describe("pi proxy silent repairs and envelope guard", () => {
+  it("normalizes alias keys and numeric strings before the host call", async () => {
+    const hostCall = vi.fn(async (ref: string, _args?: Record<string, unknown>) =>
+      ref === "pi.bash" || ref === "pi.write" || ref === "pi.edit"
+        ? { ok: true, output: "", details: null }
+        : "",
+    );
+    const result = await new QuickJsRuntime().execute(
+      `
+await pi.find({ glob: "*.ts", path: "src", max: "50" });
+await pi.find({ name: "a.ts" });
+await pi.find({ filename: "b.ts" });
+await pi.ls({ folder: "src" });
+await pi.grep({ pattern: "x", limit: "20", ctx: "2" });
+await pi.write({ path: "/tmp/x", data: "c" });
+await pi.bash({ script: "ls src", timeout: "30" });
+return "done";
+`,
+      hostCall,
+      options,
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.value).toBe("done");
+    const calls = hostCall.mock.calls.map(([ref, args]) => [ref, args]);
+    expect(calls).toEqual([
+      ["pi.find", { pattern: "*.ts", path: "src", limit: 50 }],
+      ["pi.find", { pattern: "a.ts" }],
+      ["pi.find", { pattern: "b.ts" }],
+      ["pi.ls", { path: "src" }],
+      ["pi.grep", { pattern: "x", limit: 20, context: 2 }],
+      ["pi.write", { path: "/tmp/x", content: "c" }],
+      ["pi.bash", { command: "ls src", timeout: 30 }],
+    ]);
+  });
+
+  it("turns string-method access on an envelope into an actionable error", async () => {
+    const hostCall = vi.fn(async () => ({ ok: true, output: "  hello  ", details: null }));
+    const result = await new QuickJsRuntime().execute(
+      `
+const r = await pi.bash({ command: "echo hello" });
+return r.trim();
+`,
+      hostCall,
+      options,
+    );
+    expect(result.error).toContain("envelope");
+    expect(result.error).toContain(".output");
+    expect(result.error).toContain("pi.bash");
+  });
+
+  it("keeps ordinary envelope reads, destructuring, membership, and keys intact", async () => {
+    const hostCall = vi.fn(async () => ({ ok: true, output: "  hello  ", details: null }));
+    const result = await new QuickJsRuntime().execute(
+      `
+const r = await pi.bash({ command: "echo hello" });
+const { ok, output } = r;
+return {
+  ok,
+  text: output.trim(),
+  hasOutput: "output" in r,
+  keys: Object.keys(r).join(","),
+  json: JSON.stringify({ wrapped: r }),
+};
+`,
+      hostCall,
+      options,
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.value).toEqual({
+      ok: true,
+      text: "hello",
+      hasOutput: true,
+      keys: "ok,output,details",
+      json: '{"wrapped":{"ok":true,"output":"  hello  ","details":null}}',
+    });
+  });
+
+  it("marshals an envelope returned as the program value", async () => {
+    const hostCall = vi.fn(async () => ({ ok: true, output: "  hello  ", details: null }));
+    const result = await new QuickJsRuntime().execute(
+      `return await pi.bash({ command: "echo hello" });`,
+      hostCall,
+      options,
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.value).toEqual({ ok: true, output: "  hello  ", details: null });
+  });
+
+  it("throws an actionable error when iterating an envelope", async () => {
+    const hostCall = vi.fn(async () => ({ ok: true, output: "a\nb", details: null }));
+    const result = await new QuickJsRuntime().execute(
+      `
+const r = await pi.bash({ command: "x" });
+for (const line of r) {
+  void line;
+}
+return "never";
+`,
+      hostCall,
+      options,
+    );
+    expect(result.error).toContain("not iterable");
+    expect(result.error).toContain(".output");
+  });
+
+  it("guards settled bash envelopes and still exposes ok/exitCode/output reads", async () => {
+    const hostCall = vi.fn(async () => {
+      throw new Error("sync-spawn\n\nCommand exited with code 3");
+    });
+    const reads = await new QuickJsRuntime().execute(
+      `
+const r = await pi.bash({ command: "false", settle: true });
+return { ok: r.ok, code: r.exitCode, text: r.output.trim() };
+`,
+      hostCall,
+      options,
+    );
+    expect(reads.error).toBeUndefined();
+    expect(reads.value).toEqual({ ok: false, code: 3, text: "sync-spawn" });
+
+    const misuse = await new QuickJsRuntime().execute(
+      `
+const r = await pi.bash({ command: "false", settle: true });
+return r.split("-");
+`,
+      hostCall,
+      options,
+    );
+    expect(misuse.error).toContain("envelope");
+    expect(misuse.error).toContain("settle");
+  });
+
+  it("does not guard objects returned by tools.call", async () => {
+    const hostCall = vi.fn(async () => ({ ok: true, output: "a,b" }));
+    const result = await new QuickJsRuntime().execute(
+      `
+const r = await tools.call({ ref: "demo.echo", args: {} });
+return r.split(",");
+`,
+      hostCall,
+      options,
+    );
+    expect(result.error).toBeDefined();
+    expect(result.error).not.toContain("envelope");
+  });
+});
+

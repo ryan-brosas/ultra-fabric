@@ -109,8 +109,8 @@ const __piStringFields = { bash: "command", read: "path", ls: "path", grep: "pat
 // call. Keep these in sync with the PiToolsApi overloads in guest-types.ts so
 // the type-checker accepts the same spellings it coercion-handles at runtime.
 const __piArgAliases = {
-  bash: { cmd: "command", shell: "command", cmdline: "command" },
-  find: { query: "pattern", regex: "pattern", search: "pattern", max: "limit" },
+  bash: { cmd: "command", shell: "command", cmdline: "command", script: "command" },
+  find: { query: "pattern", regex: "pattern", search: "pattern", max: "limit", name: "pattern", filename: "pattern", glob: "pattern" },
   grep: {
     query: "pattern", regex: "pattern", search: "pattern",
     ic: "ignoreCase", caseInsensitive: "ignoreCase",
@@ -118,9 +118,9 @@ const __piArgAliases = {
     max: "limit", ctx: "context",
   },
   read: { file: "path", max: "limit", start: "offset" },
-  ls: { dir: "path", file: "path", max: "limit" },
+  ls: { dir: "path", file: "path", max: "limit", folder: "path" },
   edit: { file: "path", old: "oldText", new: "newText", replacement: "newText" },
-  write: { file: "path", contents: "content", body: "content", text: "content" },
+  write: { file: "path", contents: "content", body: "content", text: "content", data: "content" },
 };
 // Multi-arg positional order, used only when a call passes >= 2 args. The
 // one-field tools (read/bash/ls) are intentionally absent: their bare-string
@@ -132,6 +132,17 @@ const __piPositionalFields = {
   find: ["pattern", "path", "limit"],
   write: ["path", "content"],
   edit: ["path", "oldText", "newText"],
+};
+// Models often pass numbers as strings ("20"); coerce the known numeric
+// option fields so the host schema sees a number. Non-numeric strings pass
+// through untouched and fail host validation exactly as before. Kept in sync
+// with the numeric optionals in the PiToolsApi overloads in guest-types.ts.
+const __piNumericFields = {
+  read: ["offset", "limit"],
+  grep: ["limit", "context"],
+  find: ["limit"],
+  ls: ["limit"],
+  bash: ["timeout"],
 };
 const __positionalToArgs = (name, rest) => {
   const order = __piPositionalFields[name];
@@ -153,7 +164,7 @@ const __normalizePiArgs = (name, args) => {
     out = Object.assign({}, args);
     if (!("timeout" in out)) {
       const timeoutMs = out.timeoutMs;
-      out.timeout = typeof timeoutMs === "number" ? timeoutMs / 1000 : timeoutMs;
+      out.timeout = Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) / 1000 : timeoutMs;
     }
     delete out.timeoutMs;
   }
@@ -170,6 +181,16 @@ const __normalizePiArgs = (name, args) => {
         if (out === args) out = Object.assign({}, args);
         if (!(canonical in out)) out[canonical] = out[alias];
         delete out[alias];
+      }
+    }
+  }
+  const numerics = __piNumericFields[name];
+  if (numerics) {
+    for (const key of numerics) {
+      const value = out[key];
+      if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) {
+        if (out === args) out = Object.assign({}, args);
+        out[key] = Number(value);
       }
     }
   }
@@ -204,6 +225,45 @@ const __normalizePiArgs = (name, args) => {
   }
   return out;
 };
+// bash/edit/write resolve envelope objects { ok, output, details }, and the
+// type-checker deliberately suppresses property-miss (2339) diagnostics, so
+// result.trim() on an envelope typechecks and then dies with QuickJS's terse
+// "not a function" — an error models cannot localize (observed: misdirected
+// debugging spirals probing unrelated globals). Guard envelopes with a proxy
+// that throws an actionable TypeError for string-method access and iteration,
+// naming the tool and the .output fix. Ordinary reads (ok/output/details/
+// exitCode/error), destructuring, 'in' checks, and JSON marshaling pass through.
+const __piEnvelopeTools = { bash: true, edit: true, write: true };
+const __piEnvelopeStringTraps = new Set([
+  "anchor", "at", "big", "blink", "bold", "charAt", "charCodeAt", "codePointAt",
+  "concat", "endsWith", "fixed", "fontcolor", "fontsize", "includes", "indexOf",
+  "italics", "lastIndexOf", "length", "link", "localeCompare", "match", "matchAll",
+  "normalize", "padEnd", "padStart", "repeat", "replace", "replaceAll", "search",
+  "slice", "small", "split", "startsWith", "strike", "sub", "substr", "substring",
+  "sup", "toLocaleLowerCase", "toLocaleUpperCase", "toLowerCase", "toUpperCase",
+  "trim", "trimEnd", "trimStart",
+]);
+const __piEnvelopeGuard = (name, value) => {
+  if (value === null || typeof value !== "object" || typeof value.ok !== "boolean") return value;
+  return new Proxy(value, {
+    get(target, property, receiver) {
+      if (property === Symbol.iterator || property === Symbol.asyncIterator) {
+        throw new TypeError(
+          "pi." + name + "(...) resolves an envelope { ok, output, details }, which is not iterable. " +
+          "Iterate the text instead: (await pi." + name + "(...)).output.split('\\\\n')"
+        );
+      }
+      if (typeof property === "string" && __piEnvelopeStringTraps.has(property)) {
+        throw new TypeError(
+          "pi." + name + "(...) resolves an envelope { ok, output, details }, not a string, so ." + property +
+          " is unavailable on it. Read the text first: const out = (await pi." + name + "(...)).output; then out." + property +
+          "(...). bash rejects on a nonzero exit — pass settle: true to receive an ok:false envelope instead."
+        );
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+};
 // The pi proxy accepts: a bare string (primary field), an options object, or
 // a positional spread mapped by __piPositionalFields. 0/1 args preserve the
 // legacy (args = {}) default so existing programs are unchanged.
@@ -224,8 +284,7 @@ globalThis.pi = new Proxy({}, {
       const settle = name === "bash" &&
         typeof args === "object" && args !== null && args.settle === true;
       const call = __call("pi." + name, __normalizePiArgs(name, args));
-      if (!settle) return call;
-      return call.catch((error) => {
+      const promise = settle ? call.catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         const match = /(?:^|\\n\\n)Command exited with code (\\d+)$/.exec(message);
         if (!match) throw error;
@@ -236,7 +295,10 @@ globalThis.pi = new Proxy({}, {
           exitCode: Number(match[1]),
           error: message,
         };
-      });
+      }) : call;
+      return __piEnvelopeTools[name] === true
+        ? promise.then((value) => __piEnvelopeGuard(name, value))
+        : promise;
     };
   },
 });

@@ -28,7 +28,9 @@ For `pi.edit`, entry-level `all:true` applies that replacement to every non-over
 
 `bash` rejects on an ordinary nonzero exit; pass `settle:true` to get `{ok:false,output,details:null,exitCode,error}` instead of a rejection. Timeout, cancellation, approval, security, and spawn failures still reject. Other Pi core tool errors reject normally.
 
-Aliases (normalized to canonical before the host validates args): `cmd`/`shell`/`cmdline`→`command`; Bash `timeout` is in seconds, while `timeoutMs` is converted from milliseconds to `timeout`; `query`/`regex`/`search`→`pattern`; `ic`/`caseInsensitive`→`ignoreCase`; `globPattern`→`glob`; `ctx`→`context`; `max`→`limit`; `file`/`dir`→`path`; `start`→`offset`; `old`→`oldText`; `new`/`replacement`→`newText`; `contents`/`body`/`text`→`content`. Misspelled keys still fail the excess-property type check.
+Aliases (normalized to canonical before the host validates args): `cmd`/`shell`/`cmdline`/`script`→`command`; Bash `timeout` is in seconds, while `timeoutMs` is converted from milliseconds to `timeout`; `query`/`regex`/`search`→`pattern`; `name`/`filename`/`glob`→`pattern` (find); `ic`/`caseInsensitive`→`ignoreCase`; `globPattern`→`glob`; `ctx`→`context`; `max`→`limit`; `file`/`dir`/`folder`→`path`; `start`→`offset`; `old`→`oldText`; `new`/`replacement`→`newText`; `contents`/`body`/`text`/`data`→`content`. Numeric strings (`limit: "20"`, `timeout: "30"`, `offset`, `context`) coerce to numbers before validation. Misspelled keys still fail the excess-property type check.
+
+`bash`/`edit`/`write` always resolve an envelope `{ ok, output, details }`, never a bare string, and the executor guards those envelopes: a string method or iteration applied to the envelope itself (`r.trim()`, `for (const line of r)`) throws a TypeError naming the fix (`.output`) instead of a context-free "not a function".
 
 ## Read economy
 
