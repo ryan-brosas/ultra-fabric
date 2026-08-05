@@ -6,7 +6,7 @@ import type { FabricState } from "../fabric-state.js";
 import { armPrewalk } from "../prewalk/arm.js";
 import { FileArtifactAdapter } from "../lifecycle/artifacts.js";
 import { reviewGateDecision, reviewOutputSchema } from "../lifecycle/review.js";
-import { sanitizeWorkSlug } from "../lifecycle/store.js";
+import { deriveWorkSlug, sanitizeWorkSlug } from "../lifecycle/store.js";
 import { parseTaskDag, selectNextWave, taskDagSchema } from "../lifecycle/task-dag.js";
 import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
@@ -719,9 +719,11 @@ const runResearch = async (
   argumentsText: string,
   command: string,
 ): Promise<void> => {
-        const topic = argumentsText.trim().slice(command.length).trim();
+        const researchArgs = argumentsText.trim().slice(command.length).trim().split(/\s+/).filter(Boolean);
+        const explicitSlug = researchArgs[0] === "--slug" && researchArgs[1] ? researchArgs[1] : undefined;
+        const topic = explicitSlug ? researchArgs.slice(2).join(" ") : researchArgs.join(" ");
         if (!topic) {
-          context.ui.notify("Usage: /fabric research <topic>", "warning");
+          context.ui.notify("Usage: /fabric research [--slug <name>] <topic>", "warning");
           return;
         }
         try {
@@ -732,7 +734,9 @@ const runResearch = async (
             timeoutMs: 600_000,
           });
           const slug = state.work.getActive();
-          const workSlug = slug ?? sanitizeWorkSlug(topic.slice(0, 64) || "research");
+          const workSlug = slug
+            ?? (explicitSlug ? sanitizeWorkSlug(explicitSlug) : undefined)
+            ?? deriveWorkSlug(topic);
           const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
           adapter.write(workSlug, "research", result.text);
           if (slug) {
@@ -782,7 +786,10 @@ const runCreate = async (
             task: `Inspect the current source and produce a dependency-aware spec for this change. Return ordered tasks, affected paths, test seams, and rollback boundaries: ${description}`,
             timeoutMs: 600_000,
           });
-          const slug = sanitizeWorkSlug(description.slice(0, 64) || "work");
+          const createArgs = argumentsText.trim().slice(command.length).trim().split(/\s+/).filter(Boolean);
+          const slug = createArgs[0] === "--slug" && createArgs[1]
+            ? sanitizeWorkSlug(createArgs[1])
+            : deriveWorkSlug(description);
           const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
           adapter.write(slug, "spec", result.text);
           await state.work.create({
