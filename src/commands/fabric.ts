@@ -223,12 +223,9 @@ const runCaptured = (
 };
 
 const runLeases = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         if (!state.config.mesh.enabled) {
           context.ui.notify("Path leases require mesh coordination to be enabled", "warning");
@@ -272,12 +269,8 @@ const runLeases = async (
 };
 
 const runOutcomes = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
-  argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         if (!state.config.outcomes.enabled) {
           context.ui.notify(
@@ -320,12 +313,8 @@ const runOutcomes = async (
 };
 
 const runHealth = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
-  argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const config = state.config;
         const qos = state.contextQosTelemetry;
@@ -373,12 +362,8 @@ const runHealth = async (
 };
 
 const runAgents = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
-  argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const oneShot = state.agents.list();
         const persistent = state.persistentAgents.list();
@@ -397,12 +382,9 @@ const runAgents = async (
 };
 
 const runMessages = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const id = argumentsList[0];
         if (!id) {
@@ -436,12 +418,9 @@ const runMessages = async (
 };
 
 const runLog = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const id = argumentsList[0];
         if (!id) {
@@ -494,12 +473,9 @@ const runLog = async (
 };
 
 const runExportLog = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const id = argumentsList[0];
         const destArg = argumentsList.slice(1).join(" ");
@@ -549,12 +525,9 @@ const runExportLog = async (
 };
 
 const runClearMessages = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const id = argumentsList[0];
         if (!id) {
@@ -572,12 +545,9 @@ const runClearMessages = async (
 };
 
 const runEvents = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const id = argumentsList[0];
         if (!id) {
@@ -599,12 +569,9 @@ const runEvents = async (
 };
 
 const runStop = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const id = argumentsList[0];
         if (!id) {
@@ -630,12 +597,9 @@ const runStop = async (
 };
 
 const runRemove = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const id = argumentsList[0];
         if (!id) {
@@ -662,12 +626,9 @@ const runRemove = async (
 };
 
 const runAttach = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const id = argumentsList[0];
         const agent = id
@@ -682,12 +643,8 @@ const runAttach = async (
 };
 
 const runGlobal = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
-  argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const templates = state.templates.list();
         context.ui.notify(
@@ -702,12 +659,9 @@ const runGlobal = async (
 };
 
 const runImport = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const key = argumentsList[0];
         if (!key) {
@@ -732,12 +686,9 @@ const runImport = async (
 };
 
 const runExport = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
   argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         const id = argumentsList[0];
         const overwrite = argumentsList.includes("--overwrite") || argumentsList.includes("-f");
@@ -763,10 +714,8 @@ const runExport = async (
 };
 
 const runResearch = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
-  argumentsList: string[],
   argumentsText: string,
   command: string,
 ): Promise<void> => {
@@ -816,10 +765,8 @@ const runResearch = async (
 };
 
 const runCreate = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
-  argumentsList: string[],
   argumentsText: string,
   command: string,
 ): Promise<void> => {
@@ -854,12 +801,8 @@ const runCreate = async (
 };
 
 const runPlan = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
-  argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         try {
           const slug = state.work.getActive();
@@ -901,9 +844,6 @@ const runShip = async (
   pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
-  argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         try {
           if (!state.config.fullCodeMode || state.config.schema.mode === "enforce") {
@@ -978,12 +918,8 @@ const runShip = async (
 };
 
 const runVerify = async (
-  pi: ExtensionAPI,
   state: FabricState,
   context: ExtensionContext,
-  argumentsList: string[],
-  argumentsText: string,
-  command: string,
 ): Promise<void> => {
         try {
           const slug = state.work.getActive();
@@ -1205,27 +1141,27 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         ui: () => fabricUi.openDashboard(context),
         providers: () => runProviders(state, context),
         captured: () => runCaptured(capturedTools, context, argumentsList),
-        leases: () => runLeases(pi, state, context, argumentsList, argumentsText, command),
-        outcomes: () => runOutcomes(pi, state, context, argumentsList, argumentsText, command),
-        health: () => runHealth(pi, state, context, argumentsList, argumentsText, command),
-        agents: () => runAgents(pi, state, context, argumentsList, argumentsText, command),
-        messages: () => runMessages(pi, state, context, argumentsList, argumentsText, command),
-        log: () => runLog(pi, state, context, argumentsList, argumentsText, command),
-        "export-log": () => runExportLog(pi, state, context, argumentsList, argumentsText, command),
-        "clear-messages": () => runClearMessages(pi, state, context, argumentsList, argumentsText, command),
-        events: () => runEvents(pi, state, context, argumentsList, argumentsText, command),
-        stop: () => runStop(pi, state, context, argumentsList, argumentsText, command),
-        remove: () => runRemove(pi, state, context, argumentsList, argumentsText, command),
-        attach: () => runAttach(pi, state, context, argumentsList, argumentsText, command),
-        global: () => runGlobal(pi, state, context, argumentsList, argumentsText, command),
-        import: () => runImport(pi, state, context, argumentsList, argumentsText, command),
-        export: () => runExport(pi, state, context, argumentsList, argumentsText, command),
-        research: () => runResearch(pi, state, context, argumentsList, argumentsText, command),
-        create: () => runCreate(pi, state, context, argumentsList, argumentsText, command),
-        plan: () => runPlan(pi, state, context, argumentsList, argumentsText, command),
-        ship: () => runShip(pi, state, context, argumentsList, argumentsText, command),
-        kill: () => runRemove(pi, state, context, argumentsList, argumentsText, command),
-        verify: () => runVerify(pi, state, context, argumentsList, argumentsText, command),
+        leases: () => runLeases(state, context, argumentsList),
+        outcomes: () => runOutcomes(state, context),
+        health: () => runHealth(state, context),
+        agents: () => runAgents(state, context),
+        messages: () => runMessages(state, context, argumentsList),
+        log: () => runLog(state, context, argumentsList),
+        "export-log": () => runExportLog(state, context, argumentsList),
+        "clear-messages": () => runClearMessages(state, context, argumentsList),
+        events: () => runEvents(state, context, argumentsList),
+        stop: () => runStop(state, context, argumentsList),
+        remove: () => runRemove(state, context, argumentsList),
+        attach: () => runAttach(state, context, argumentsList),
+        global: () => runGlobal(state, context),
+        import: () => runImport(state, context, argumentsList),
+        export: () => runExport(state, context, argumentsList),
+        research: () => runResearch(state, context, argumentsText, command),
+        create: () => runCreate(state, context, argumentsText, command),
+        plan: () => runPlan(state, context),
+        ship: () => runShip(pi, state, context),
+        kill: () => runRemove(state, context, argumentsList),
+        verify: () => runVerify(state, context),
         status: () => runStatus(deps, context),
       };
       const run = handlers[command];
