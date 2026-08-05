@@ -32,6 +32,8 @@ Aliases (normalized to canonical before the host validates args): `cmd`/`shell`/
 
 ## Read economy
 
+Never call `tools.list({ provider: "mcp" })` without a query. Prefer `mcp.$servers` for orientation and `tools.search({ query })` for routing. Listing every MCP tool schema is unbounded and floods the context window.
+
 Search before reading. Run `pi.grep`/`pi.find` first, then `pi.read({ path, offset, limit })` the matching range instead of unbounded whole-file reads:
 
 ```ts
