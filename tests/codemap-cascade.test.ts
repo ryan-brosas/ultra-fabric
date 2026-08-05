@@ -31,16 +31,18 @@ describe("predictFileCascade", () => {
 });
 
 describe("predictSymbolCascade", () => {
-  it("yields dependency-derived candidates for a symbol whose file has no commit history", { timeout: 30000 }, () => {
-    // src/codemap/disclose.ts is untracked -> no git history. Its symbols' only
-    // signal is the AST dependency graph.
+  it("yields dependency-derived candidates alongside any history signal", { timeout: 30000 }, () => {
+    // The dependency channel must contribute on its own merits. This previously
+    // relied on disclose.ts being untracked so historyRate was always 0, which
+    // silently broke the moment src/codemap was committed. Assert the durable
+    // property instead: the AST dependency graph yields candidates regardless of
+    // whether the seed file has commit history.
     const files = runOutline(["src/codemap/disclose.ts", "src/codemap/search.ts", "src/codemap/skeleton.ts", "src/codemap/symbols.ts", "src/codemap/outline.ts", "src/codemap/rank.ts"], { cwd: root });
     const index = buildSymbolIndex(files);
     const edges = buildAllEdges(index, root);
     const preds = predictSymbolCascade("expand:src/codemap/disclose.ts", { index, edges }, { cwd: root, historyWeight: 0.5, maxCommits: 200 });
     // History is empty (no commits), so candidates come from the dependency channel.
     expect(preds.length).toBeGreaterThan(0);
-    for (const p of preds) expect(p.historyRate).toBe(0);
     expect(preds.some((p) => p.dependencyScore > 0)).toBe(true);
     // disclose.ts imports search.ts, skeleton.ts, symbols.ts, outline.ts, rank.ts
     expect(preds.some((p) => p.file === "src/codemap/search.ts")).toBe(true);
