@@ -977,6 +977,104 @@ const runShip = async (
         return;
 };
 
+const runVerify = async (
+  pi: ExtensionAPI,
+  state: FabricState,
+  context: ExtensionContext,
+  argumentsList: string[],
+  argumentsText: string,
+  command: string,
+): Promise<void> => {
+        try {
+          const slug = state.work.getActive();
+          if (!slug) {
+            context.ui.notify("No active work record. Run /fabric create <description> first.", "warning");
+            return;
+          }
+          const record = state.work.get(slug);
+          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
+          const specText = record.artifacts.spec ? adapter.read(slug, "spec") : undefined;
+          const planText = record.artifacts.plan ? adapter.read(slug, "plan") : undefined;
+          const result = await state.agents.run({
+            role: "reviewer",
+            name: `verify-${Date.now()}`,
+            task: `Review the current diff and the spec for this work. Return findings ordered by severity with file:line evidence. Spec: ${specText ?? planText ?? slug}`,
+            schema: reviewOutputSchema as Record<string, unknown>,
+            timeoutMs: 600_000,
+          });
+          const gate = reviewGateDecision(result.value);
+          const now = Date.now();
+          await state.work.update(slug, (r) => ({
+            ...r,
+            phase: "verify",
+            gates: [...r.gates, { gate: "review", passed: gate.passed, sequence: r.gates.length + 1, recordedAt: now }],
+            evidence: [...r.evidence, { phase: "verify", ref: `agent:${result.traceId ?? "reviewer"}`, claim: gate.passed ? (gate.summary ?? "passed") : gate.reason }],
+            ...(gate.passed ? { status: "done" as const } : { status: "blocked" as const }),
+          }));
+          context.ui.notify(
+            gate.passed
+              ? `Verify passed for ${slug}. All gates green.`
+              : `Verify found issues for ${slug}. ${gate.reason}`,
+            gate.passed ? "info" : "warning",
+          );
+        } catch (error) {
+          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+};
+
+const runStatus = (deps: FabricCommandDeps, context: ExtensionContext): void => {
+  const { state, capturedTools } = deps;
+      const config = state.config;
+      context.ui.notify(
+        [
+          `cwd: ${state.cwd}`,
+          `mode: ${config.fullCodeMode ? "full code (Fabric-owned core tools)" : "orchestration-only (native Pi tools)"}`,
+          `providers: ${state.registry
+            .providers()
+            .map((provider) => provider.name)
+            .join(", ")}`,
+          `runner: ${config.agents.runner} · transport: ${config.agents.transport} · model: ${
+            config.agents.runner === "claude"
+              ? config.agents.claude.model || "Claude default"
+              : config.agents.model || "inherit"
+          }`,
+          `agent limits: concurrency ${config.agents.maxConcurrent}, per execution ${config.agents.maxPerExecution}, depth ${config.agents.maxDepth}`,
+          (() => {
+            const prewalk = state.prewalk.status();
+            return prewalk.state === "idle"
+              ? `prewalk: idle · model ${config.prewalk.model || "Ask each time"} · always re-arm ${config.prewalk.alwaysRearm ? "on" : "off"}`
+              : `prewalk: ${prewalk.state}  ${prewalk.model}${prewalk.alwaysRearm ? " · always re-arm" : ""}${prewalk.state === "blocked" ? " · retry available" : ""}`;
+          })(),
+          config.fullCodeMode && config.capture.enabled
+            ? `captured tools: ${capturedTools.size} · model visibility: ${config.capture.hideFromModel ? "hidden" : "visible"}`
+            : "captured tools: disabled (native registry preserved)",
+          `persistent agents: ${state.persistentAgents.list().length} · mesh: ${config.mesh.enabled ? state.mesh.root : "disabled"}`,
+          `admission: ${config.agents.requireAdmissionIntent ? "required" : "optional"} · profiles: ${
+            Object.keys(config.agents.capabilityProfiles).length > 0
+              ? Object.keys(config.agents.capabilityProfiles).join(", ")
+              : "none"
+          } · quality downgrade: ${config.agents.allowQualityDowngrade ? "allowed" : "blocked"}`,
+          `prewalk triggers: effects [${config.prewalk.triggerEffects.join(", ") || "none"}] · risks [${
+            config.prewalk.triggerRisks.join(", ") || "none"
+          }] · refs [${config.prewalk.triggerRefs.join(", ") || "none"}]`,
+          `outcomes: ${
+            config.outcomes.enabled
+              ? `on · max ${config.outcomes.maxRecords} · min samples ${config.outcomes.minRecommendationSamples} (/fabric outcomes)`
+              : "disabled"
+          }`,
+          `context QoS: ${
+            config.compaction.contextQos.enabled
+              ? `on · window ${config.compaction.contextQos.turnWindow} turns`
+              : "disabled"
+          }`,
+          `MCP: ${config.mcp.enabled ? "enabled" : "disabled"}`,
+          `UI: ${config.ui.enabled ? `${config.ui.widget} widget above chat` : "disabled"}`,
+        ].join("\n"),
+        "info",
+      );
+};
+
 export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps): void {
   const { state, fabricUi, capturedTools, applyFabricMode } = deps;
   pi.registerCommand("fabric", {
@@ -1099,206 +1197,46 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         .trim()
         .split(/\s+/)
         .filter(Boolean);
-      if (command === "reload") {
-        await runReload(deps, context);
-        return;
-      }
-      if (command === "settings") {
-        await openFabricSettings(context, { state, applyFabricMode, capturedTools });
-        return;
-      }
-      if (command === "prewalk") {
-        const task = argumentsText.trim().slice(command.length).trim();
-        await runPrewalk(pi, state, context, argumentsList, task);
-        return;
-      }
-      if (command === "dashboard" || command === "ui") {
-        await fabricUi.openDashboard(context);
-        return;
-      }
-      if (command === "providers") {
-        runProviders(state, context);
-        return;
-      }
-      if (command === "captured") {
-        runCaptured(capturedTools, context, argumentsList);
-        return;
-      }
-      if (command === "leases") {
-        await runLeases(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "outcomes") {
-        await runOutcomes(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "health") {
-        await runHealth(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "agents") {
-        await runAgents(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "messages") {
-        await runMessages(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "log") {
-        await runLog(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "export-log") {
-        await runExportLog(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "clear-messages") {
-        await runClearMessages(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "events") {
-        await runEvents(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "stop") {
-        await runStop(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "remove" || command === "kill") {
-        await runRemove(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "attach") {
-        await runAttach(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "global") {
-        await runGlobal(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "import") {
-        await runImport(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-      if (command === "export") {
-        await runExport(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-
-      if (command === "research") {
-        await runResearch(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-
-      if (command === "create") {
-        await runCreate(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-
-      if (command === "plan") {
-        await runPlan(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-
-      if (command === "ship") {
-        await runShip(pi, state, context, argumentsList, argumentsText, command);
-        return;
-      }
-
-      if (command === "verify") {
-        try {
-          const slug = state.work.getActive();
-          if (!slug) {
-            context.ui.notify("No active work record. Run /fabric create <description> first.", "warning");
-            return;
-          }
-          const record = state.work.get(slug);
-          const adapter = new FileArtifactAdapter(path.join(context.cwd, ".artifact"));
-          const specText = record.artifacts.spec ? adapter.read(slug, "spec") : undefined;
-          const planText = record.artifacts.plan ? adapter.read(slug, "plan") : undefined;
-          const result = await state.agents.run({
-            role: "reviewer",
-            name: `verify-${Date.now()}`,
-            task: `Review the current diff and the spec for this work. Return findings ordered by severity with file:line evidence. Spec: ${specText ?? planText ?? slug}`,
-            schema: reviewOutputSchema as Record<string, unknown>,
-            timeoutMs: 600_000,
-          });
-          const gate = reviewGateDecision(result.value);
-          const now = Date.now();
-          await state.work.update(slug, (r) => ({
-            ...r,
-            phase: "verify",
-            gates: [...r.gates, { gate: "review", passed: gate.passed, sequence: r.gates.length + 1, recordedAt: now }],
-            evidence: [...r.evidence, { phase: "verify", ref: `agent:${result.traceId ?? "reviewer"}`, claim: gate.passed ? (gate.summary ?? "passed") : gate.reason }],
-            ...(gate.passed ? { status: "done" as const } : { status: "blocked" as const }),
-          }));
-          context.ui.notify(
-            gate.passed
-              ? `Verify passed for ${slug}. All gates green.`
-              : `Verify found issues for ${slug}. ${gate.reason}`,
-            gate.passed ? "info" : "warning",
-          );
-        } catch (error) {
-          context.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
-        return;
-      }
-
-      if (command !== "status") {
+      const handlers: Record<string, () => Promise<void> | void> = {
+        reload: () => runReload(deps, context),
+        settings: () => openFabricSettings(context, { state, applyFabricMode, capturedTools }),
+        prewalk: () => runPrewalk(pi, state, context, argumentsList, argumentsText.trim().slice(command.length).trim()),
+        dashboard: () => fabricUi.openDashboard(context),
+        ui: () => fabricUi.openDashboard(context),
+        providers: () => runProviders(state, context),
+        captured: () => runCaptured(capturedTools, context, argumentsList),
+        leases: () => runLeases(pi, state, context, argumentsList, argumentsText, command),
+        outcomes: () => runOutcomes(pi, state, context, argumentsList, argumentsText, command),
+        health: () => runHealth(pi, state, context, argumentsList, argumentsText, command),
+        agents: () => runAgents(pi, state, context, argumentsList, argumentsText, command),
+        messages: () => runMessages(pi, state, context, argumentsList, argumentsText, command),
+        log: () => runLog(pi, state, context, argumentsList, argumentsText, command),
+        "export-log": () => runExportLog(pi, state, context, argumentsList, argumentsText, command),
+        "clear-messages": () => runClearMessages(pi, state, context, argumentsList, argumentsText, command),
+        events: () => runEvents(pi, state, context, argumentsList, argumentsText, command),
+        stop: () => runStop(pi, state, context, argumentsList, argumentsText, command),
+        remove: () => runRemove(pi, state, context, argumentsList, argumentsText, command),
+        attach: () => runAttach(pi, state, context, argumentsList, argumentsText, command),
+        global: () => runGlobal(pi, state, context, argumentsList, argumentsText, command),
+        import: () => runImport(pi, state, context, argumentsList, argumentsText, command),
+        export: () => runExport(pi, state, context, argumentsList, argumentsText, command),
+        research: () => runResearch(pi, state, context, argumentsList, argumentsText, command),
+        create: () => runCreate(pi, state, context, argumentsList, argumentsText, command),
+        plan: () => runPlan(pi, state, context, argumentsList, argumentsText, command),
+        ship: () => runShip(pi, state, context, argumentsList, argumentsText, command),
+        kill: () => runRemove(pi, state, context, argumentsList, argumentsText, command),
+        verify: () => runVerify(pi, state, context, argumentsList, argumentsText, command),
+        status: () => runStatus(deps, context),
+      };
+      const run = handlers[command];
+      if (!run) {
         context.ui.notify(
           "Usage: /fabric [status|health|dashboard|settings|prewalk [task]|prewalk --retry|prewalk --off|reload|providers|captured [query]|leases [--release <id...>|--release-all]|outcomes|agents|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>|research <topic>|create <description>|plan|ship|verify [path|all] [--quick|--full]]",
           "warning",
         );
         return;
       }
-      const config = state.config;
-      context.ui.notify(
-        [
-          `cwd: ${state.cwd}`,
-          `mode: ${config.fullCodeMode ? "full code (Fabric-owned core tools)" : "orchestration-only (native Pi tools)"}`,
-          `providers: ${state.registry
-            .providers()
-            .map((provider) => provider.name)
-            .join(", ")}`,
-          `runner: ${config.agents.runner} · transport: ${config.agents.transport} · model: ${
-            config.agents.runner === "claude"
-              ? config.agents.claude.model || "Claude default"
-              : config.agents.model || "inherit"
-          }`,
-          `agent limits: concurrency ${config.agents.maxConcurrent}, per execution ${config.agents.maxPerExecution}, depth ${config.agents.maxDepth}`,
-          (() => {
-            const prewalk = state.prewalk.status();
-            return prewalk.state === "idle"
-              ? `prewalk: idle · model ${config.prewalk.model || "Ask each time"} · always re-arm ${config.prewalk.alwaysRearm ? "on" : "off"}`
-              : `prewalk: ${prewalk.state}  ${prewalk.model}${prewalk.alwaysRearm ? " · always re-arm" : ""}${prewalk.state === "blocked" ? " · retry available" : ""}`;
-          })(),
-          config.fullCodeMode && config.capture.enabled
-            ? `captured tools: ${capturedTools.size} · model visibility: ${config.capture.hideFromModel ? "hidden" : "visible"}`
-            : "captured tools: disabled (native registry preserved)",
-          `persistent agents: ${state.persistentAgents.list().length} · mesh: ${config.mesh.enabled ? state.mesh.root : "disabled"}`,
-          `admission: ${config.agents.requireAdmissionIntent ? "required" : "optional"} · profiles: ${
-            Object.keys(config.agents.capabilityProfiles).length > 0
-              ? Object.keys(config.agents.capabilityProfiles).join(", ")
-              : "none"
-          } · quality downgrade: ${config.agents.allowQualityDowngrade ? "allowed" : "blocked"}`,
-          `prewalk triggers: effects [${config.prewalk.triggerEffects.join(", ") || "none"}] · risks [${
-            config.prewalk.triggerRisks.join(", ") || "none"
-          }] · refs [${config.prewalk.triggerRefs.join(", ") || "none"}]`,
-          `outcomes: ${
-            config.outcomes.enabled
-              ? `on · max ${config.outcomes.maxRecords} · min samples ${config.outcomes.minRecommendationSamples} (/fabric outcomes)`
-              : "disabled"
-          }`,
-          `context QoS: ${
-            config.compaction.contextQos.enabled
-              ? `on · window ${config.compaction.contextQos.turnWindow} turns`
-              : "disabled"
-          }`,
-          `MCP: ${config.mcp.enabled ? "enabled" : "disabled"}`,
-          `UI: ${config.ui.enabled ? `${config.ui.widget} widget above chat` : "disabled"}`,
-        ].join("\n"),
-        "info",
-      );
+      await run();
     },
   });
 }
