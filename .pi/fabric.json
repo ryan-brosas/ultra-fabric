@@ -1,10 +1,10 @@
 {
-  "configVersion": 2,
+  "configVersion": 3,
   "prewalk": {
     "thinking": "max",
     "verificationMode": "gated",
     "maxPhaseRevisions": 5,
-    "model": "makora/zai-org/GLM-5.2-NVFP4",
+    "model": "makora/deepseek-ai/DeepSeek-V4-Flash",
     "alwaysRearm": true,
     "autoArm": true,
     "triggerRefs": [
@@ -16,7 +16,12 @@
   },
   "agents": {
     "retainRuns": true,
-    "runRoot": "/home/ryanj/work/projects/ultra-fabric/.pi/fabric/runs"
+    "runRoot": "/home/ryanj/work/projects/ultra-fabric/.pi/fabric/runs",
+    "allowQualityDowngrade": false,
+    "model": "omniroute/opencode-go/deepseek-v4-flash",
+    "transport": "localterm",
+    "thinking": "max",
+    "maxDepth": 6
   },
   "compaction": {
     "thresholds": {
@@ -52,6 +57,9 @@
     "memoryLimitBytes": 8589934592
   },
   "consult": {
-    "maxFindingsPerWorker": 16
+    "maxFindingsPerWorker": 16,
+    "maxTokensPerWorker": 64000,
+    "maxEvidenceBytesPerConsult": 33554432,
+    "maxEvidenceFileBytes": 8388608
   }
 }

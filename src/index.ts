@@ -18,6 +18,7 @@ import {
 } from "./prewalk/continuation.js";
 import { restorePrewalkModel } from "./prewalk/model.js";
 import { prewalkChecklistReminder } from "./prewalk/continuation.js";
+import { phaseContract } from "./lifecycle/phase-contract.js";
 import { autoArmPrewalk } from "./prewalk/arm.js";
 import { prewalkRearmDefaults } from "./prewalk/rearm.js";
 import { withTrajectoryRearmDirective } from "./prewalk/handoff.js";
@@ -45,6 +46,7 @@ import {
 } from "./core/direct-tool-approval.js";
 import { buildSkillReferenceGuidance } from "./core/skill-references.js";
 import { createFabricExecTool } from "./fabric-exec-tool.js";
+import { createCodemapTool } from "./codemap/tool.js";
 import { FabricState } from "./fabric-state.js";
 import { piHostCompatibilityWarning } from "./host-compatibility.js";
 import {
@@ -151,6 +153,7 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     initialPolicy: inactiveCapturePolicy,
   });
   pi.registerTool(fabricTool);
+  pi.registerTool(createCodemapTool());
 
   const applyFabricMode = (): void => {
     toolCapture.setPolicy(effectiveToolCaptureConfig(state.config));
@@ -300,11 +303,21 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     // between tasks takes effect instead of the previous arm being carried on.
     const rearm = prewalkRearmDefaults(state.config);
     const settledContinuation = state.prewalk.settleContinuation(sessionId, rearm);
-    if (settledContinuation.returnModel) {
+    // Two terminal paths owe a restore: a continuation that settles (including a
+    // gated one that never passed verification) and a task blocked by a failed
+    // gate at the fabric_exec boundary. The ?? keeps it to one restore.
+    const returnModel =
+      settledContinuation.returnModel ?? state.prewalk.takeReturnState(sessionId).model;
+    const returnThinking =
+      settledContinuation.returnThinking ?? state.prewalk.takeReturnState(sessionId).thinking;
+    if (returnThinking) {
+      pi.setThinkingLevel(returnThinking as any);
+    }
+    if (returnModel) {
       const restored = await restorePrewalkModel(
         pi,
         context,
-        settledContinuation.returnModel,
+        returnModel,
       );
       // A concurrent settle is already restoring Main; reporting it as a
       // failure would be wrong, so leave the notice to the owning call.
@@ -319,6 +332,14 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     }
     const settledTask = state.prewalk.settleTask(sessionId, rearm);
     if (settledContinuation.settled || settledTask) {
+      try {
+        const slug = state.work.getActive();
+        if (slug) {
+          await state.work.completeInFlight(slug);
+        }
+      } catch {
+        // work store unavailable or record missing; skip completion
+      }
       const status = state.prewalk.status();
       context.ui.setStatus(
         "fabric-prewalk",
@@ -516,6 +537,26 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
       ];
       changed = true;
     }
+    if (state.initialized) {
+      try {
+        const claimedPhase = state.work.claimPhaseContract(sessionId);
+        if (claimedPhase) {
+          const contract = phaseContract(claimedPhase);
+          if (contract) {
+            messages = [
+              ...messages,
+              {
+                role: "user",
+                content: [{ type: "text", text: contract }],
+              } as (typeof messages)[number],
+            ];
+            changed = true;
+          }
+        }
+      } catch {
+        // work store unavailable or record missing; skip phase injection
+      }
+    }
     return changed ? { messages } : undefined;
   });
 
@@ -580,3 +621,4 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
 
 export * from "./audit/index.js";
 export * from "./protocol.js";
+export { buildCodeGraph, anchoredPageRank } from "./codemap/build.js";

@@ -51,6 +51,7 @@ import {
 } from "./main-agent.js";
 import { AgentsProvider } from "./providers/agents-provider.js";
 import { CapturedToolsProvider } from "./providers/captured-tools-provider.js";
+import { CodemapProvider } from "./providers/codemap-provider.js";
 import { CompactProvider } from "./providers/compact-provider.js";
 import { McpProvider } from "./providers/mcp-provider.js";
 import { MemoryProvider, type MemoryProviderContext } from "./providers/memory-provider.js";
@@ -62,6 +63,7 @@ import { WorkflowsProvider } from "./providers/workflows-provider.js";
 import { DurableWorkflowStore } from "./workflows/durable.js";
 import { OutcomesProvider } from "./providers/outcomes-provider.js";
 import { FabricOutcomeStore } from "./outcomes/store.js";
+import { FabricWorkStore } from "./lifecycle/store.js";
 import { PathLeaseStore } from "./leases/path-leases.js";
 import { LeasesProvider } from "./providers/leases-provider.js";
 import { SchemaController } from "./schema/controller.js";
@@ -200,6 +202,7 @@ export class FabricState {
   #mesh: MeshStore | undefined;
   #workflows: DurableWorkflowStore | undefined;
   #outcomes: FabricOutcomeStore | undefined;
+  #work: FabricWorkStore | undefined;
   #pathLeases: PathLeaseStore | undefined;
   #identity: MeshIdentity | undefined;
   #mainAgent: MainAgentController | undefined;
@@ -295,6 +298,11 @@ export class FabricState {
   get outcomes(): FabricOutcomeStore {
     if (!this.#outcomes) throw new Error("Pi Fabric outcomes are unavailable");
     return this.#outcomes;
+  }
+
+  get work(): FabricWorkStore {
+    if (!this.#work) throw new Error("Pi Fabric work store is unavailable");
+    return this.#work;
   }
 
   get pathLeases(): PathLeaseStore {
@@ -444,6 +452,7 @@ export class FabricState {
       } else {
         this.#outcomes = undefined;
       }
+      this.#work = new FabricWorkStore(this.#mesh, identity);
     } else {
       this.#workflows = undefined;
       this.#outcomes = undefined;
@@ -464,6 +473,7 @@ export class FabricState {
       onCommit: (info) => void this.#publishCompactEvent(info.status, info),
     });
     this.#registry.register(new CompactProvider(this.#compact));
+    this.#registry.register(new CodemapProvider());
     const agentConfig = enforceSchema
       ? { ...this.#config.agents, enabled: false }
       : this.#config.agents;
@@ -849,6 +859,7 @@ export class FabricState {
     this.#mesh = undefined;
     this.#workflows = undefined;
     this.#outcomes = undefined;
+    this.#work = undefined;
     this.#pathLeases = undefined;
     this.#identity = undefined;
     this.#mainAgent = undefined;
@@ -900,6 +911,7 @@ export class FabricState {
     this.#mesh = undefined;
     this.#workflows = undefined;
     this.#outcomes = undefined;
+    this.#work = undefined;
     this.#pathLeases = undefined;
     this.#identity = undefined;
     this.#mainAgent = undefined;
