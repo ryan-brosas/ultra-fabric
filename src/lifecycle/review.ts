@@ -1,28 +1,3 @@
-export const reviewOutputSchema = {
-  type: "object",
-  properties: {
-    verdict: { type: "string", enum: ["pass", "revise", "abort"] },
-    summary: { type: "string", maxLength: 2_048 },
-    findings: {
-      type: "array",
-      maxItems: 32,
-      items: {
-        type: "object",
-        properties: {
-          severity: { type: "string", enum: ["blocker", "high", "medium", "low"] },
-          path: { type: "string", maxLength: 1_024 },
-          line: { type: "number", minimum: 1 },
-          claim: { type: "string", maxLength: 2_048 },
-        },
-        required: ["severity", "claim"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["verdict", "findings"],
-  additionalProperties: false,
-} as const satisfies Record<string, unknown>;
-
 export interface ReviewFinding {
   severity: "blocker" | "high" | "medium" | "low";
   path?: string;

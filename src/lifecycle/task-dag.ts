@@ -1,29 +1,3 @@
-export const taskDagSchema = {
-  type: "object",
-  properties: {
-    tasks: {
-      type: "array",
-      maxItems: 128,
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string", maxLength: 64 },
-          description: { type: "string", maxLength: 4096 },
-          dependsOn: { type: "array", items: { type: "string" } },
-          parallel: { type: "boolean" },
-          conflictsWith: { type: "array", items: { type: "string" } },
-          files: { type: "array", maxItems: 32, items: { type: "string", maxLength: 1024 } },
-          verify: { type: "string", maxLength: 1024 },
-        },
-        required: ["id", "description"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["tasks"],
-  additionalProperties: false,
-} as const satisfies Record<string, unknown>;
-
 export interface FabricTask {
   id: string;
   description: string;

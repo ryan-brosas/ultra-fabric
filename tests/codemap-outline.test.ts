@@ -12,10 +12,8 @@ describe("runOutline", () => {
     expect(finding!.symbolType).toBe("interface");
     expect(finding!.members).toHaveLength(4);
     expect(finding!.members.map((m) => m.name).sort()).toEqual(["claim", "line", "path", "severity"]);
-    // Line conversion: reviewOutputSchema is at line 1 (0-indexed line 0 in JSON -> 1-indexed)
-    const schema = file.items.find((i) => i.name === "reviewOutputSchema");
-    expect(schema).toBeDefined();
-    expect(schema!.range.line).toBe(1);
+    // Line conversion: the first symbol is at line 1 (0-indexed line 0 in JSON -> 1-indexed)
+    expect(finding!.range.line).toBe(1);
   });
 
   it("returns an empty array when the binary is absent", () => {
