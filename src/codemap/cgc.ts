@@ -35,17 +35,51 @@ export const defaultCgcRunner: CgcRunner = (args) =>
   });
 
 // cgc query prints bootstrap lines ("Resolving context...", rich console setup)
-// before the JSON array of scalar projections (json.dumps). Extract the array.
+// before the JSON array of scalar projections. Extract the array.
 export const extractCgcJson = (stdout: string): unknown => {
   const clean = stdout.replace(/\x1b\[[0-9;]*m/g, "");
   const start = clean.indexOf("[");
   const end = clean.lastIndexOf("]");
   if (start === -1 || end <= start) return null;
   try {
-    return JSON.parse(clean.slice(start, end + 1)) as unknown;
+    return JSON.parse(repairWrappedStrings(clean.slice(start, end + 1))) as unknown;
   } catch {
     return null;
   }
+};
+
+// The cgc CLI prints query results with Rich's print_json, which wraps long
+// string values at the console width (default 80 when piped) by embedding a
+// real newline inside the JSON string literal. JSON.stringify escapes real
+// newlines in values as \n, so any raw newline inside a string literal is a
+// wrap artifact: drop it and the value rejoins exactly as emitted.
+const repairWrappedStrings = (json: string): string => {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+      } else if (ch === "\\") {
+        out += ch;
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+        out += ch;
+      } else if (ch === "\n" || ch === "\r") {
+        // wrap artifact inside a string value
+      } else {
+        out += ch;
+      }
+      continue;
+    }
+    if (ch === '"') inString = true;
+    out += ch;
+  }
+  return out;
 };
 
 export const runCgc = (runner: CgcRunner, args: string[], timeoutMs: number): CgcResult => {
@@ -60,10 +94,22 @@ export const runCgc = (runner: CgcRunner, args: string[], timeoutMs: number): Cg
     if (err.code === "ETIMEDOUT" || err.code === "SIGTERM") {
       return { ok: false, kind: "timeout", message: "cgc query timed out" };
     }
-    const detail =
-      typeof err.stderr === "string" && err.stderr.trim()
-        ? err.stderr.trim().split("\n").slice(-3).join(" | ")
-        : String(err.message ?? err);
+    // The cgc CLI writes diagnostics ("Error: Context 'x' is not registered")
+    // to stdout while stderr carries only bootstrap lines; prefer the stream
+    // that actually contains a diagnostic so the failure message is actionable.
+    const stdoutRaw = (err as { stdout?: unknown }).stdout;
+    const stderr =
+      typeof err.stderr === "string" && err.stderr.trim() ? err.stderr.trim() : null;
+    const stdout =
+      typeof stdoutRaw === "string" && stdoutRaw.trim() ? stdoutRaw.trim() : null;
+    const hasDiag = (s: string): boolean => /error|not registered|query error/i.test(s);
+    let detail =
+      stderr && stdout
+        ? hasDiag(stdout)
+          ? stdout
+          : stderr
+        : (stderr ?? stdout ?? String(err.message ?? err));
+    detail = detail.split("\n").slice(-3).join(" | ");
     return { ok: false, kind: "error", message: detail.slice(0, 300) };
   }
 };

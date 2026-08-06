@@ -44,6 +44,26 @@ describe("cgc runner", () => {
     }
   });
 
+  it("prefers a stdout diagnostic over bootstrap stderr lines when both are present", () => {
+    // The cgc CLI writes "Error: Context 'x' is not registered" to stdout while
+    // stderr carries only bootstrap lines; the failure message must surface the
+    // actionable diagnostic, not the config noise.
+    const runner: CgcRunner = () => {
+      throw Object.assign(new Error("cgc exited 1"), {
+        stderr: "Loaded configuration from: /home/ryanj/.codegraphcontext/.env\nUsing database: falkordb-remote\nhost: 127.0.0.1",
+        stdout: "Resolving context...\nError: Context 'omniroute' is not registered. Create it with: cgc context create omniroute",
+      });
+    };
+    const r = runCgc(runner, ["query", "x"], 30_000);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.kind).toBe("error");
+      expect(r.message).toContain("not registered");
+      expect(r.message).not.toContain("Loaded configuration");
+      expect(r.message.length).toBeLessThanOrEqual(300);
+    }
+  });
+
   it("passes through valid stdout as ok text", () => {
     const runner: CgcRunner = () => "bootstrap\n[{\"a\":1}]";
     const r = runCgc(runner, ["query", "x"], 30_000);
@@ -66,6 +86,17 @@ describe("extractCgcJson", () => {
   it("returns null for output without a JSON array", () => {
     expect(extractCgcJson("no results here")).toBeNull();
     expect(extractCgcJson("[not json]")).toBeNull();
+  });
+
+  it("repairs Rich-wrapped string values so long paths still parse", () => {
+    // The cgc CLI prints query results with Rich's print_json, which wraps long
+    // string values at the console width by embedding a real newline inside the
+    // string literal (invalid JSON). The extractor must repair those wraps.
+    const out =
+      "Resolving context...\n[\n  {\n    \"f.path\": \n\"/home/ryanj/work/inspo/omniroute/open-sse/servic\nes/components/NinerouterModelList.tsx\"\n  }\n]";
+    expect(extractCgcJson(out)).toEqual([
+      { "f.path": "/home/ryanj/work/inspo/omniroute/open-sse/services/components/NinerouterModelList.tsx" },
+    ]);
   });
 });
 
