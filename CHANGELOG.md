@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.31.1-ultra.8 - 2026-08-06
+
+- **CI-safe cross-repo benchmark.** The codemap focus/dwell bench skips its
+  on-demand fixture clones (`sources/`, `/tmp/codemap-bench`) when absent,
+  so the release gate passes in fresh CI checkouts instead of failing on
+  ENOENT for vendored repositories.
+
 ## 0.31.1-ultra.7 - 2026-08-06
 
 - **Auto-scout brief.** Opt-in `prewalk.autoScout` runs the cheap scout/explorer
