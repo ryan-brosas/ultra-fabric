@@ -12,6 +12,20 @@ import type {
   FabricProvider,
   FabricProviderListRequest,
 } from "../protocol.js";
+import {
+  argsForIntent,
+  runSearchWithDeps,
+  type EvidenceExec,
+  type EvidenceRecord,
+  type SearchOutcome,
+} from "../evidence/execute.js";
+import {
+  classifyIntent,
+  updateHealth,
+  type EvidenceHealth,
+  type RouteOverrides,
+} from "../evidence/route.js";
+import type { EvidenceToolShape } from "../evidence/classify.js";
 
 const TOOL_METADATA_TTL_MS = 60_000;
 
@@ -74,12 +88,39 @@ const managementDescriptors: FabricActionDescriptor[] = [
     risk: "network",
     namespace: "management",
   },
+  {
+    name: "$search",
+    description: "Balanced evidence search across the MCP tool surface: classify intent, rank capable tools by health and recency, execute with fallback, and return results with provenance",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1 },
+        pin: { type: "array", items: { type: "string" } },
+        deny: { type: "array", items: { type: "string" } },
+        weights: { type: "object", additionalProperties: { type: "number" } },
+        maxAttempts: { type: "number", minimum: 1, maximum: 5 },
+        timeoutMs: { type: "number", minimum: 1000, maximum: 120000 },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    risk: "network",
+    namespace: "management",
+  },
 ];
 
 const normalizeSchema = (schema: unknown): Record<string, unknown> =>
   typeof schema === "object" && schema !== null && !Array.isArray(schema)
     ? (schema as Record<string, unknown>)
     : emptyObjectSchema;
+
+// In-memory success/latency stats for $search balancing. Bounded by the
+// number of distinct MCP tools; reset on demand.
+const searchHealth = new Map<string, EvidenceHealth>();
+
+export const resetSearchHealth = (): void => {
+  searchHealth.clear();
+};
 
 const normalizeMcpResult = (result: unknown): unknown => {
   if (typeof result !== "object" || result === null || Array.isArray(result)) return result;
@@ -197,6 +238,9 @@ export class McpProvider implements FabricProvider {
           : {};
       return this.#call(server, tool, toolArgs, context.signal);
     }
+    if (actionName === "$search") {
+      return this.#runSearch(args, context.signal);
+    }
     const parsed = this.#parseToolName(actionName);
     if (!parsed) throw new Error(`Invalid MCP action: ${actionName}`);
     return this.#call(parsed.server, parsed.tool, args, context.signal);
@@ -204,6 +248,52 @@ export class McpProvider implements FabricProvider {
 
   async close(): Promise<void> {
     await this.#resetRuntime();
+  }
+
+  async #runSearch(args: Record<string, unknown>, signal?: AbortSignal): Promise<SearchOutcome> {
+    const query = String(args.query ?? "").trim();
+    if (!query) throw new Error("$search requires a query");
+    const intent = classifyIntent(query);
+    const runtime = await this.#getRuntime();
+    const enumerate = async (): Promise<EvidenceToolShape[]> => {
+      const tools: EvidenceToolShape[] = [];
+      for (const server of runtime.listServers()) {
+        let list: ServerToolInfo[];
+        try {
+          list = await this.#listTools(runtime, server);
+        } catch {
+          continue;
+        }
+        for (const tool of list) {
+          tools.push({
+            name: server + "." + tool.name,
+            description: tool.description ?? "",
+            inputSchema: normalizeSchema(tool.inputSchema),
+          });
+        }
+      }
+      return tools;
+    };
+    const overrides: RouteOverrides = {
+      ...(Array.isArray(args.pin) ? { pin: args.pin.map(String) } : {}),
+      ...(Array.isArray(args.deny) ? { deny: args.deny.map(String) } : {}),
+      ...(typeof args.weights === "object" && args.weights !== null
+        ? { weights: args.weights as Record<string, number> }
+        : {}),
+    };
+    const exec: EvidenceExec = async (server, tool) => {
+      const bare = tool.slice(server.length + 1);
+      return this.#call(server, bare, argsForIntent(intent, query), signal);
+    };
+    const record: EvidenceRecord = (tool, success, elapsedMs) => {
+      const next = updateHealth(searchHealth, tool, success, Date.now());
+      searchHealth.clear();
+      for (const [key, value] of next) searchHealth.set(key, value);
+    };
+    return runSearchWithDeps(query, enumerate, searchHealth, overrides, {
+      maxAttempts: Number(args.maxAttempts ?? 3),
+      timeoutMs: Number(args.timeoutMs ?? this.config.callTimeoutMs ?? 30_000),
+    }, exec, record);
   }
 
   async #call(
