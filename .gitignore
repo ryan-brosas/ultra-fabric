@@ -8,3 +8,7 @@ coverage/
 .artifact/
 *.log
 .DS_Store
+
+# Vendored upstream clones (see AGENTS.md research discipline) and runtime
+# caches must never be tracked or indexed.
+sources/
