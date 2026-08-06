@@ -100,5 +100,10 @@
     "maxTokensPerWorker": 64000,
     "maxEvidenceBytesPerConsult": 33554432,
     "maxEvidenceFileBytes": 8388608
+  },
+  "codemap": {
+    "cgc": {
+      "enabled": true
+    }
   }
 }
