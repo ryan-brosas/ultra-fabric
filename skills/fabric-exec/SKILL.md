@@ -140,6 +140,21 @@ The host fixes every admitted worker to Pi, fresh depth-one execution, `recursiv
 
 Treat `status: "not_admitted"` as a decision to continue inline, not a reason to retry or fall back to manual fan-out. Treat `partial` as usable evidence plus explicit missing coverage. `inconclusive` means workers completed but no finding survived evidence validation. Challenge silence is a successful no-issue result. Consult outcome telemetry stores only mode/status/counts/context ratio/tokens/cost, never prompts, findings, or worker prose. Exact types and failure statuses are in `<skill-dir>/references/agents.md`.
 
+## Small-task delegation
+
+Delegating breadth recon to a small role spends the child's own context instead of Main's. The `.pi/agents/` role files (or the user scope) define `scout` (external research) and `explorer` (codebase cartography): read-only tools, bounded turns, an omniroute auto-tier model, and a findings-plus-locators output contract. Use them when a query is breadth-shaped (map a subsystem, compare upstream, gather evidence across many files), when context pressure is rising, or when independent verification helps. For one-answer micro-queries, inline codemap/grep is cheaper — a child carries ~25K tokens of harness context per turn on top of the task.
+
+```ts
+// Delegate breadth recon to a bounded child on its own context budget.
+const findings = await agents.run({
+  role: "explorer", // or scout for external research
+  task: "Map the codemap scope-resolution path and return file:line locators.",
+  maxTokens: 30000, // total cap; child input context ~25K/turn compounds per turn
+  turnBudget: { maxTurns: 3, graceTurns: 0 },
+  admission: { reason: "independent_context", expectedArtifact: "file:line locators" },
+});
+```
+
 ## Orchestration surfaces (opt-in)
 Advanced workflow skills are user-invoked; never load them autonomously. When the user has explicitly invoked an agent or mesh workflow, read `<skill-dir>/references/agents.md` and `<skill-dir>/references/mesh.md` for low-level API detail.
 
