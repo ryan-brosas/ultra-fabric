@@ -35,6 +35,7 @@ describe("planInit", () => {
       "Research",
       "Secrets",
       "Writing",
+      "Fabric behavior",
     ]) {
       expect(agents.content.toLowerCase()).toContain(section.toLowerCase());
     }
@@ -42,6 +43,23 @@ describe("planInit", () => {
     expect(agents.content).toContain("project.md");
     expect(agents.content).toContain("roadmap.md");
     expect(agents.content).toContain("codemap");
+  });
+
+  it("generated context trio is detailed", () => {
+    const plan = planInit(new Set(), V);
+    const byPath = new Map(plan.files.map((f) => [f.path, f.content]));
+    const project = byPath.get("project.md")!;
+    for (const s of ["Non-goals", "Users", "Current milestone", "Decisions", "Risks", "Links"]) {
+      expect(project.toLowerCase()).toContain(s.toLowerCase());
+    }
+    const roadmap = byPath.get("roadmap.md")!;
+    for (const s of ["Usage", "Acceptance", "Status", "Evidence", "Done", "Parked"]) {
+      expect(roadmap.toLowerCase()).toContain(s.toLowerCase());
+    }
+    const stack = byPath.get("tech-stack.md")!;
+    for (const s of ["Version", "Tooling", "Runtime targets", "lockfile", "Upgrade", "External services"]) {
+      expect(stack.toLowerCase()).toContain(s.toLowerCase());
+    }
   });
 
   it("AGENTS.md is adapted generic guidance, not copied from another project", () => {
