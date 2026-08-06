@@ -3,6 +3,7 @@ import type { SymbolIndex } from "./symbols.js";
 import { enclosingSymbol } from "./symbols.js";
 import { computeEdgeWeight, type RankEdge } from "./rank.js";
 import { groupFilesByLang } from "./lang.js";
+import { buildImportScope, resolveDefiners } from "./scope.js";
 
 // AST-precise call-edge extraction. Unlike the regex token scan in
 // buildReferenceEdges (which matches identifiers inside strings and comments),
@@ -42,6 +43,7 @@ export const extractCallEdges = (
   const maxDefiners = options.maxDefiners ?? 5;
   const files = [...index.byFile.keys()];
   if (files.length === 0) return [];
+  const scope = buildImportScope(cwd);
 
   // Run ast-grep per language group (no hardcoded --lang ts) so call edges are
   // extracted across a polyglot tree.
@@ -68,16 +70,19 @@ export const extractCallEdges = (
     }
   }
 
-  const defNames = new Set(index.byName.keys());
   const pairCounts = new Map<string, { from: string; to: string; ident: string; count: number; definerCount: number }>();
 
   for (const m of matches) {
     const calleeText = m.metaVariables?.single?.F?.text;
     if (!calleeText) continue;
     const ident = lastSegment(calleeText);
-    if (!ident || !defNames.has(ident)) continue;
-    const defs = index.byName.get(ident);
-    if (!defs) continue;
+    if (!ident) continue;
+    // Scope the callee to the caller’s imports: a call may only reach
+    // definitions in the caller’s file or in files it imports. Callers
+    // without resolvable imports fall back to all definers (prior behavior),
+    // and the definer count used for the maxDefiners gate is the scoped count.
+    const { defs } = resolveDefiners(index, scope, m.file, ident);
+    if (defs.length === 0) continue;
     const definerCount = defs.length;
     if (definerCount > maxDefiners) continue;
     // ast-grep lines are 0-indexed; enclosingSymbol expects 1-indexed lines.

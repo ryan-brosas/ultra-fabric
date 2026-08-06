@@ -551,3 +551,50 @@ property of how the graph is built, not a tuning bug. historyWeight selecting
 1.0 (pure history on both TRAIN and TEST) is therefore a data-driven exclusion
 of a degenerate channel, and the cascade score defaults correctly to the
 history channel alone.
+## 11. Gap Audit, Selection, and Import-Scoped Resolution (2026-08-06)
+
+### Gap list (file:line, verified against source)
+
+- G1 calls.ts:48-50,86-100 — callee resolution takes only the final member segment and links EVERY definer of that name (up to maxDefiners=5), with no import/scope filter; common names either over-connect the graph or are dropped outright when they exceed the definer gate.
+- G2 symbols.ts:22-27,141-206 — regex identifier scan (IDENT_RE) for references matches inside strings/comments (documented at :22-27). Not on the production edge path: buildAllEdges (symbols.ts:229) uses extractCallEdges; buildReferenceEdges is exercised only by tests.
+- G3 symbols.ts:208-228 — inheritance edges regex-parse the signature text and link to all same-named bases cross-file.
+- G4 cascade.ts:96,108 — fixed historyWeight default 0.5; the §10 diagnosis shows the channel was degenerate, so the blend defaulted toward noise. symbolDependencyChannel (cascade.ts:66) ignores its `_index` parameter.
+- G5 disclose.ts:46,74-84 — disclosure granularity is the whole-file skeleton; tokenEstimate is chars/4, not AST-aware; no member-level elision (cAST / semnav range-read idea).
+- G6 lang.ts:12-26,44 — 10 extensions only; findSourceFiles hardcodes walk("src"), so tests/, scripts/, and root files are invisible to the graph.
+- G7 imports.ts:28,40-53 — IMPORT_RE matches only `from "..."`; misses require(), dynamic import(), side-effect imports; resolveSpecifier rewrites only .js→.ts.
+- G8 tool.ts:117-129 — expand returns entity keys only, no signatures; cascade returns raw predictions without a budget-fit re-rank.
+- G9 eval.ts — extractQueryIdentifiers has no production caller; the evaluation surface is the benchmark scripts, not eval.ts.
+
+### Research sweep (technique-to-module mapping)
+
+- github/stack-graphs (cloned sources/, shallow): scope-graph name resolution; per-language rules, incremental, no build tools. Maps to G1/G3 — adopted at 0 dependencies via the first-party import graph.
+- oraios/serena (cloned sources/, shallow): IDE-grade symbol tools over MCP; high-level symbol-level operations. Maps to the codemode tool surface (G8), not the AST core.
+- inspo semnav: Semantic Graph MCP caching LSP results (find_symbol, references, call hierarchies) — the "LSP-but-queryable-graph" concept behind the intent.
+- inspo astchunk: the cAST implementation (arXiv 2506.15655, EMNLP 2025 Findings): recursive AST chunking + sibling merging. Maps to G5 (next slice).
+- arXiv: cAST 2506.15655 (AST-boundary chunking); CodexGraph 2408.03910 (graph-DB-backed repo interface). LocAgent/RepoGraph/aider already cited in module comments.
+
+### Selection
+
+Chosen: import-scoped callee resolution (G1) via a new pure module scope.ts (buildImportScope + resolveDefiners) wired into extractCallEdges. Rationale: addresses the §10 diagnosed root cause — the AST graph's 1-hop dependency signal was flat by construction because every file linked to every definer of common names. Fallback keeps prior behavior for callers with no resolvable imports (Go/Python/Rust/Java, dynamic imports), preserving recall.
+
+Targets: false cross-file invokes edges -> 0 for files with resolvable imports; edge count down; cascade channel regains ranking signal (TRAIN-selected historyWeight leaves 1.0); expand coverage not lower.
+
+Rejected/deferred:
+- G2 regex reference scan: off the production path; leave.
+- G6 language coverage: unverified ast-grep grammars, no benchmark signal.
+- G4 cascade default weight: benchmark tunes per split; the channel fix (chosen slice) is the data-driven fix.
+- G5 AST-boundary chunking: recommended next slice (cAST-style member-level disclosure, measured by expand-depth tokens-to-cover).
+- G7 import specifier coverage: this repo is 100% .js-suffixed (670 vs 0 extensionless), so the existing resolver already resolves all first-party imports here.
+- stack-graphs full adoption: per-language Rust rule sets; import scoping delivers the 80% at zero deps.
+
+### Measured results (post-change, dist build)
+
+| Metric | Before | After |
+|--------|--------|-------|
+| invokes edges | 6486 | 4392 (-32.3%) |
+| cross-file false invokes edges (target not imported; source has resolvable imports) | 2457 (37.9%) | 0 (0%) |
+| expand coverage depth 1/2/3 (163 commits) | 0.100/0.105/0.111 (doc §10, 159 commits) | 0.113/0.120/0.122 |
+| cascade TRAIN-selected historyWeight (WINDOW=60) | 1.0 (pure history, degenerate channel) | 0.75 (channel contributes) |
+| cascade TEST R@4K/R@8K (WINDOW=60) | n/a | 0.162/0.242 (cascade dominates graph 0.076/0.108 and naive 0.018/0.027) |
+
+Reproduce: `node scripts/benchmark-expand-depth.mjs`; `node scripts/validate-codemap-holdout.mjs --window=N`; edge stats via `.measure-scope.mjs` (ephemeral, not committed).
