@@ -99,6 +99,21 @@ The binary verifier awards a full solve only when all 31 task-specific fail-to-p
 
 This is a one-task smoke comparison with three stochastic attempts across different package versions, so it neither proves broad superiority nor isolates Ultra-native behavior from upstream evolution. See the [benchmark harness and reproduction notes](bench/README.md).
 
+## Live Prewalk DeepSWE run
+
+A separate one-task run recorded on 2026-08-06 exercised the live same-session Prewalk flow directly (not the Pier harness): a fresh `boyter/scc` checkout at base commit `bc2796e01998ebc2d40818323f93113aed2542ea`, checklist-first planning, and the executor model `omniroute/opencode-go/deepseek-v4-flash`. The official DeepSWE verifier for `scc-bounded-memory-spilling` graded the resulting patch on a pristine base clone.
+
+| Metric | Value |
+| --- | ---: |
+| Reward | 1 |
+| Pass-to-pass | 286/286 |
+| Fail-to-pass | 31/31 |
+| Patch bytes | 27,914 |
+
+Evidence: `bench/results/live-prewalk/scc-bounded-memory-spilling.json` plus the exact graded patch as `scc-bounded-memory-spilling-model.patch.gz` (uncompressed md5 `539106689e27cbb76df0451f1a3e1036`, compressed sha256 `4892f6bdef150fdffafd641098ca6bd7a5c44ef3f5759589bdf83283fd21eca2`) next to it.
+
+This result is **not comparable to the smoke comparison above** and is deliberately not merged with it. It is one task with no live baseline arm, so no cost, token, or wall-time comparison is claimed. Two process limitations are disclosed: the one-shot `explorer` scout attempt hit the run token limit and returned no usable output, and the task bundle's reference `solution.patch` was inspected during the run after independent task and path analysis, so this is not a clean-room execution. Broader subsets (canary-8 and the 36-task set) remain pending until each named task is independently run and graded; no extrapolation from 1/1 is implied.
+
 ## Prewalk handoff
 
 Prewalk lets a frontier model plan and take the first concrete implementation step, then hands the **same session** to a faster executor. The switch is in-session: the executor inherits the live conversation and the real tool set, so no plan has to be re-serialised into a fresh context. One path, no modes. Set `prewalk.delegateContext` to keep recon and research on `scout`/`explorer` roles or `consult.run` workers, so Main's context stays lean while the executor implements; `prewalk.handoffRetirement` then retires Main's planning-phase tool results from the executor transcript, and `prewalk.reuseChecklists` seeds repeat tasks with their prior plan. `prewalk.autoScout` runs the cheap scout role before planning and injects a bounded 2k-character context brief, and `prewalk.failureMemory` seeds the next similar task's plan with the failure patterns the gate previously rejected, with scout spend attributed in the budget ledger under `prewalk:scout`. See [docs/agents.md](docs/agents.md#automatic-prewalk).

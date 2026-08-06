@@ -57,6 +57,7 @@ class PiCodingAgent(BaseInstalledAgent):
         fabric_package_path: str | None = None,
         fabric_package_name: str | None = None,
         fabric_package_spec: str | None = None,
+        omniroute_provider_path: str | None = None,
         thinking_level: str = "low",
         pi_version: str = "0.83.0",
         **kwargs: Any,
@@ -70,6 +71,7 @@ class PiCodingAgent(BaseInstalledAgent):
             Path(fabric_package_path).resolve() if fabric_package_path else None
         )
         self._fabric_package_spec = fabric_package_spec
+        self._omniroute_provider_path = omniroute_provider_path
         if fabric_package_spec:
             spec_name = package_name_from_spec(fabric_package_spec)
             if fabric_package_name and fabric_package_name != spec_name:
@@ -168,6 +170,26 @@ class PiCodingAgent(BaseInstalledAgent):
                 "git -C /app config user.email 'pi-agent@localhost'"
             ),
         )
+        if self._omniroute_provider_path:
+            import tarfile as _tarfile
+            import tempfile as _tempfile
+            provider_root = Path(self._omniroute_provider_path)
+            # Package the local provider dir so it lands at a stable in-container
+            # path the -e flag can point at.
+            archive = provider_root / ".omniroute-provider.tgz"
+            with _tarfile.open(archive, "w:gz") as tf:
+                tf.add(provider_root, arcname="pi-omniroute-provider",
+                       filter=lambda info: (
+                           None if "node_modules" in info.name or ".git" in info.name else info
+                       ))
+            await environment.upload_file(str(archive), "/tmp/pi-omniroute-provider.tgz")
+            await self.exec_as_root(
+                environment,
+                command=(
+                    "mkdir -p /tmp/omniroute-ext && tar -xzf /tmp/pi-omniroute-provider.tgz -C /tmp/omniroute-ext && "
+                    "npm install --prefix /tmp/omniroute-ext/pi-omniroute-provider --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 || true"
+                ),
+            )
         if self._fabric_package_path:
             await environment.upload_file(
                 self._fabric_package_path, "/tmp/fabric-package.tgz"
@@ -197,6 +219,8 @@ class PiCodingAgent(BaseInstalledAgent):
             extension_flags = fabric_extension_flags(self._fabric_package_name)
         else:
             extension_flags = "--no-skills --no-extensions"
+        if self._omniroute_provider_path:
+            extension_flags += " -e /tmp/omniroute-ext/pi-omniroute-provider"
         command = " ".join(
             [
                 "mkdir -p /tmp/pi-session /logs/agent;",

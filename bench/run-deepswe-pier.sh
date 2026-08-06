@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "usage: $0 <task-slug|task-path|dataset-path> <baseline|fabric-local|fabric-npm> [pier run args...]" >&2
+  echo "usage: $0 <task-slug|task-path|dataset-path> <baseline|fabric-local|fabric-prewalk|fabric-npm> [pier run args...]" >&2
   exit 2
 fi
 
@@ -75,16 +75,17 @@ import sys
 agent_dir = sys.argv[1]
 auth_path = os.path.expanduser("~/.pi/agent/auth.json")
 auth = json.load(open(auth_path)) if os.path.exists(auth_path) else {}
-selected = {key: auth[key] for key in ("openai-codex",) if key in auth}
+selected = {key: auth[key] for key in ("openai-codex", "omniroute") if key in auth}
 if not selected:
     raise SystemExit("openai-codex OAuth credentials are unavailable")
 with open(os.path.join(agent_dir, "auth.json"), "w") as handle:
     json.dump(selected, handle)
 with open(os.path.join(agent_dir, "settings.json"), "w") as handle:
     json.dump({
-        "defaultModel": "gpt-5.6-sol",
-        "defaultProvider": "openai-codex",
+        "defaultModel": "makora/deepseek-ai/DeepSeek-V4-Flash",
+        "defaultProvider": "makora",
         "defaultThinkingLevel": "low",
+        "packages": ["npm:pi-makora-provider"],
     }, handle)
 PY
 chmod 600 "$AGENT_DIR"/*.json
@@ -93,7 +94,52 @@ FABRIC_ARGS=()
 case "$CONFIG" in
   baseline)
     ;;
-  fabric-local)
+fabric-local|fabric-prewalk)
+    if [[ "$CONFIG" == "fabric-prewalk" ]]; then
+      PIER_MODEL=${PIER_MODEL:-omniroute/opencode-go/deepseek-v4-flash}
+      # Isolated prewalk-first fabric.json loaded by Pi as the global config
+      # inside the cell (PI_CODING_AGENT_DIR=/tmp/pi-agent). Opt-in flags only:
+      # cheap scout/explorer context roles, checklist reuse, gate-failure
+      # memory, handoff retirement, and plan-then-delegate. No credentials.
+      PREWALK_EXECUTOR=${PI_FABRIC_EXECUTOR_MODEL:-omniroute/opencode-go/deepseek-v4-flash}
+      python3 - "$AGENT_DIR" "$PREWALK_EXECUTOR" <<'PY'
+import json
+import os
+import sys
+
+agent_dir, executor = sys.argv[1], sys.argv[2]
+with open(os.path.join(agent_dir, "settings.json"), "w") as handle:
+    json.dump({
+        "defaultModel": executor,
+        "defaultProvider": "omniroute",
+        "defaultThinkingLevel": "low",
+        "packages": [],
+    }, handle)
+config = {
+    "configVersion": 3,
+    "prewalk": {
+        "arm": "task",
+        "model": executor,
+        "autoScout": True,
+        "failureMemory": True,
+        "reuseChecklists": True,
+        "handoffRetirement": True,
+        "delegateContext": True,
+    },
+    "agents": {
+        "enabled": True,
+        "roleModels": {
+            "scout": executor,
+            "explorer": executor,
+            "planner": executor,
+            "reviewer": executor,
+        },
+    },
+}
+with open(os.path.join(agent_dir, "fabric.json"), "w") as handle:
+    json.dump(config, handle, indent=2)
+PY
+    fi
     if [[ -n "${PI_FABRIC_PACKAGE:-}" ]]; then
       FABRIC_PACKAGE=$(cd "$(dirname "$PI_FABRIC_PACKAGE")" && pwd)/$(basename "$PI_FABRIC_PACKAGE")
       if [[ ! -f "$FABRIC_PACKAGE" ]]; then
@@ -129,6 +175,11 @@ PY
       --agent-kwarg "fabric_package_path=$FABRIC_PACKAGE"
       --agent-kwarg "fabric_package_name=$FABRIC_PACKAGE_NAME"
     )
+    if [[ "$CONFIG" == "fabric-prewalk" ]]; then
+      FABRIC_ARGS+=(
+        --agent-kwarg "omniroute_provider_path=${PI_OMNIROUTE_PROVIDER:-$OPEN_SOURCE_ROOT/pi-omniroute-provider}"
+      )
+    fi
     ;;
   fabric-npm)
     FABRIC_SPEC=${PI_FABRIC_SPEC:-}
@@ -176,7 +227,7 @@ PIER_ARGS=(
   uv run --directory "$PIER_ROOT" pier run
   --path "$TASK_PATH"
   --agent-import-path pier_pi_agent:PiCodingAgent
-  --model openai-codex/gpt-5.6-sol
+--model "${PIER_MODEL:-openai-codex/gpt-5.6-sol}"
   --agent-kwarg "pi_agent_dir=$AGENT_DIR"
   --agent-kwarg "pi_version=$PIER_PI_VERSION"
 )

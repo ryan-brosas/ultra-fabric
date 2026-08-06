@@ -42,11 +42,11 @@ case "$CONFIG_SET" in
   both)
     CONFIGS=(baseline fabric-local)
     ;;
-  baseline|fabric-local|fabric-npm)
+  baseline|fabric-local|fabric-prewalk|fabric-npm)
     CONFIGS=("$CONFIG_SET")
     ;;
   *)
-    echo "usage: $0 [subset-file] [both|baseline|fabric-local|fabric-npm] [pier run args...]" >&2
+    echo "usage: $0 [subset-file] [both|baseline|fabric-local|fabric-prewalk|fabric-npm] [pier run args...]" >&2
     exit 2
     ;;
 esac

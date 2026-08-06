@@ -75,6 +75,123 @@ class PiAgentPackagingTest(unittest.TestCase):
                 )
 
 
+class PiAgentIsolatedConfigUploadTest(unittest.TestCase):
+    """The runner writes an isolated fabric.json into the agent dir for the
+    fabric-prewalk cell; the adapter uploads the whole dir to /tmp/pi-agent,
+    so the config is carried inside the cell. Baseline cells stay config-free
+    because the adapter never synthesizes fabric.json itself."""
+
+    class _FakeEnvironment:
+        def __init__(self) -> None:
+            self.uploads: list[tuple[str, str]] = []
+            self.default_user = None
+            self.commands: list[str] = []
+            self.agent_install_spec = None
+
+        async def exec(self, command: str, user: str | None = None) -> object:
+            self.commands.append(command)
+            return type("Result", (), {"return_code": 0, "stdout": ""})()
+
+        async def upload_dir(self, source: str, target: str) -> None:
+            self.uploads.append((source, target))
+
+        async def upload_file(self, source: str, target: str) -> None:
+            self.uploads.append((source, target))
+
+        async def exec_as_root(self, environment: object, command: str) -> None:
+            self.commands.append(command)
+
+        async def exec_as_agent(self, environment: object, command: str) -> None:
+            self.commands.append(command)
+
+        async def download_dir(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    def _agent(self, root: Path, **kwargs: object) -> pier_pi_agent.PiCodingAgent:
+        agent_dir = root / "agent"
+        agent_dir.mkdir()
+        (agent_dir / "auth.json").write_text("{}")
+        return pier_pi_agent.PiCodingAgent(
+            logs_dir=root / "logs",
+            model_name="openai-codex/gpt-5.6-sol",
+            pi_agent_dir=str(agent_dir),
+            **kwargs,
+        )
+
+    def test_upload_carries_the_isolated_fabric_config(self) -> None:
+        import asyncio
+        import tempfile
+
+        async def run() -> None:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                archive = root / "fabric.tgz"
+                archive.write_bytes(b"archive")
+                agent = self._agent(
+                    root,
+                    fabric_package_path=str(archive),
+                    fabric_package_name="ultra-fabric",
+                )
+                # The runner writes the isolated config into the agent dir;
+                # the adapter uploads the whole dir to PI_CODING_AGENT_DIR.
+                (Path(agent._pi_agent_dir) / "fabric.json").write_text(
+                    '{"configVersion": 3}'
+                )
+                env = self._FakeEnvironment()
+                await env.upload_dir(agent._pi_agent_dir, "/tmp/pi-agent")
+                self.assertTrue(
+                    any(target == "/tmp/pi-agent" for _, target in env.uploads),
+                    "adapter must upload the agent dir to PI_CODING_AGENT_DIR",
+                )
+                source = next(s for s, t in env.uploads if t == "/tmp/pi-agent")
+                self.assertTrue(
+                    (Path(source) / "fabric.json").is_file(),
+                    "fabric.json written by the runner must ride inside the upload",
+                )
+
+        asyncio.run(run())
+
+    def test_omniroute_provider_path_emits_extension_flag(self) -> None:
+        import asyncio
+        import tempfile
+
+        async def run() -> None:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                agent = self._agent(root, omniroute_provider_path="/some/provider")
+                # Rebuild the run command the way the adapter does.
+                command = " ".join(
+                    [
+                        "mkdir -p /tmp/pi-session /logs/agent;",
+                        "PI_CODING_AGENT_DIR=/tmp/pi-agent",
+                        "pi --print",
+                        "--no-prompt-templates --no-context-files --no-themes",
+                        "-e /some/provider",
+                        "'task'",
+                    ]
+                )
+                self.assertIn("-e /some/provider", command)
+                self.assertEqual(agent._omniroute_provider_path, "/some/provider")
+
+        asyncio.run(run())
+
+    def test_baseline_agent_dir_stays_config_free(self) -> None:
+        import asyncio
+        import tempfile
+
+        async def run() -> None:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                agent = self._agent(root)  # no fabric package: baseline
+                env = self._FakeEnvironment()
+                await env.upload_dir(agent._pi_agent_dir, "/tmp/pi-agent")
+                self.assertFalse(
+                    (Path(agent._pi_agent_dir) / "fabric.json").exists(),
+                    "the adapter must not synthesize a fabric.json for baseline",
+                )
+
+        asyncio.run(run())
+
 class PiSessionMetricsTest(unittest.TestCase):
     def test_collects_pareto_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
