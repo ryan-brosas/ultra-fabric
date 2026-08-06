@@ -178,6 +178,7 @@ PY
     if [[ "$CONFIG" == "fabric-prewalk" ]]; then
       FABRIC_ARGS+=(
         --agent-kwarg "omniroute_provider_path=${PI_OMNIROUTE_PROVIDER:-$OPEN_SOURCE_ROOT/pi-omniroute-provider}"
+        --agent-kwarg "omniroute_url=${PI_OMNIROUTE_URL_CELL:-http://host.docker.internal:20128/v1}"
       )
     fi
     ;;

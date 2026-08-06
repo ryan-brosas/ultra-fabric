@@ -42,6 +42,13 @@ describe("DeepSWE matrix harness (fabric-prewalk)", () => {
     });
   });
 
+  it("carries a host-reachable OmniRoute URL into fabric-prewalk cells", () => {
+    const script = fs.readFileSync(path.join(BENCH, "run-deepswe-pier.sh"), "utf8");
+    expect(script).toContain('--agent-kwarg "omniroute_url=');
+    expect(script).toContain("PI_OMNIROUTE_URL_CELL");
+    expect(script).toContain("http://host.docker.internal:20128/v1");
+  });
+
   it("refuses an unknown config", () => {
     withFixture((root) => {
       const r = runMatrix([path.join(root, "subsets.txt"), "fabric-foo"], { DEEPSWE_ROOT: root });

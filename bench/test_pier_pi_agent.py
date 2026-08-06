@@ -175,6 +175,20 @@ class PiAgentIsolatedConfigUploadTest(unittest.TestCase):
 
         asyncio.run(run())
 
+    def test_omniroute_url_injects_host_reachable_route_without_credentials(self) -> None:
+        """A configured OmniRoute URL must reach the cell process env exactly,
+        without leaking API keys or other credentials."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            url = "http://host.docker.internal:20128/v1"
+            agent = self._agent(root, omniroute_url=url)
+            env = agent.process_env()
+            self.assertEqual(env["OMNIROUTE_URL"], url)
+            upper = env["OMNIROUTE_URL"].upper()
+            self.assertNotIn("API_KEY", upper)
+            self.assertNotIn("BEARER", upper)
+            self.assertNotIn("key=", env["OMNIROUTE_URL"].lower())
+
     def test_baseline_agent_dir_stays_config_free(self) -> None:
         import asyncio
         import tempfile

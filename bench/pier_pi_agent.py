@@ -58,6 +58,7 @@ class PiCodingAgent(BaseInstalledAgent):
         fabric_package_name: str | None = None,
         fabric_package_spec: str | None = None,
         omniroute_provider_path: str | None = None,
+        omniroute_url: str | None = None,
         thinking_level: str = "low",
         pi_version: str = "0.83.0",
         **kwargs: Any,
@@ -72,6 +73,7 @@ class PiCodingAgent(BaseInstalledAgent):
         )
         self._fabric_package_spec = fabric_package_spec
         self._omniroute_provider_path = omniroute_provider_path
+        self._omniroute_url = omniroute_url
         if fabric_package_spec:
             spec_name = package_name_from_spec(fabric_package_spec)
             if fabric_package_name and fabric_package_name != spec_name:
@@ -239,9 +241,7 @@ class PiCodingAgent(BaseInstalledAgent):
             await self.exec_as_agent(
                 environment,
                 command=command,
-                env=self.build_process_env(
-                    {"PI_CODING_AGENT_DIR": "/tmp/pi-agent"}
-                ),
+                env=self.process_env(),
                 cwd="/app",
             )
         finally:
@@ -251,6 +251,15 @@ class PiCodingAgent(BaseInstalledAgent):
                 )
             except Exception as exc:
                 self.logger.warning("Failed to download Pi session: %s", exc)
+
+    def process_env(self) -> dict[str, str]:
+        """Runtime env for the cell process: the configured OmniRoute URL
+        rides here so the omniroute provider extension inside the container
+        reaches the host gateway instead of its own localhost."""
+        base: dict[str, str | None] = {"PI_CODING_AGENT_DIR": "/tmp/pi-agent"}
+        if self._omniroute_url:
+            base["OMNIROUTE_URL"] = self._omniroute_url
+        return self.build_process_env(base)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         if not self._session_logs_dir or not self._session_logs_dir.exists():
