@@ -32,7 +32,10 @@ describe("runSearchWithDeps", () => {
     expect(out.results).toBe("B-result");
     expect(calls).toEqual([webA.name, webB.name]);
     expect(out.provenance.attempts[0]!.ok).toBe(false);
+    expect(out.provenance.attempts[0]!.category).toBeDefined();
+    expect(out.provenance.attempts[0]!.recovery!.length).toBeGreaterThan(20);
     expect(out.provenance.attempts[1]!.ok).toBe(true);
+    expect(out.provenance.attempts[1]!.recovery).toBeUndefined();
     expect(out.provenance.attempts[1]!.server).toBe("serena");
     expect(out.toolsAvailable).toBe(3);
     expect(records[0]![0]).toBe(webA.name);

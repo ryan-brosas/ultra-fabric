@@ -7,6 +7,7 @@ import {
   type RouteOverrides,
 } from "./route.js";
 import type { EvidenceToolShape } from "./classify.js";
+import { classifyFailure, type FailureCategory } from "./failure.js";
 
 // Plan executor with dependency injection: the adapter supplies the real
 // call implementation and a record callback that feeds the health map.
@@ -21,6 +22,8 @@ export interface AttemptProvenance {
   ok: boolean;
   elapsedMs: number;
   error?: string;
+  category?: FailureCategory;
+  recovery?: string;
 }
 
 export interface EvidenceOutcome {
@@ -44,12 +47,16 @@ export const executePlan = async (
       return { results, provenance: { intent: plan.intent, attempts } };
     } catch (error) {
       const elapsedMs = Date.now() - t0;
+      const message = error instanceof Error ? error.message : String(error);
+      const classified = classifyFailure(message);
       attempts.push({
         server: a.server,
         tool: a.tool,
         ok: false,
         elapsedMs,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
+        category: classified.category,
+        recovery: classified.recovery,
       });
       record(a.tool, false, elapsedMs);
     }
