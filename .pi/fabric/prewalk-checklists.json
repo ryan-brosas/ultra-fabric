@@ -1,5 +1,252 @@
 [
   {
+    "task": "can we make sure supervisor always active please",
+    "checklist": {
+      "items": [
+        {
+          "task": "Confirm the current watchdog and DeepSWE runner remain healthy before changing monitoring.",
+          "validation": "Runner and watchdog PIDs are alive and bounded status JSON is fresh."
+        },
+        {
+          "task": "Add a test-first mesh heartbeat publisher for the DeepSWE watchdog.",
+          "validation": "RED test proves a heartbeat is a valid bounded mesh event addressed to the supervisor topic without credentials or solution content."
+        },
+        {
+          "task": "Wire the five-minute watchdog to publish each status heartbeat.",
+          "validation": "Every poll updates status/history and publishes one coalescible bench.deepswe.heartbeat mesh event using the supported MeshStore path."
+        },
+        {
+          "task": "Respawn the supervisor with the heartbeat topic subscription.",
+          "validation": "New persistent supervisor has topic bench.deepswe.heartbeat, native non-recursive events only, triggerTurn enabled, and the requested OmniRoute model."
+        },
+        {
+          "task": "Prove end-to-end activation.",
+          "validation": "Publish one real heartbeat and observe supervisor activation/message count or lastRunId advance, then return to idle with action silent while healthy."
+        },
+        {
+          "task": "Verify monitoring remains bounded and durable.",
+          "validation": "Watchdog and runner remain alive; no recursive turn_end subscriptions; focused tests, pnpm run check, git diff --check, and status pass."
+        }
+      ],
+      "readyAt": 1786024779100
+    },
+    "recordedAt": 1786025218835
+  },
+  {
+    "task": "can you monitor this.... and run it on our stuff directly... the purpose of the test it to test ultra fabric to test it on deep swe stuff",
+    "checklist": {
+      "items": [
+        {
+          "task": "Stop the invalid full run before additional paid cells fail.",
+          "validation": "Original matrix pid is stopped; preserve its two connection failures as infrastructure evidence."
+        },
+        {
+          "task": "Add a regression test for OmniRoute reachability from Pier Docker cells.",
+          "validation": "RED test requires fabric-prewalk to inject OMNIROUTE_URL into the agent process environment without exposing credentials."
+        },
+        {
+          "task": "Implement the smallest upstream-shaped harness fix.",
+          "validation": "Pier adapter accepts a configured OmniRoute URL and forwards it only to the cell process; no Ultra policy change or dependency."
+        },
+        {
+          "task": "Probe the Docker endpoint directly before relaunch.",
+          "validation": "A disposable container reaches /v1/models through the configured host route and sees opencode-go/deepseek-v4-flash."
+        },
+        {
+          "task": "Relaunch Ultra Fabric itself across all 113 DeepSWE tasks.",
+          "validation": "Config records ultra-fabric 0.31.1-ultra.9 tarball, fabric-prewalk, exact OmniRoute model, one attempt per task, and bounded concurrency."
+        },
+        {
+          "task": "Monitor and preserve honest benchmark state.",
+          "validation": "Persistent supervisor remains active; new matrix is alive with a real Ultra Fabric session, and final aggregation separates verifier results from infrastructure failures."
+        },
+        {
+          "task": "Run focused and repository verification for the harness change.",
+          "validation": "Run Python adapter tests, DeepSWE harness tests, pnpm run check, git diff --check, and git status --short --branch before committing or publishing."
+        }
+      ],
+      "readyAt": 1786021813673
+    },
+    "recordedAt": 1786022819206
+  },
+  {
+    "task": "do all of the deepswe not only lol",
+    "checklist": {
+      "items": [
+        {
+          "task": "Freeze the complete local DeepSWE corpus manifest.",
+          "validation": "Generate a sorted manifest from every directory under deep-swe/tasks and assert exactly 113 unique tasks."
+        },
+        {
+          "task": "Validate the complete Prewalk matrix before spending model capacity.",
+          "validation": "Dry-run must select 113 tasks, one attempt, only fabric-prewalk, and model omniroute/opencode-go/deepseek-v4-flash."
+        },
+        {
+          "task": "Validate runtime prerequisites without exposing credentials.",
+          "validation": "Confirm Pier, OmniRoute provider, Docker, and the requested model endpoint are available."
+        },
+        {
+          "task": "Launch one official verifier-backed attempt for every DeepSWE task.",
+          "validation": "Start a persistent background matrix with bounded concurrency and save PID, command, manifest, and logs under a timestamped ignored results directory."
+        },
+        {
+          "task": "Prove the benchmark is running rather than merely queued.",
+          "validation": "Observe the process alive and a Pier job/result directory or substantive runner output after startup."
+        },
+        {
+          "task": "Preserve honest completion criteria.",
+          "validation": "Do not claim suite results until all 113 task cells terminate and per-task verifier outputs are aggregated; report infrastructure failures separately from solve failures."
+        }
+      ],
+      "readyAt": 1786021451104
+    },
+    "recordedAt": 1786021631895
+  },
+  {
+    "task": "commit, push and publish",
+    "checklist": {
+      "items": [
+        {
+          "task": "Stage only the completed DeepSWE harness, tests, README, and evidence changes.",
+          "validation": "Cached diff excludes runtime checklist memory and unrelated root-level context files."
+        },
+        {
+          "task": "Keep the graded patch byte-exact while satisfying repository whitespace checks.",
+          "validation": "Store deterministic gzip and record both uncompressed md5 and compressed sha256 in the receipt."
+        },
+        {
+          "task": "Commit and push the implementation work before release metadata.",
+          "validation": "Create one conventional commit and confirm origin/main contains it."
+        },
+        {
+          "task": "Cut the next prerelease according to the release skill.",
+          "validation": "Bump package.json to 0.31.1-ultra.9 and add a dated changelog section, committed separately."
+        },
+        {
+          "task": "Publish only through the annotated v0.31.1-ultra.9 tag.",
+          "validation": "Push main then explicit refs/tags/v0.31.1-ultra.9; do not use local publish or --follow-tags."
+        },
+        {
+          "task": "Verify npm trusted publishing and final repository state.",
+          "validation": "Confirm npm next dist-tag and trustedPublisher github, then run git status --short --branch."
+        }
+      ],
+      "readyAt": 1786020751580
+    },
+    "recordedAt": 1786021120119
+  },
+  {
+    "task": "yes please and update our readme based on result, don't cheat on this please",
+    "checklist": {
+      "items": [
+        {
+          "task": "Preserve the completed live scc run as immutable evidence before changing documentation.",
+          "validation": "Write a compact JSON receipt and copy the exact 27,914-byte model.patch under bench/results/live-prewalk/."
+        },
+        {
+          "task": "Report only measurements actually observed in the live run.",
+          "validation": "README must state reward 1, P2P 286/286, F2P 31/31, exact model, and exact task/base commit."
+        },
+        {
+          "task": "Disclose process limitations and contamination risks.",
+          "validation": "README must state one task, no live baseline, no trustworthy cost/wall-time metrics, explorer token-limit failure, and reference-patch inspection."
+        },
+        {
+          "task": "Keep the earlier Pier benchmark separate from the new live Prewalk result.",
+          "validation": "Use a distinct subsection and do not merge scores, costs, attempts, or model claims."
+        },
+        {
+          "task": "Do not claim a canary-8 or 36-task result until every named task is independently run and graded.",
+          "validation": "README labels broader subset work as pending rather than extrapolating 1/1."
+        },
+        {
+          "task": "Verify documentation and repository gates after edits.",
+          "validation": "Run focused docs tests, pnpm run check, git diff --check, and git status --short --branch."
+        }
+      ],
+      "readyAt": 1786020325238
+    },
+    "recordedAt": 1786020568225
+  },
+  {
+    "task": "yes please go ahead",
+    "checklist": {
+      "items": [
+        {
+          "task": "Inspect the current --format-multi accumulation path and identify where per-file records remain resident.",
+          "validation": "processor/formatters.go:fileSummarizeMulti shows all FileJob pointers appended before replay."
+        },
+        {
+          "task": "Add CLI flags and fail-fast validation for bounded-memory directory and positive in-memory limit.",
+          "validation": "Official invalid-config subtests reject missing dir, missing max, zero, and negative limits."
+        },
+        {
+          "task": "Implement bounded per-file storage with spill files kept through process exit and create missing directories.",
+          "validation": "Official spill tests require a non-empty regular file and successful creation of a nested missing directory."
+        },
+        {
+          "task": "Preserve json, json2, csv, and csv-stream output, destinations, ordering, and sorted csv-stream behavior.",
+          "validation": "Official parity and destination tests compare bounded and unbounded bytes and sorted filenames."
+        },
+        {
+          "task": "Preserve tabular and wide aggregate totals and exclude a spill directory nested under scanned paths.",
+          "validation": "Official aggregate and inside-vs-outside spill-directory tests compare totals and JSON output."
+        },
+        {
+          "task": "Emit bounded-memory stats only when requested, including spills and peak in-memory file count.",
+          "validation": "Official stats parser requires exactly one bounded-memory stderr line with both integer fields."
+        },
+        {
+          "task": "Run focused parity and spill tests, repository Go tests, then the official DeepSWE verifier.",
+          "validation": "Both focused tagged tests and the base suite must pass before grading."
+        }
+      ],
+      "readyAt": 1786020025979
+    },
+    "recordedAt": 1786020152432
+  },
+  {
+    "task": "go ahead commit and do the deepswe test with our prewalk stuff...",
+    "checklist": {
+      "items": [
+        {
+          "task": "Add an explicit DeepSWE fabric-prewalk configuration without changing baseline or existing fabric-local semantics",
+          "validation": "runner accepts fabric-prewalk and matrix dry-run emits a distinct resumable job"
+        },
+        {
+          "task": "Write isolated fabric.json for the prewalk cell with autoScout, failureMemory, checklist reuse, retirement, and cheap scout/explorer role models",
+          "validation": "generated config is valid, opt-in, and contains no credentials"
+        },
+        {
+          "task": "Ensure the Pier adapter copies fabric.json into PI_CODING_AGENT_DIR for Fabric cells only",
+          "validation": "adapter unit test observes the file inside the isolated upload and baseline remains config-free"
+        },
+        {
+          "task": "Add harness regression tests for config parsing, clean-worktree rules, and dry-run command construction",
+          "validation": "Python and shell harness tests pass"
+        },
+        {
+          "task": "Run a free one-task paired dry-run and inspect the exact baseline versus prewalk commands",
+          "validation": "two deterministic jobs are printed and paid-cell count remains bounded"
+        },
+        {
+          "task": "Run one paid paired canary task (baseline vs fabric-prewalk, one attempt each) through Pier",
+          "validation": "both jobs finish or a concrete environment/provider blocker is captured without rerunning unchanged"
+        },
+        {
+          "task": "Analyze matched results and record reward, tokens, cost, wall time, tool/read pathology, and prewalk evidence",
+          "validation": "comparison JSON is written and claims distinguish measured result from harness limitations"
+        },
+        {
+          "task": "Update README/bench docs only if the paid result is valid, then run repository gates",
+          "validation": "pnpm run check, Python bench tests, git diff --check, and status pass"
+        }
+      ],
+      "readyAt": 1786015358228
+    },
+    "recordedAt": 1786018384463
+  },
+  {
     "task": "can we do a full deepswe test all the test that we have, then update our metrics on readme, we can differentiate this from original like we are steering this more on prewalk, token optimization, and well agent utilization for context handlign and such.... and well codemode better I guess?",
     "checklist": {
       "items": [
@@ -296,227 +543,5 @@
       "readyAt": 1785992127379
     },
     "recordedAt": 1785992464492
-  },
-  {
-    "task": "also add to an algorithm that will detect plugin/mcp/whatever when you do /fabric init it should detect that..... also for user.md it should go see the github cli or ask user",
-    "checklist": {
-      "items": [
-        {
-          "task": "Pure detection module src/init/detect.ts + RED-first tests/fabric-detect.test.ts: interpretDetection(probes) takes injected probe facts (package.json text, lockfile names, manifest filenames present, mcp server list [{name,toolCount}], extension names, identity probe results from gh/git) and returns DetectedContext { packageManager, commands, languages, dependencies, mcpServers, extensions, identity }. Algorithm: lockfile wins for package manager (pnpm-lock.yaml/bun.lock/yarn.lock/package-lock.json) then packageJson.packageManager; commands from scripts (build/test/lint/typecheck/check -> '<pm> run <name>'); languages from manifests (tsconfig->TypeScript, Cargo.toml->Rust, go.mod->Go, pyproject.toml->Python); identity precedence gh > git config > none",
-          "validation": "RED module-not-found first, then detect tests green covering each rule plus empty-probe fallback; no I/O imports in detect.ts"
-        },
-        {
-          "task": "Scaffold integration: planInit(existing, configVersion, detected?) fills templates when detection is present — Commands section with real commands, tech-stack languages/dependencies/package-manager rows, External services & MCP servers table rows from detected servers — and adds user.md to the plan: identity from gh/git when available, otherwise explicit ask-the-user placeholders; update existing fabric-init tests for the new file and detection-filled variants",
-          "validation": "fabric-init tests green including: undetected plan keeps placeholders, detected plan carries real commands and MCP rows, user.md with identity vs ask-user fallback, user.md skipped when existing"
-        },
-        {
-          "task": "Adapter wiring in src/commands/fabric.ts runInit (dirty WIP file — surgical staging again): gather probes with try/catch effects only (fs reads for package.json/lockfiles/manifests/tsconfig, ~/.pi/agent/mcp-cache.json for server+tool counts, execFileSync gh api user then git config for identity), call interpretDetection, pass to planInit; notify gains a detection summary line and an ask-user line when identity is missing",
-          "validation": "tsc clean; staged diff (git apply --cached of a HEAD-baseline patch) shows only runInit-related hunks; post-commit git diff HEAD -- src/commands/fabric.ts equals the WIP baseline"
-        },
-        {
-          "task": "Live proof + gate + commit: run the built scaffold with real probes from this repo (detect pnpm, check commands, live MCP servers from the host cache, gh identity) against a temp dir; then five gate stages, git diff --check; commit detect.ts + scaffold.ts + tests + fabric.ts init hunks as feat(init); no push",
-          "validation": "Temp-dir user.md shows the gh-derived identity and tech-stack.md shows detected rows; stages exit 0 with only the 3 known pre-existing WIP failures; commit lists only the named files"
-        }
-      ],
-      "readyAt": 1785991101041,
-      "easy": true
-    },
-    "recordedAt": 1785991873359
-  },
-  {
-    "task": "also include fabric behavior on it as well please on a section add additional section also make the other .md generated one to be detailed as possible",
-    "checklist": {
-      "items": [
-        {
-          "task": "Add a 'Fabric behavior' section to the AGENTS_MD template in src/init/scaffold.ts describing the runtime contract accurately: prewalk arms and gates the first mutation behind an accepted checklist; research mode (5-9 validated items) vs easy escape (2-4, bounded tasks) vs trivial escape (1-2 small edits, same turn, no model swap); executor handoff owns implementation through completion and re-arms per user message; role model precedence (request > /fabric settings roleModels > profile pin); delegation economics (children carry fixed harness context per turn, so delegate breadth not micro-queries); blocked prewalk recovery via /fabric prewalk --retry",
-          "validation": "Section reads accurate to the implemented behavior and generic to any project; agent-language gate still passes (no legacy nouns)"
-        },
-        {
-          "task": "Rewrite PROJECT_MD, ROADMAP_MD, TECH_STACK_MD templates to be detailed: project.md gains Non-goals, Users, Current milestone with acceptance criteria, Decisions log format, Risks & constraints, Links; roadmap.md gains usage instructions, per-milestone goal/acceptance/status/evidence structure, Done and Parked sections; tech-stack.md gains versioned languages, purpose-tabled frameworks, tooling (build/test/lint), runtime targets, package-manager + lockfile policy, upgrade policy, external services/MCP servers",
-          "validation": "Templates carry the new sections with placeholder guidance; tests/fabric-init.test.ts updated to assert the key new sections in all four templates and still green with tsc clean"
-        },
-        {
-          "task": "Gate and commit: stages separately, git diff --check; commit only src/init/scaffold.ts + tests/fabric-init.test.ts; WIP untouched, no push",
-          "validation": "Stages exit 0 with only the 3 known pre-existing WIP failures; git show --stat lists exactly the two files"
-        }
-      ],
-      "readyAt": 1785990545362,
-      "easy": true
-    },
-    "recordedAt": 1785990901602
-  },
-  {
-    "task": "but instead inside of .pi we should put it on root, do a deep research how we can set this properly set rules and such",
-    "checklist": {
-      "items": [
-        {
-          "task": "External research via the live MCP search surface (mcp.exa.omniroute_web_search / omniroute_web_fetch): (a) the AGENTS.md open standard — agents.md spec: discovery, nesting/precedence, recommended sections; (b) how major harnesses treat root context files (Claude Code CLAUDE.md + /init, opencode AGENTS.md + /init, Cursor rules, Copilot instructions, Gemini GEMINI.md); (c) init-command precedents — what they generate, how they avoid overwriting. Rank per source hierarchy (official docs > source > articles)",
-          "validation": "Findings note with verified URLs and per-claim citations; each harness's root-file convention and init behavior stated; conflicts called out"
-        },
-        {
-          "task": "Local discovery research: establish with file:line evidence how this stack loads context today — where pi (pi-coding-agent) discovers AGENTS.md, whether .pi/project.md / roadmap.md / tech-stack.md are read by any code path or only by convention (CLAUDE.md references them), and what /fabric settings writes to .pi/fabric.json — so root placement provably gets loaded",
-          "validation": "Loader paths cited file:line; a clear statement of which files are mechanically loaded vs convention-only"
-        },
-        {
-          "task": "Design note: root-level layout for /fabric init informed by the research — AGENTS.md at root as the single mechanically-loaded rules entrypoint, with project.md/roadmap.md/tech-stack.md at root (linked from AGENTS.md) unless research shows a stronger convention; .pi/fabric.json stays under .pi (settings, not context); strictly non-destructive plan with per-file create/skip and a migration report when legacy .pi/*.md context files exist",
-          "validation": "Decision note recorded (docs/ or final report) naming layout, template section outlines, skip/migration semantics, and rejected alternatives with reasons"
-        },
-        {
-          "task": "RED: tests/fabric-init.test.ts (new file — tests/fabric-command.test.ts is dirty WIP) for a pure planner: planInit(existingPaths, configVersion) returns per-file {path, content, action: create|skip} with root-level paths, template sections required by the design note present in content, skip for existing files, and a migration notice entry when .pi/project.md-style legacy files are detected",
-          "validation": "npx vitest run tests/fabric-init.test.ts fails module-not-found before src/init/scaffold.ts exists"
-        },
-        {
-          "task": "GREEN: src/init/scaffold.ts — pure planner + templates (no I/O), plus a small applyInitPlan adapter using injected write/exists so the command wiring stays thin; templates carry the researched section structure and reference Ultra's real surfaces (prewalk, codemap, roles, mcp.$search)",
-          "validation": "Init tests green; typecheck clean; no I/O imports in the planner"
-        },
-        {
-          "task": "Wire the init subcommand into src/commands/fabric.ts (dirty WIP file): add 'init' to the subcommand list and a dispatch case calling the scaffold adapter; stage ONLY these hunks surgically (git diff filtered to the init hunks applied via git apply --cached) so the user's WIP hunks stay uncommitted; commit module+tests+wiring together so the committed tree has no unreferenced module (knip)",
-          "validation": "git diff --cached reviewed before commit shows only init-related hunks; after commit, git diff HEAD -- src/commands/fabric.ts shows exactly the WIP hunks (+9/-13 baseline) and knip passes on the working tree"
-        },
-        {
-          "task": "Live proof + gate: execute the scaffold against a temp dir (all files created with template sections) and against this repo (existing AGENTS.md/CLAUDE.md skipped, legacy .pi context migration reported); then the five gate stages separately, git diff --check, status; no push",
-          "validation": "Transcript shows create-all in temp dir and skip/migrate report here; stages exit 0 with only the 3 known pre-existing WIP failures"
-        }
-      ],
-      "readyAt": 1785988715977
-    },
-    "recordedAt": 1785989567105
-  },
-  {
-    "task": "So we are going to utilize most of our mcp stuff like deepwiki, exa, omniroute search stuff since we put most of the search provider there.... so.... go nuts balancing or how fabric use it, make like algorithm so this will be flexible and can be applied to other user not specifically us",
-    "checklist": {
-      "items": [
-        {
-          "task": "Recon fixtures + wiring: pull the real inputSchema/description for the representative search tools (mcp.exa.omniroute_web_search / omniroute_web_fetch / omniroute_pool_health, mcp.deepwiki.*, mcp.context7.*, mcp.cloudflare-docs.search_cloudflare_documentation) via tools.describe to use as test fixtures; read src/providers/mcp-provider.ts fully (clean file, 394 lines) to find where tool enumeration and $call execution live; cite file:line in the report",
-          "validation": "Fixture descriptors captured; enumeration and invoke paths named with line numbers; confirmed no dirty WIP file (src/config.ts, src/index.ts) needs to change"
-        },
-        {
-          "task": "RED classifier: tests/evidence-classify.test.ts asserting a pure classifier maps tool descriptors (name+description+inputSchema only, never server names) to capabilities: web-search (query param + search naming), web-fetch (url param), repo-wiki (deepwiki-shaped ask/read over a repo), docs-search (library/documentation naming), health (pool/health naming), and none for unrelated tools (codegraphcontext CRUD, pyxel)",
-          "validation": "npx vitest run tests/evidence-classify.test.ts fails with module-not-found before src/evidence/classify.ts exists"
-        },
-        {
-          "task": "GREEN classifier: src/evidence/classify.ts — pure, typed, zero deps: capability discriminated union, pattern heuristics over name/description/schema properties, deterministic; no server-name allowlists so it works on any user's MCP set",
-          "validation": "Classifier tests pass; typecheck clean"
-        },
-        {
-          "task": "RED+GREEN router: src/evidence/route.ts — pure plan builder: classify query intent (explicit URL -> fetch, owner/repo mention -> repo-wiki, library-docs phrasing -> docs, otherwise web-search), then rank capable tools by score = capability match x health x success EWMA, with LRU rotation breaking ties (fair balancing), optional pin/deny/weight overrides passed as args (not config, keeping dirty src/config.ts untouched), and a bounded attempt plan (maxAttempts, per-attempt timeout). Deterministic tests: intent classification, rotation fairness across repeated plans, fallback ordering after a recorded failure, deny/pin behavior",
-          "validation": "tests/evidence-route.test.ts RED first, then green; all pure functions, no I/O imports in src/evidence/*"
-        },
-        {
-          "task": "Adapter: add a $search meta-action to src/providers/mcp-provider.ts (clean file) that enumerates live MCP tools, classifies, builds the plan, executes attempts in order with failure fallback, feeds success/failure/latency back into an in-memory bounded stats map (module-level EWMA, resettable), and returns { results, provenance: { server, tool, intent, attempts } }; keep effects in the adapter, policy in src/evidence",
-          "validation": "Unit tests with a faked tool registry cover fallback-on-error and provenance; tools.list shows mcp.$search; typecheck clean"
-        },
-        {
-          "task": "Prompt generalization: update .pi/agents/scout.md (and the user-scope copy) Evidence tools section to lead with the balanced discovery path (mcp.$search) and demote the named-tool examples to fallback; keep tests/agent-role-files.test.ts contract assertions passing",
-          "validation": "Role-file tests still 8/8; scout behavior text names the balanced search path without requiring any specific server"
-        },
-        {
-          "task": "Live proof: call mcp.$search in this session for (a) a web query and (b) a repo/docs-shaped query; confirm provenance shows a real server+tool choice and that a denied primary falls back to the next candidate",
-          "validation": "Transcript shows results with provenance and one demonstrated fallback; if the live session's provider registry predates the build, prove via the built dist adapter directly and name the reload constraint"
-        },
-        {
-          "task": "Gate + commit: five stages separately, git diff --check, status; commits: feat(evidence) for the pure modules + tests, feat(mcp) for the adapter, docs(agents) for the prompt touch — never staging dirty WIP files; no push unless asked",
-          "validation": "Stages exit 0 with only the 3 known pre-existing WIP failures; each git show --stat lists only the named files"
-        }
-      ],
-      "readyAt": 1785986772636
-    },
-    "recordedAt": 1785988306611
-  },
-  {
-    "task": "this is all good small agent like scout/explorer/ for small task... also if we can revamp our prompt for it as well look on our template/.opencode for agents utilize our mcp stuff as well, omniroute whatever",
-    "checklist": {
-      "items": [
-        {
-          "task": "Verify the role-registry load path end-to-end: confirm AgentRoleRegistry's project-dir resolution reaches .pi/agents/<role>.md in this repo (role-profiles.ts:295-311 builtinDir/project wiring, the 'define .pi/agents/<role>.md' error path, and how one-shot-manager resolves roles for agents.run), so the new files are discoverable without code changes",
-          "validation": "A registry constructed over this repo's .pi/agents dir lists scout and explorer after the files exist; the resolution chain is cited file:line in the final report"
-        },
-        {
-          "task": "RED: add tests (new tests/agent-role-files.test.ts, mirroring tests/agent-role-profiles.test.ts conventions) that load the repo's real .pi/agents/scout.md and .pi/agents/explorer.md via parseAgentRoleProfile and assert: lifecycle one-shot, bounded maxTurns with graceTurns, read-only tools (no write/edit/bash mutation), model set to an omniroute auto tier, and behavior body containing the codemap-first instruction, the findings+locators output contract, and the no-whole-files rule",
-          "validation": "npx vitest run tests/agent-role-files.test.ts fails with file-not-found before the profiles exist"
-        },
-        {
-          "task": "GREEN scout.md: author .pi/agents/scout.md adapted from inspo template/.opencode/agent/scout.md (external research specialist) — direct-answer-first, source hierarchy, retrieval budget, citations — rewritten for Ultra: use the exa MCP tools (mcp.exa.omniroute_web_search / omniroute_web_fetch) for web evidence, sources/ clones for dependency reading, model omniroute/auto/fast (or cheap), maxTurns bounded, tools read-only, output contract findings + evidence locators only",
-          "validation": "RED scout assertions pass; parseAgentRoleProfile accepts the file; renderAgentRolePrompt output contains the output contract"
-        },
-        {
-          "task": "GREEN explorer.md: author .pi/agents/explorer.md adapted from template explore.md (read-only codebase cartographer) rewritten for Ultra: codemap search/expand/source/cascade as the primary navigation (replacing the template's LSP table), pi.grep only for literals/comments/config, file:line locators with absolute paths, stop-when-supported budget, never return whole files, model omniroute/auto/best-coding-fast, one-shot lifecycle",
-          "validation": "RED explorer assertions pass; full role-profile suite green (npx vitest run tests/agent-role-*.test.ts)"
-        },
-        {
-          "task": "Live proof: run one bounded explorer via agents.run({ role: 'explorer', task: <small real recon question about this repo>, maxTokens bounded }) — user authorized agents by name — and confirm the reply is structured findings with file:line locators, not file dumps; record the token cost vs an equivalent inline recon; if the live host cannot see fresh .pi/agents without a session reload, prove via registry load + renderAgentRolePrompt and name the reload requirement explicitly",
-          "validation": "Transcript shows the role resolved (no 'Unknown Agent role'), the structured return, and the measured cost; or the reload constraint is demonstrated and documented"
-        },
-        {
-          "task": "Guidance touch: extend the fabric-exec SKILL.md delegation guidance with one typed agents.run example naming scout/explorer and when delegation pays (breadth recon, rising context pressure), keeping every TS block type-clean against GUEST_TYPE_DECLARATIONS",
-          "validation": "The two fabric-exec skill TS blocks plus the new one type-check via the same harness used in slice A; skill-docs failures remain byte-identical to the pre-existing fabric-fusion WIP failure"
-        },
-        {
-          "task": "Gate and commit: run the five check stages separately, git diff --check, git status; commit only .pi/agents/scout.md, .pi/agents/explorer.md, the new test file, and the SKILL.md touch — never staging the dirty WIP set (.pi/fabric.json, src/agents/*, prewalk files); no push unless asked",
-          "validation": "Stages exit 0 with only the three known pre-existing WIP test failures; git show --stat per commit lists only the named files"
-        }
-      ],
-      "readyAt": 1785985607090
-    },
-    "recordedAt": 1785986387305
-  },
-  {
-    "task": "commit and push, publish",
-    "checklist": {
-      "items": [
-        {
-          "task": "Confirm the four slice commits are intact and nothing from the codemap slices is left uncommitted, then push main to origin",
-          "validation": "git log shows 4b70f3e..2069dfa ahead; git status shows no uncommitted codemap/skill slice files; push output shows main advanced"
-        },
-        {
-          "task": "Release 0.31.1-ultra.6 per the release skill: bump package.json, add dated CHANGELOG section, commit exactly those two files as chore(release), annotated tag v0.31.1-ultra.6 with message equal to tag name, push tag by explicit ref (never --follow-tags)",
-          "validation": "git show --stat HEAD lists only package.json and CHANGELOG.md; git cat-file -t shows 'tag'; ls-remote shows main and the tag at the release commit"
-        },
-        {
-          "task": "Verify the CI OIDC publish moved the next dist-tag, and hand the user the OTP-gated latest promotion command",
-          "validation": "registry dist-tags JSON shows next: 0.31.1-ultra.6; report names the npm dist-tag add command for latest"
-        }
-      ],
-      "readyAt": 1785984339705,
-      "easy": true
-    },
-    "recordedAt": 1785984683373
-  },
-  {
-    "task": "let's go with that order implement or address is 1 by 1, plan it out for prewalk carefully",
-    "checklist": {
-      "items": [
-        {
-          "task": "Slice A (guidance): edit skills/fabric-exec/SKILL.md read-economy section (~line 39) so symbol/declaration/call-shaped queries route to the codemap provider first (codemap.search / codemap.expand via direct proxy or tools.call), with pi.grep reserved for string literals, comments, and config; verify the codemap provider action names and arg shapes against src/providers/codemap-provider.ts descriptors before writing the example",
-          "validation": "npx vitest run tests/skill-docs.test.ts passes (it type-checks every TypeScript-fenced skill program); the section names both the codemap-first path and the grep-remainder cases; commit docs(skills) touching only the SKILL.md"
-        },
-        {
-          "task": "Slice B RED: add failing tests asserting the graph sees beyond src/ — codemap search finds a symbol defined in tests/ (e.g., a describe-level helper in tests/codemap-scope.test.ts) and a symbol in scripts/, via findSourceFiles or buildCodeGraph with widened roots",
-          "validation": "npx vitest run on the new/extended codemap test file fails for the expected reason (symbol not found) before any src change"
-        },
-        {
-          "task": "Slice B GREEN: widen src/codemap/lang.ts findSourceFiles (walk('src') hardcode at ~line 44) to cover src/, tests/, and scripts/ with explicit excludes (node_modules, dist, sources/, bench/, .git); keep the walk bounded and pure; check every caller of findSourceFiles (build.ts, tool.ts, benchmark scripts) for assumptions about src-only paths",
-          "validation": "RED tests pass; full codemap suite green (npx vitest run tests/codemap-*.test.ts); node scripts/benchmark-expand-depth.mjs re-run and edge/coverage numbers recorded in a docs/code-map-research.md section (regression means revert or justify); commit feat(codemap)"
-        },
-        {
-          "task": "Slice C (source operation): add a budget-capped 'source' operation — pure range lookup (symbol key name:file -> line..endLine text) in a small module or symbols.ts, wired into codemapOperation in src/codemap/tool.ts and a new descriptor in src/providers/codemap-provider.ts mirroring the existing schema shape (maxTokens bounds); RED test first in tests/codemap-tool.test.ts or a new file, then implement; check whether the MCP bridge (pi-claude-bridge) passes operations through or needs a schema update, and record the finding rather than editing the external repo",
-          "validation": "New tests pass plus full codemap suite; codemap.source via the fabric provider returns the exact source range for a known symbol (e.g., resolveDefiners:src/codemap/scope.ts) truncated to maxTokens; bridge pass-through status noted in the commit body or docs; commit feat(codemap)"
-        },
-        {
-          "task": "Slice D (phrase fallback): in src/codemap/route.ts, when a literal-classified query returns zero literal hits, tokenize the query with extractQueryIdentifiers from src/codemap/eval.ts (giving it its first production caller) and retry the symbol index, merging results with provenance marking the fallback; RED test in tests/codemap-route.test.ts for a multi-word query that names a real symbol",
-          "validation": "RED then GREEN on codemap-route tests; classify() behavior unchanged for existing categories (existing route tests untouched and passing); commit feat(codemap)"
-        },
-        {
-          "task": "Live proof against the original complaint: call the codemap MCP tool from this session (search for a tests/-defined symbol; source operation if the bridge passes it through) and confirm the answer that previously required grep now comes from the AST surface",
-          "validation": "MCP codemap search returns the tests/ symbol with file:line; transcript evidence captured in the final report; any bridge gap explicitly named"
-        },
-        {
-          "task": "Gate: run the five check stages separately (typecheck, build, vitest full, knip, smoke) honoring the 120s tool budget, then git diff --check and git status --short --branch; keep the unrelated in-flight WIP (agents/prewalk/config, 3 failing tests) uncommitted and untouched; no push unless asked",
-          "validation": "All five stages exit 0 except the known pre-existing WIP-driven failures which must be byte-identical to the pre-slice failure set (verified via clean-tree archive run if any doubt); status shows only the four slices' files as new commits"
-        }
-      ],
-      "readyAt": 1785981802802
-    },
-    "recordedAt": 1785982943869
   }
 ]
