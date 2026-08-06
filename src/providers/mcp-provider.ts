@@ -286,7 +286,7 @@ export class McpProvider implements FabricProvider {
       return this.#call(server, bare, argsForIntent(intent, query), signal);
     };
     const record: EvidenceRecord = (tool, success, elapsedMs) => {
-      const next = updateHealth(searchHealth, tool, success, Date.now());
+      const next = updateHealth(searchHealth, tool, success, Date.now(), 0.3, elapsedMs);
       searchHealth.clear();
       for (const [key, value] of next) searchHealth.set(key, value);
     };

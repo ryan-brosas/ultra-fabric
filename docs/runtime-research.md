@@ -46,8 +46,8 @@ no model-memory citations. No implementation in this task — the user picks the
 
 ## 4. Ranked slice proposals (user picks)
 
-- S1: failure-taxonomy + recovery-guidance module (PALADIN-inspired, pure) wired into prewalk checklist validation, so blocked/failed handoffs carry concrete recovery guidance instead of a bare retry. Acceptance: benchmark-prewalk recovery rate improves on injected-failure fixtures; no new deps.
-- S2: outcome/latency-aware scoring in src/evidence/route.ts (extend EWMA+LRU with latency and outcome-weighted scores). Acceptance: router unit tests show latency-weighted rotation; mcp.$search p50 latency recorded on the live host.
+- S1 (LANDED 2026-08-06): failure-taxonomy + recovery-guidance module src/evidence/failure.ts (PALADIN-adapted categories + recovery strings), wired into mcp.$search attempt provenance (execute.ts). Prewalk checklist consumption deferred: every src/prewalk file is dirty with the in-flight runner-refactor WIP; wire it there once that lands. Acceptance met at unit level (22 taxonomy tests; enriched provenance on the fallback path).
+- S2 (LANDED 2026-08-06): latency-aware scoring in src/evidence/route.ts — EvidenceHealth.latencyMs EWMA, score = weight x successRate x latencyFactor with latencyFactor = 2000/(2000+ewma) floored at 0.5 so reliability dominates and latency only separates comparably healthy tools. Live mcp.$search p50 lands after a session reload (host-injected MCP config).
 - S3 (follow-up): parallel / non-blocking compaction. Acceptance: compaction completes within a bounded budget without stalling the agent loop.
 
 ## 5. Rejected / deferred

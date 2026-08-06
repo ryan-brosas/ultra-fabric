@@ -60,6 +60,33 @@ describe("updateHealth", () => {
     const f = updateHealth(h, "x", false, 2000, 0.3);
     expect(f.get("x")!.successRate).toBeCloseTo(0.7);
   });
+
+  it("records a latency EWMA from elapsedMs", () => {
+    let h = updateHealth(new Map(), "x", true, 1000, 0.3, 1000);
+    expect(h.get("x")!.latencyMs).toBeCloseTo(1000);
+    h = updateHealth(h, "x", true, 2000, 0.3, 2000);
+    // EWMA: 1000 * 0.7 + 2000 * 0.3 = 1300
+    expect(h.get("x")!.latencyMs).toBeCloseTo(1300);
+  });
+});
+
+describe("latency-aware ranking", () => {
+  it("prefers the lower-latency tool at equal success rate", () => {
+    let health = new Map();
+    health = updateHealth(health, webA.name, true, 100, 0.3, 8000);
+    health = updateHealth(health, webB.name, true, 100, 0.3, 500);
+    const plan = buildPlan("web-search", [webA, webB], health);
+    expect(plan.attempts[0]!.tool).toBe(webB.name);
+  });
+
+  it("a repeatedly failing tool ranks below a slow but healthy one", () => {
+    let health = new Map();
+    health = updateHealth(health, webA.name, false, 100, 0.3, 300);
+    health = updateHealth(health, webA.name, false, 200, 0.3, 300);
+    health = updateHealth(health, webB.name, true, 100, 0.3, 9000);
+    const plan = buildPlan("web-search", [webA, webB], health);
+    expect(plan.attempts[0]!.tool).toBe(webB.name);
+  });
 });
 
 describe("executePlan", () => {

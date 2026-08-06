@@ -8,6 +8,7 @@ export type EvidenceIntent = Exclude<EvidenceCapability, "health" | "none">;
 
 export interface EvidenceHealth {
   successRate: number;
+  latencyMs: number; // EWMA of observed call latency; 0 = unmeasured
   lastUsedAt: number;
   usedCount: number;
 }
@@ -68,11 +69,20 @@ export const buildPlan = (
     .map((t) => ({ tool: t, eff: overrides.weights?.[t.name] ?? 1, lru: health.get(t.name)?.lastUsedAt ?? 0 }));
   const rest = capable
     .filter((t) => !pin.includes(t.name))
-    .map((t) => ({
-      tool: t,
-      eff: (overrides.weights?.[t.name] ?? 1) * (health.get(t.name)?.successRate ?? 1),
-      lru: health.get(t.name)?.lastUsedAt ?? 0,
-    }))
+    .map((t) => {
+      const h = health.get(t.name);
+      // Latency factor: REF/(REF + ewma), floored at 0.5 so latency can at
+      // most halve a score — reliability dominates ordering, latency only
+      // breaks ties between comparably healthy tools. Unmeasured tools score 1
+      // so new candidates are not penalized before their first observation.
+      const latency = h?.latencyMs ?? 0;
+      const latencyFactor = latency > 0 ? Math.max(0.5, LATENCY_REF_MS / (LATENCY_REF_MS + latency)) : 1;
+      return {
+        tool: t,
+        eff: (overrides.weights?.[t.name] ?? 1) * (h?.successRate ?? 1) * latencyFactor,
+        lru: h?.lastUsedAt ?? 0,
+      };
+    })
     .sort((a, b) => b.eff - a.eff || a.lru - b.lru);
   const ordered = [...pinned, ...rest].slice(0, maxAttempts);
   return {
@@ -81,16 +91,26 @@ export const buildPlan = (
   };
 };
 
+// Reference latency for the scoring factor: a tool at REF ms scores 0.5.
+const LATENCY_REF_MS = 2000;
+
 export const updateHealth = (
   health: ReadonlyMap<string, EvidenceHealth>,
   tool: string,
   success: boolean,
   now: number,
   alpha = 0.3,
+  elapsedMs?: number,
 ): Map<string, EvidenceHealth> => {
-  const prev = health.get(tool) ?? { successRate: 1, lastUsedAt: 0, usedCount: 0 };
+  const prev = health.get(tool) ?? { successRate: 1, latencyMs: 0, lastUsedAt: 0, usedCount: 0 };
+  const latencyMs = elapsedMs === undefined
+    ? prev.latencyMs
+    : prev.latencyMs > 0
+      ? prev.latencyMs * (1 - alpha) + elapsedMs * alpha
+      : elapsedMs;
   const next: EvidenceHealth = {
     successRate: prev.successRate * (1 - alpha) + (success ? 1 : 0) * alpha,
+    latencyMs,
     lastUsedAt: now,
     usedCount: prev.usedCount + 1,
   };
