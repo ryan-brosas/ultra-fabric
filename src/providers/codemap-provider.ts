@@ -63,6 +63,20 @@ const descriptors: FabricActionDescriptor[] = [
     },
     risk: "read",
   },
+  {
+    name: "source",
+    description: "Return the AST range text of a name:file symbol key, bounded by maxTokens",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entities: { type: "array", minItems: 1, maxItems: 1, items: { type: "string" } },
+        maxTokens: { type: "number", minimum: 100, maximum: 20000 },
+      },
+      required: ["entities"],
+      additionalProperties: false,
+    },
+    risk: "read",
+  },
 ];
 
 export class CodemapProvider implements FabricProvider {
@@ -90,6 +104,8 @@ export class CodemapProvider implements FabricProvider {
         return codemapOperation("cascade", { seed: String(args.seed ?? ""), maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
       case "expand":
         return codemapOperation("expand", { entities: Array.isArray(args.entities) ? args.entities.map(String) : [String(args.entities)], direction: args.direction as any, depth: args.depth as any, maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
+      case "source":
+        return codemapOperation("source", { entities: Array.isArray(args.entities) ? args.entities.map(String) : [String(args.entities)], maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
       default:
         throw new Error(`Unknown codemap action: ${name}`);
     }

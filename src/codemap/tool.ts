@@ -5,6 +5,7 @@ import { buildLiteralIndex } from "./literals.js";
 import { route } from "./route.js";
 import { expand, buildDisclosureGraph, minimalSkeleton, type Direction } from "./disclose.js";
 import { predictFileCascade, predictSymbolCascade } from "./cascade.js";
+import { readSymbolSource } from "./source.js";
 
 // The codemap as an agent tool: "incremental mapping through agent discovery on
 // the tools." Four operations, each bounded by an explicit token budget:
@@ -13,7 +14,7 @@ import { predictFileCascade, predictSymbolCascade } from "./cascade.js";
 //   expand    - disclose more of the graph around given entities
 // The graph is built once (mtime-cached) and reused across operations.
 
-export type CodemapOperation = "skeleton" | "search" | "expand" | "cascade";
+export type CodemapOperation = "skeleton" | "search" | "expand" | "cascade" | "source";
 
 export interface CodemapOpArgs {
   query?: string;
@@ -107,6 +108,19 @@ export const codemapOperation = (
     return { operation: "cascade", text: t.text, tokens: t.tokens, entities: preds.slice(0, 100).map((p) => p.file), truncated: t.truncated };
   }
 
+  // source
+  if (operation === "source") {
+    const key = (args.entities ?? [])[0] ?? "";
+    if (!key) throw new Error("source requires a name:file symbol key");
+    const s = readSymbolSource(graph.index, root, key);
+    if (!s.found) {
+      return { operation: "source", text: "symbol not found: " + key, tokens: 0, entities: [], truncated: false };
+    }
+    const header = key + " (" + s.line + "-" + s.endLine + ")\n";
+    const t = truncateToTokens(header + s.text, maxTokens);
+    return { operation: "source", text: t.text, tokens: t.tokens, entities: [key], truncated: t.truncated };
+  }
+
   // expand
   const entities = args.entities ?? [];
   const ex = expand(disclosure, entities, {
@@ -128,17 +142,17 @@ export const createCodemapTool = (deps: CodemapToolDeps = {}): ToolDefinition<an
     name: "codemap",
     label: "Code Map",
     description:
-      "AST-compressed code map for incremental navigation. Operations: skeleton (minimal map), search (route a query to symbols/literals), expand (disclose graph neighbors of entities), cascade (predict co-change cascade from a seed file or symbol). Each response is bounded by maxTokens.",
-    promptSnippet: "AST code map: skeleton, search, expand, cascade",
+      "AST-compressed code map for incremental navigation. Operations: skeleton (minimal map), search (route a query to symbols/literals), expand (disclose graph neighbors of entities), cascade (predict co-change cascade from a seed file or symbol), source (return the AST range text of a name:file symbol key). Each response is bounded by maxTokens.",
+    promptSnippet: "AST code map: skeleton, search, expand, cascade, source",
     promptGuidelines: [
       "Use codemap for: symbol definitions, type signatures, function/class structure, call and import relationships, and dependency neighborhoods.",
       "Reserve grep for: literal text inside string literals, comments, configuration files, and patterns that are not valid identifiers or code symbols.",
     ],
     parameters: Type.Object({
-      operation: Type.Union([Type.Literal("skeleton"), Type.Literal("search"), Type.Literal("expand"), Type.Literal("cascade")]),
+      operation: Type.Union([Type.Literal("skeleton"), Type.Literal("search"), Type.Literal("expand"), Type.Literal("cascade"), Type.Literal("source")]),
       seed: Type.Optional(Type.String({ description: "file path or name:file symbol key to seed the cascade (operation: cascade)" })),
       query: Type.Optional(Type.String({ description: "search query (operation: search)" })),
-      entities: Type.Optional(Type.Array(Type.String(), { description: "symbol keys name:file to expand from (operation: expand)" })),
+      entities: Type.Optional(Type.Array(Type.String(), { description: "symbol keys name:file to expand from (operation: expand) or read source for (operation: source)" })),
       direction: Type.Optional(Type.Union([Type.Literal("upstream"), Type.Literal("downstream"), Type.Literal("both")])),
       depth: Type.Optional(Type.Number({ minimum: 1, maximum: 2 })),
       maxTokens: Type.Optional(Type.Number({ minimum: 100, maximum: 20000 })),
