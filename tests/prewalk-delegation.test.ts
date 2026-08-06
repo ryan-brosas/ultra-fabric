@@ -19,15 +19,15 @@ const checklist = (): FabricPrewalkChecklist => ({
 });
 
 describe("prewalk delegateContext", () => {
-  it("is absent from config unless explicitly enabled", () => {
-    expect(DEFAULT_FABRIC_CONFIG.prewalk).not.toHaveProperty("delegateContext");
-    expect(normalizeFabricConfig({}).prewalk).not.toHaveProperty("delegateContext");
+  it("defaults on; only an explicit false disables it", () => {
+    expect(DEFAULT_FABRIC_CONFIG.prewalk.delegateContext).toBe(true);
+    expect(normalizeFabricConfig({}).prewalk.delegateContext).toBe(true);
+    expect(normalizeFabricConfig({ prewalk: { delegateContext: true } }).prewalk.delegateContext).toBe(
+      true,
+    );
     expect(normalizeFabricConfig({ prewalk: { delegateContext: false } }).prewalk).not.toHaveProperty(
       "delegateContext",
     );
-    expect(
-      normalizeFabricConfig({ prewalk: { delegateContext: true } }).prewalk.delegateContext,
-    ).toBe(true);
   });
 
   it("injects the plan-then-delegate discipline into the armed prompt only when enabled", () => {

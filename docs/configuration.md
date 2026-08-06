@@ -158,6 +158,8 @@ Prewalk trigger matching is host-owned. `prewalk.triggerEffects` defaults to `["
 
 `prewalk.model` is the optional Pi `provider/model` selected by `/fabric prewalk`. Prewalk runs one in-session path: the frontier model plans and submits a checklist, then the host hands the same Main session to the executor for implementation and verification, then restores the frontier model on settle.
 
+`prewalk.delegateContext` defaults to `true`: the armed planning instruction and the executor continuation carry an explicit plan-then-delegate discipline so recon lands on `scout`/`explorer` roles or `consult.run` workers instead of Main's context. Set it to `false` for the zero-agents planning posture. `prewalk.autoScout` defaults to `true`: a cheap scout pass injects a bounded 2k-character context brief before planning, with spend attributed in the budget ledger under `prewalk:scout`; without a host scout runner the pass is skipped and never blocks arming. Set it to `false` to skip the scout. The learning and retirement levers — `prewalk.reuseChecklists`, `prewalk.failureMemory`, and `prewalk.handoffRetirement` — remain opt-in pending the Slice 8 benchmark gate. See [agents](agents.md#automatic-prewalk) for the full lever semantics.
+
 The arming instruction asks Main to call `prewalk.checklist({ items })` inside `fabric_exec` with 5-9 ordered items. Every item needs a concrete task and a specific validation. The host rejects matching mutations until the checklist is accepted, so the executor inherits a validated plan. A gated verification revision keeps its scoped feedback instead, because that revision must stay narrow.
 
 ```json

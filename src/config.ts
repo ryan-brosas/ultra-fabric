@@ -72,7 +72,8 @@ interface FabricPrewalkConfig {
   arm: "off" | "session" | "task";
   // Prefer offloading context gathering to support roles/consult workers. When
   // on, the armed and continuation prompts carry an explicit plan-then-delegate
-  // discipline so recon spends worker context, not Main's. Default off.
+  // discipline so recon spends worker context, not Main's. Default on; set
+  // false to restore the zero-agents planning posture.
   delegateContext?: boolean;
   // Retire Main's planning-phase read/grep/find/ls results once the executor
   // continuation is live; the accepted checklist carries the plan so the
@@ -86,8 +87,9 @@ interface FabricPrewalkConfig {
   // measured by the Slice 8 A/B benchmark).
   failureMemory?: boolean;
   // Run a cheap small-model scout before the frontier model plans and inject
-  // the compressed context brief into the armed prompt. Opt-in; requires the
-  // host to supply a scout runner. Default off.
+  // the compressed context brief into the armed prompt. Requires the host to
+  // supply a scout runner; without one the scout is skipped and never blocks
+  // arming. Default on; set false to skip the scout pass.
   autoScout?: boolean;
   // Reasoning effort for the in-session executor. Unset inherits agents.thinking.
   thinking?: FabricThinking;
@@ -319,6 +321,8 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     triggerEffects: ["workspace"],
     triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
     arm: "task",
+    delegateContext: true,
+    autoScout: true,
   },
   agents: {
     enabled: true,
@@ -931,7 +935,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         const raw = typeof prewalk.researchAgent === "string" ? prewalk.researchAgent.trim() : "";
         return raw && /^[a-z][a-z0-9-]{0,31}$/.test(raw) ? { researchAgent: raw } : {};
       })(),
-      ...(booleanValue(prewalk.delegateContext, false)
+      ...(booleanValue(prewalk.delegateContext, true)
         ? { delegateContext: true }
         : {}),
       ...(booleanValue(prewalk.handoffRetirement, false)
@@ -943,7 +947,7 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       ...(booleanValue(prewalk.failureMemory, false)
         ? { failureMemory: true }
         : {}),
-      ...(booleanValue(prewalk.autoScout, false)
+      ...(booleanValue(prewalk.autoScout, true)
         ? { autoScout: true }
         : {}),
     },

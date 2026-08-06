@@ -8,6 +8,7 @@ purpose: Confirmed direction, proposed work, dependencies, and acceptance checks
 
 - Current outcome: build representative operational evidence without weakening the host-owned control boundary.
 - Current milestone: Slice 8 benchmark and soak gates.
+- Agent-utilization posture (2026-08-08): `prewalk.autoScout` and `prewalk.delegateContext` default on so recon spends worker context off Main; the learning and retirement levers (`reuseChecklists`, `failureMemory`, `handoffRetirement`) stay opt-in until the Slice 8 gates.
 - Main constraint: Slices 0 through 7 have tested backend contracts, but automatic policy promotion remains disabled until representative real-task evidence exists. Evidence: `docs/ultra-fabric.md`.
 
 ## Effort scale

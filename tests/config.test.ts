@@ -147,18 +147,24 @@ describe("Fabric configuration", () => {
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       arm: "task",
+      delegateContext: true,
+      autoScout: true,
     });
     expect(normalizeFabricConfig({ prewalk: { model: "   " } }).prewalk).toEqual({
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       arm: "task",
+      delegateContext: true,
+      autoScout: true,
     });
     expect(normalizeFabricConfig({ prewalk: { arm: "off" } }).prewalk).toEqual({
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       arm: "off",
+      delegateContext: true,
+      autoScout: true,
     });
         // Arming defaults to per-task (the legacy always-rearm default) and only
     // stays off when the user explicitly opts out.
@@ -181,6 +187,17 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ prewalk: { autoScout: true } }).prewalk).toMatchObject({
       autoScout: true,
     });
+    // Agent-utilization levers default on (opencode-style task-first delegation);
+    // an explicit false still disables each one. Learning and retirement levers
+    // stay opt-in until the Slice 8 benchmark gate.
+    expect(DEFAULT_FABRIC_CONFIG.prewalk).toMatchObject({ autoScout: true, delegateContext: true });
+    expect(normalizeFabricConfig({}).prewalk).toMatchObject({ autoScout: true, delegateContext: true });
+    expect(normalizeFabricConfig({ prewalk: { autoScout: false } }).prewalk).not.toHaveProperty(
+      "autoScout",
+    );
+    expect(normalizeFabricConfig({ prewalk: { delegateContext: false } }).prewalk).not.toHaveProperty(
+      "delegateContext",
+    );
     // A configured run root must be absolute so agent evidence lands somewhere predictable.
     expect(normalizeFabricConfig({ agents: { runRoot: "/tmp/fabric-runs" } }).agents.runRoot).toBe(
       "/tmp/fabric-runs",
@@ -664,6 +681,8 @@ describe("Fabric configuration", () => {
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       arm: "task",
+      delegateContext: true,
+      autoScout: true,
     });
   });
 

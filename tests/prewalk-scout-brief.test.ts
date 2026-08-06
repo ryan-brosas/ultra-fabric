@@ -94,6 +94,7 @@ describe("prewalk scout brief", () => {
   });
 
   it("skips the scout entirely when autoScout is off", async () => {
+    // autoScout defaults on, so the opt-out must be explicit.
     const controller = new PrewalkController();
     const ctx = context();
     const ext = extension();
@@ -102,7 +103,7 @@ describe("prewalk scout brief", () => {
     await armPrewalk(
       ext.value,
       controller,
-      configFor({}).prewalk,
+      configFor({ autoScout: false }).prewalk,
       ctx.value,
       "anthropic/executor",
       "any task",
