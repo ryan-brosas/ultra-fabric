@@ -2,7 +2,7 @@
 
 # ⚙️ Ultra Fabric
 
-**A [Pi](https://github.com/earendil-works/pi-coding-agent) extension that turns many tool calls into one type-checked program.**
+**A [Pi](https://github.com/earendil-works/pi-coding-agent) extension for context engineering: structural code maps, same-session prewalk handoff, host-owned compaction, and bounded agents.**
 
 <p>
   <img src="https://raw.githubusercontent.com/monotykamary/pi-fabric/main/media/cover.jpg" alt="Pi Fabric composing tools and agents in the Pi TUI" width="1100">
@@ -16,24 +16,22 @@
 
 ---
 
-> **Status:** experimental fork of [monotykamary/pi-fabric](https://github.com/monotykamary/pi-fabric), based on upstream 0.31.1. See the [architecture](docs/ultra-fabric.md) and the [fork-boundary ADR](docs/adr/0001-fork-boundary.md).
+> **Status:** experimental fork of [monotykamary/pi-fabric](https://github.com/monotykamary/pi-fabric), based on upstream 0.31.1. Current milestone is the Slice 8 benchmark and soak gates: the all-113 DeepSWE matrix stopped at 28/113 cells on Docker daemon loss, so the gate remains unmet and automatic policy promotion stays off. See the [architecture](docs/ultra-fabric.md), the [fork-boundary ADR](docs/adr/0001-fork-boundary.md), and the [roadmap](.pi/roadmap.md).
 
-You talk to Pi the way you always do. Fabric adds one tool, `fabric_exec`, that the model uses to combine reads, edits, MCP servers, agents, and coordination into a single TypeScript program. The program is type-checked, runs in a sandbox, and only its result comes back to the conversation. Branching, loops, and fan-out become code instead of a stack of tool calls you watch one by one.
+## What Ultra Fabric is
 
-## Why?
+Ultra Fabric is a Pi extension for context engineering. It reads code structurally instead of scanning text, hands long tasks across models in one live session, keeps the session's context host-owned and compact, and delegates only what an explicit, bounded agent budget allows. Main keeps task intent and final authority; zero agents remains the default.
 
-Without Fabric, the model makes one tool call per step and waits. With `fabric_exec`, it writes one program that reads in parallel, branches on the results, fans out to agents, and loops. Type-checking catches shape errors before the program runs.
+Four focus areas:
 
-| | What it gives you |
-| :-: | --- |
-| ⚡ | One tool schema; branching, loops, and fan-out as checked TypeScript |
-| 🧰 | Pi tools, MCP servers, extension tools, and Fabric providers through one runtime |
-| 🧠 | Context offload through read-only workers that return validated evidence |
-| 🕸️ | Phased workflows plus durable shared topics and state |
-| 🛡️ | Approvals, isolation, language-aware quality gates, timeouts, and cost budgets |
-| 🎚️ | A live activity panel and dashboard inside the Pi TUI |
+1. **Codemap** — the codebase is parsed once into an AST graph, compressed 11.1x from raw source, and disclosed to the model in stages under an explicit token budget. `skeleton`, `search`, `focus`, `dwell`, `expand`, and `cascade` answer which files and symbols a change touches, not which files contain a string.
+2. **Prewalk** — a frontier model plans and takes the first concrete implementation step, then hands the **same live session** to a faster executor. The executor inherits the conversation and the real tool set, and Main is restored when it settles. Three clean-room runs measured 67% of output tokens from the executor at roughly 2.2x generation rate, for an estimated 46.5% cost saving against the all-planner counterfactual.
+3. **Compaction** — the session owns its context. `compact.request` records an advisory intent the host commits at the next `agent_settled` boundary, with bounded preserve items and instructions; a model can never compact the running context directly.
+4. **Agent utilization** — agents are profiles on one runtime, used explicitly and bounded: `prewalk.delegateContext` keeps recon on `scout`/`explorer` or `consult.run` workers, `prewalk.autoScout` injects a 2k-character brief before planning, the supervisor is a four-turn-bound runtime behavior, and scout spend lands in the budget ledger under `prewalk:scout`.
 
 ## How it works
+
+You talk to Pi the way you always do. Fabric adds one tool, `fabric_exec`, that the model uses to combine reads, edits, MCP servers, agents, and coordination into a single type-checked TypeScript program. The program runs in a sandbox and only its result returns to the conversation; branching, loops, and fan-out become code instead of a stack of tool calls you watch one by one. Type-checking catches shape errors before the program runs.
 
 1. You ask in plain language.
 2. Pi writes one program that calls the tools, agents, and MCP servers it needs. The program is type-checked before it runs.
@@ -79,44 +77,19 @@ The whole outline is roughly 56K tokens. That fits a modern context window but s
 | --------- | --------------- |
 | `skeleton` | The minimal compressed map to start from |
 | `search` | A query routed to the symbol and literal index |
+| `focus` | A query heat-diffused through the graph to center the map on a task |
+| `dwell` | One active field expanded, returning only the delta |
 | `expand` | The dependency neighborhood around named entities, upstream or downstream |
 | `cascade` | Files or symbols that have historically changed together with a seed |
+| `source` | The AST range text of a `name:file` symbol key |
 
 `cascade` blends git history with the dependency graph, so it answers which files a change will drag along rather than which files contain a string. That is the part text search cannot do.
 
-The graph is built once per root and cached on file mtime, so repeated calls within a turn stay cheap. Language coverage comes from ast-grep, so TypeScript, JavaScript, Go, Python, Rust, and Java all index through one path. `@ast-grep/cli` ships as a declared dependency, so there is nothing to install separately.
-
-## DeepSWE smoke comparison
-
-A matched [Pier benchmark](bench/README.md) recorded on 2026-08-03 compared the published packages on the `scc-bounded-memory-spilling` DeepSWE task. Both arms used Pi 0.83.0, `openai-codex/gpt-5.6-sol` at low thinking, the same Docker task image and verifier, and three serial attempts.
-
-| Package | Full solves | Mean partial score | Median agent wall time | Total model cost |
-| ------- | ----------: | -----------------: | ---------------------: | ---------------: |
-| `pi-fabric@0.25.6` | 0/3 | 0.9748 | 320.9s | $2.79 |
-| `ultra-fabric@0.31.1-ultra.1` | 2/3 | 0.9947 | 398.1s | $2.90 |
-
-The binary verifier awards a full solve only when all 31 task-specific fail-to-pass tests and all 286 pass-to-pass regression tests pass. The reference arm preserved all regression tests but missed task-specific edge cases in every attempt. Ultra passed all 31 task-specific tests in every attempt and produced two fully correct patches. All six trials completed without infrastructure errors.
-
-This is a one-task smoke comparison with three stochastic attempts across different package versions, so it neither proves broad superiority nor isolates Ultra-native behavior from upstream evolution. See the [benchmark harness and reproduction notes](bench/README.md).
-
-## Live Prewalk DeepSWE run
-
-A separate one-task run recorded on 2026-08-06 exercised the live same-session Prewalk flow directly (not the Pier harness): a fresh `boyter/scc` checkout at base commit `bc2796e01998ebc2d40818323f93113aed2542ea`, checklist-first planning, and the executor model `omniroute/opencode-go/deepseek-v4-flash`. The official DeepSWE verifier for `scc-bounded-memory-spilling` graded the resulting patch on a pristine base clone.
-
-| Metric | Value |
-| --- | ---: |
-| Reward | 1 |
-| Pass-to-pass | 286/286 |
-| Fail-to-pass | 31/31 |
-| Patch bytes | 27,914 |
-
-Evidence: `bench/results/live-prewalk/scc-bounded-memory-spilling.json` plus the exact graded patch as `scc-bounded-memory-spilling-model.patch.gz` (uncompressed md5 `539106689e27cbb76df0451f1a3e1036`, compressed sha256 `4892f6bdef150fdffafd641098ca6bd7a5c44ef3f5759589bdf83283fd21eca2`) next to it.
-
-This result is **not comparable to the smoke comparison above** and is deliberately not merged with it. It is one task with no live baseline arm, so no cost, token, or wall-time comparison is claimed. Two process limitations are disclosed: the one-shot `explorer` scout attempt hit the run token limit and returned no usable output, and the task bundle's reference `solution.patch` was inspected during the run after independent task and path analysis, so this is not a clean-room execution. Broader subsets (canary-8 and the 36-task set) remain pending until each named task is independently run and graded; no extrapolation from 1/1 is implied.
+The graph is built once per root and cached on file mtime, so repeated calls within a turn stay cheap. Language coverage comes from ast-grep, so TypeScript, JavaScript, Go, Python, Rust, and Java all index through one path. `@ast-grep/cli` ships as a declared dependency, so there is nothing to install separately. See [code map research](docs/code-map-research.md) for the measured baselines and the AST-rank fusion plan.
 
 ## Prewalk handoff
 
-Prewalk lets a frontier model plan and take the first concrete implementation step, then hands the **same session** to a faster executor. The switch is in-session: the executor inherits the live conversation and the real tool set, so no plan has to be re-serialised into a fresh context. One path, no modes. Set `prewalk.delegateContext` to keep recon and research on `scout`/`explorer` roles or `consult.run` workers, so Main's context stays lean while the executor implements; `prewalk.handoffRetirement` then retires Main's planning-phase tool results from the executor transcript, and `prewalk.reuseChecklists` seeds repeat tasks with their prior plan. `prewalk.autoScout` runs the cheap scout role before planning and injects a bounded 2k-character context brief, and `prewalk.failureMemory` seeds the next similar task's plan with the failure patterns the gate previously rejected, with scout spend attributed in the budget ledger under `prewalk:scout`. See [docs/agents.md](docs/agents.md#automatic-prewalk).
+Prewalk lets a frontier model plan and take the first concrete implementation step, then hands the **same session** to a faster executor. The switch is in-session: the executor inherits the live conversation and the real tool set, so no plan has to be re-serialised into a fresh context. One path, no modes. The context levers for the split — `delegateContext`, `handoffRetirement`, `autoScout`, `reuseChecklists`, `failureMemory` — are covered under [Compaction and context](#compaction-and-context). See [docs/agents.md](docs/agents.md#automatic-prewalk) for the full protocol.
 
 Three isolated clean-room runs on 2026-08-04, each a fresh `pi -p` session in an empty workspace with `--session-dir`, planner `claude-bridge/claude-opus-5`, executor `makora/zai-org/GLM-5.2-NVFP4`, and the standalone `pi-prewalk` extension uninstalled so attribution is unambiguous.
 
@@ -169,6 +142,18 @@ The technique originates with [Stencil Prewalk](https://stencil.so/blog/prewalk)
 
 **These are not the same measurements.** Stencil ran a real task suite with a different model pair and reported end-to-end completion time and pass rate. Ours is a three-task shape check on trivial functions measuring generation rate, with cost derived from list prices rather than invoices, and no pass rate at all. The agreement in direction is worth noting; the numbers are not comparable, and Stencil figures are **not** inherited here. Paired task-level evidence remains the job of the 20-task contract corpus in [certification and benchmarks](docs/certification.md).
 
+## Compaction and context
+
+The session owns its context. A `compact` provider is always available (no config guard) with three actions:
+
+- `compact.request({ reason?, instructions?, preserve?, requestedBy? })` — records an advisory intent to compact. The host commits it at the next `agent_settled` boundary; the model cannot compact the running context directly.
+- `compact.status()` — reports the compaction controller state.
+- `compact.cancel()` — cancels a pending request.
+
+Requests are bounded: instructions up to 8 KiB, and up to 16 preserve items of at most 2 KiB each (`src/compaction/instructions.ts`). See [docs/architecture.md](docs/architecture.md#model-context-economy) for the output-side economy (capped returns, artifact staging, omission markers).
+
+The same principle shapes the Prewalk context split. `prewalk.delegateContext` keeps recon and research on `scout`/`explorer` roles or `consult.run` workers so Main's context stays lean while the executor implements; `prewalk.handoffRetirement` then retires Main's planning-phase `read`/`grep`/`find`/`ls` results from the executor transcript once the continuation is live and accepted — errors and evidence-bearing results always survive — mirroring the SWE-Edit viewer/editor decomposition that cut inference cost 17.9% on SWE-Bench Verified. `prewalk.autoScout` runs the cheap scout role before planning and injects a bounded 2k-character context brief, and `prewalk.reuseChecklists` seeds repeat tasks with their prior plan (newest 16, max 4 seed items). `prewalk.failureMemory` seeds the next similar task's plan with the failure patterns the gate previously rejected, with scout spend attributed in the budget ledger under `prewalk:scout`. See [docs/agents.md](docs/agents.md#automatic-prewalk).
+
 ## Agents
 
 An agent is either one-shot or persistent. Roles like scout, worker, advisor, and supervisor are profiles on that one runtime, not separate systems. List them with `(await agents.roles()).roles`, pick one with `role`, and override its goal, completion contract, or turn budget per call. Add your own in `~/.pi/agent/agents/*.md` or trusted project profiles in `.pi/agents/*.md`.
@@ -176,6 +161,38 @@ An agent is either one-shot or persistent. Roles like scout, worker, advisor, an
 The built-in `supervisor` is runtime behavior, not a skill: it subscribes to settled and error events, steers only when useful, coalesces repeats, and drops stale directives, with a four-turn activation bound. `/skill:fabric-supervisor` only creates or reuses that role for a concrete goal.
 
 Installed Pi provider extensions and `~/.pi/agent/models.json` are auto-detected for Pi-backed agents, settings, and `tools.models()`. Known Fabric providers take direct calls such as `mcp.fal_ai.get_model_schema(...)`, `memory.recall(...)`, `state.get()`, `schema.status()`, and `compact.status()`. Use `tools.call({ ref, args })` for refs computed at runtime.
+
+## DeepSWE smoke comparison
+
+A matched [Pier benchmark](bench/README.md) recorded on 2026-08-03 compared the published packages on the `scc-bounded-memory-spilling` DeepSWE task. Both arms used Pi 0.83.0, `openai-codex/gpt-5.6-sol` at low thinking, the same Docker task image and verifier, and three serial attempts.
+
+| Package | Full solves | Mean partial score | Median agent wall time | Total model cost |
+| ------- | ----------: | -----------------: | ---------------------: | ---------------: |
+| `pi-fabric@0.25.6` | 0/3 | 0.9748 | 320.9s | $2.79 |
+| `ultra-fabric@0.31.1-ultra.1` | 2/3 | 0.9947 | 398.1s | $2.90 |
+
+The binary verifier awards a full solve only when all 31 task-specific fail-to-pass tests and all 286 pass-to-pass regression tests pass. The reference arm preserved all regression tests but missed task-specific edge cases in every attempt. Ultra passed all 31 task-specific tests in every attempt and produced two fully correct patches. All six trials completed without infrastructure errors.
+
+This is a one-task smoke comparison with three stochastic attempts across different package versions, so it neither proves broad superiority nor isolates Ultra-native behavior from upstream evolution. See the [benchmark harness and reproduction notes](bench/README.md).
+
+## Live Prewalk DeepSWE run
+
+A separate one-task run recorded on 2026-08-06 exercised the live same-session Prewalk flow directly (not the Pier harness): a fresh `boyter/scc` checkout at base commit `bc2796e01998ebc2d40818323f93113aed2542ea`, checklist-first planning, and the executor model `omniroute/opencode-go/deepseek-v4-flash`. The official DeepSWE verifier for `scc-bounded-memory-spilling` graded the resulting patch on a pristine base clone.
+
+| Metric | Value |
+| --- | ---: |
+| Reward | 1 |
+| Pass-to-pass | 286/286 |
+| Fail-to-pass | 31/31 |
+| Patch bytes | 27,914 |
+
+Evidence: `bench/results/live-prewalk/scc-bounded-memory-spilling.json` plus the exact graded patch as `scc-bounded-memory-spilling-model.patch.gz` (uncompressed md5 `539106689e27cbb76df0451f1a3e1036`, compressed sha256 `4892f6bdef150fdffafd641098ca6bd7a5c44ef3f5759589bdf83283fd21eca2`) next to it.
+
+This result is **not comparable to the smoke comparison above** and is deliberately not merged with it. It is one task with no live baseline arm, so no cost, token, or wall-time comparison is claimed. Two process limitations are disclosed: the one-shot `explorer` scout attempt hit the run token limit and returned no usable output, and the task bundle's reference `solution.patch` was inspected during the run after independent task and path analysis, so this is not a clean-room execution. Broader subsets (canary-8 and the 36-task set) remain pending until each named task is independently run and graded; no extrapolation from 1/1 is implied.
+
+### Status of the broader runs
+
+The all-113 live matrix under `bench/results/deepswe-all113` (job `20260806-v3b`) was stopped mid-run when the Docker daemon became unavailable. Evidence `bench/results/deepswe-all113/monitor-v3b/status.json` records 28 of 113 cells completed, 2 exceptions, and 85 pending. The stop is an infrastructure failure, not a task verdict, and no result beyond the recorded cells is claimed. The canary-8 and full matrix subsets plus the 20-task Prewalk contract corpus remain pending until each named task is independently run and graded. Slice 8 stays active and automatic policy promotion stays disabled until representative evidence clears the documented gate.
 
 ## Install
 
