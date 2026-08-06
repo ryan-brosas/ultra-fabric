@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.31.1-ultra.7 - 2026-08-06
+
+- **Auto-scout brief.** Opt-in `prewalk.autoScout` runs the cheap scout/explorer
+  role (pinned via `roleModels`) before the frontier planning pass, bounds the
+  compressed context brief to 2k characters, injects it into the armed prompt,
+  and appends scout token spend to the budget ledger under `prewalk:scout`.
+- **Release gate repair.** Restore user-opt-in `disable-model-invocation` on the
+  specialized skills, drop the retired agent `runner` field from skill programs
+  and tests, remove machine-local path pointers from skill docs, and clear the
+  knip dead-export backlog so `pnpm run check` exits clean.
+
 ## 0.31.1-ultra.6 - 2026-08-06
 
 - **AST-first agent guidance.** Route symbol, declaration, call, and dependency queries to the
