@@ -102,12 +102,51 @@ export const autoArmPrewalk = async (
   controller: PrewalkController,
   config: FabricConfig,
   context: ExtensionContext,
+  deps: ArmPrewalkDeps = {},
 ): Promise<boolean> => {
   const prewalk = config.prewalk;
   if (prewalk.arm === "off") return false;
   const model = prewalk.model?.trim();
   if (!model || !model.includes("/")) return false;
   if (controller.isArmed(context.sessionManager.getSessionId())) return false;
-  await armPrewalk(extension, controller, prewalk, context, model, undefined, config.agents.runRoot);
+  await armPrewalk(
+    extension,
+    controller,
+    prewalk,
+    context,
+    model,
+    undefined,
+    config.agents.runRoot,
+    deps,
+  );
   return true;
+};
+
+// Fire the cheap auto-scout when a task is observed on an already-armed
+// session. Session and task-less command arms carry no task, so the scout
+// cannot fire inside armPrewalk for them; the input handler calls this with
+// the observed task text so the scout still runs before the frontier model
+// plans. The caller injects the returned brief on the prewalk armed channel
+// (PREWALK_ARMED_MESSAGE_TYPE) so the existing lifecycle filter retires it
+// once planning completes instead of lingering as context noise. Spend lands
+// in the budget ledger under prewalk:scout and a status/notify makes the
+// spawn visible.
+export const scoutOnTaskObserved = async (
+  controller: PrewalkController,
+  prewalk: FabricConfig["prewalk"],
+  context: ExtensionContext,
+  task: string,
+  runRoot?: string,
+  deps: ArmPrewalkDeps = {},
+): Promise<string> => {
+  if (prewalk.autoScout !== true || !deps.scoutRun) return "";
+  if (!controller.isArmed(context.sessionManager.getSessionId())) return "";
+  const trimmed = task.trim();
+  if (!trimmed) return "";
+  const brief = await runScoutBrief(deps.scoutRun, trimmed, runRoot);
+  if (!brief) return "";
+  // Make the spawn visible: the cheap model ran on its own context budget.
+  context.ui.notify("auto-scout brief gathered (" + brief.length + " chars, prewalk:scout)", "info");
+  context.ui.setStatus("fabric-prewalk", "armed · scout briefed");
+  return brief;
 };

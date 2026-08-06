@@ -4,7 +4,9 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PrewalkController } from "../src/prewalk/controller.js";
-import { armPrewalk, autoArmPrewalk } from "../src/prewalk/arm.js";
+import { armPrewalk, autoArmPrewalk, scoutOnTaskObserved } from "../src/prewalk/arm.js";
+import { SCOUT_BUDGET_CATEGORY } from "../src/prewalk/scout-brief.js";
+import { readBudgetLedgerDetailed } from "../src/agents/budget-ledger.js";
 import { CHECKLIST_MEMORY_FILE, recordChecklist } from "../src/prewalk/checklist-memory.js";
 import { normalizeFabricConfig } from "../src/config.js";
 
@@ -28,6 +30,75 @@ const configFor = (overrides: Record<string, unknown>) =>
   normalizeFabricConfig({
     prewalk: { arm: "session", model: "anthropic/executor", ...overrides },
   });
+
+describe("scout on task observed", () => {
+  it("runs the scout and injects the brief when an armed session observes a task with autoScout on", async () => {
+    const controller = new PrewalkController();
+    const ctx = context();
+    const ext = extension();
+    const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fabric-scout-observe-"));
+    await autoArmPrewalk(ext.value, controller, configFor({}), ctx.value);
+    expect(controller.isArmed("session-1")).toBe(true);
+
+    const scoutRun = vi.fn(async () => ({
+      result: "src/config.ts — normalizes fabric config",
+      model: "deepseek-v4-flash",
+      usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0 },
+    }));
+    const brief = await scoutOnTaskObserved(
+      controller,
+      configFor({}).prewalk,
+      ctx.value,
+      "refactor the config normalizer",
+      runRoot,
+      { scoutRun },
+    );
+    expect(scoutRun).toHaveBeenCalledWith(expect.objectContaining({ role: "scout" }));
+    expect(brief).toContain("src/config.ts");
+    // Spend is attributed under the scout budget category so Slice 8 can compare it.
+    const ledger = readBudgetLedgerDetailed(path.join(runRoot, "budget-ledger.jsonl"));
+    expect(ledger.entries.some((e) => e.persistentAgentName === SCOUT_BUDGET_CATEGORY)).toBe(true);
+    // The spawn is visible: a status or notify names the scout brief.
+    const statuses = ctx.setStatus.mock.calls.map((c) => c[1]);
+    const notifies = (ctx.value.ui.notify as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    expect(
+      statuses.some((s) => /scout/i.test(String(s))) || notifies.some((n) => /scout/i.test(String(n))),
+    ).toBe(true);
+  });
+
+  it("skips the scout when autoScout is off", async () => {
+    const controller = new PrewalkController();
+    const ctx = context();
+    const ext = extension();
+    await autoArmPrewalk(ext.value, controller, configFor({ autoScout: false }), ctx.value);
+    const scoutRun = vi.fn();
+    const brief = await scoutOnTaskObserved(
+      controller,
+      configFor({ autoScout: false }).prewalk,
+      ctx.value,
+      "any task",
+      undefined,
+      { scoutRun },
+    );
+    expect(scoutRun).not.toHaveBeenCalled();
+    expect(brief).toBe("");
+  });
+
+  it("skips the scout when the session is not armed", async () => {
+    const controller = new PrewalkController();
+    const scoutRun = vi.fn();
+    const brief = await scoutOnTaskObserved(
+      controller,
+      configFor({}).prewalk,
+      context().value,
+      "any task",
+      undefined,
+      { scoutRun },
+    );
+    expect(scoutRun).not.toHaveBeenCalled();
+    expect(brief).toBe("");
+  });
+});
 
 describe("autoArmPrewalk", () => {
   it("arms from configuration and queues the advisory prompt", async () => {

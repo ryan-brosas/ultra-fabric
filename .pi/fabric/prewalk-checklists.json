@@ -1,5 +1,46 @@
 [
   {
+    "task": "let's buff it up add a cgc mode on to get inspo data from directly welll code..... and also algorithm to get sufficient data like explore github repo with efficient test and such",
+    "checklist": {
+      "items": [
+        {
+          "task": "Recon the CGC CLI contract on this machine before writing the runner: capture exact `cgc query --help` flags, whether `query` supports `--json`, the `context` list/switch commands, and a real `cgc query \"<cheap cypher>\" --json` output shape against the existing `work` context. Record the concrete cypher templates for symbol lookup, callers/callees, and test-file discovery that CGC's schema supports (node labels like Function/Class/File, relationships like CALLS/IMPORTS/DEFINES).",
+          "validation": "A short recon note names the exact flags, confirms --json on query, and lists 3-4 working cypher query templates proven against the live falkordb-remote `work` graph, with one sample JSON record shape pasted."
+        },
+        {
+          "task": "Add a pure, testable CGC runner module `src/codemap/cgc.ts`: an injectable `CgcRunner = (args: string[]) => string` seam defaulting to `execFileSync(\"cgc\", args, { encoding: utf8, timeout })`; helpers `cgcQuery(cypher, {context})`, `cgcReport(path)`, `cgcListRepos()`; a discriminated-union result `CgcResult = { ok: true, text } | { ok: false, kind: 'unavailable' | 'timeout' | 'error', message }` so a missing cgc binary, a dead DB, or a timeout never throws into the tool. No mutation of CGC state (read-only: query/report/list only).",
+          "validation": "Unit tests with an injected fake runner prove: missing binary -> unavailable; nonzero exit -> error with stderr tail; timeout -> timeout; valid output -> ok text. No real cgc call in tests."
+        },
+        {
+          "task": "Add config `codemap.cgc` (default off, opt-in) with `context` (string, default the CGC `work` context) and `timeoutMs` (default 30s) to src/config.ts DEFAULT_FABRIC_CONFIG + normalizeFabricConfig + the FabricCodemapConfig type, mirroring how prewalk flags were threaded. Add config tests: default off, explicit on, context/timeoutMs round-trip.",
+          "validation": "tests/config.test.ts asserts default-off, explicit enable, and context/timeoutMs normalization; pnpm vitest run tests/config.test.ts green."
+        },
+        {
+          "task": "Extend `createCodemapTool`/`codemapOperation` with `mode?: \"ast\"|\"cgc\"` (default ast) plus optional `context`. When mode===\"cgc\", the search/skeleton/expand/source operations dispatch to the CGC runner (search->cypher symbol lookup, skeleton->report/stats summary, expand->callers/callees cypher, source->cypher + file range) scoped to the resolved CGC context, each bounded by maxTokens via the existing truncateToTokens. ast mode is byte-for-byte unchanged. Wire the runner through CodemapToolDeps so tests inject a fake.",
+          "validation": "tests for the tool prove: ast mode untouched; mode cgc with a fake runner returns bounded CGC text for search/skeleton/expand/source; mode cgc with an unavailable runner returns a clean unavailable note, not a throw; truncation still applies."
+        },
+        {
+          "task": "Add the `explore` operation (the sufficiency algorithm): bounded pipeline = LOC/skeleton -> CGC route search for the task query -> hotspot/report god-nodes -> test-as-spec discovery (CGC query for *_test/Test files that CALL/IMPORT the matched seam, falling back to our cochange cascade on the target repo's git log) -> return a compact evidence pack of file:line locators + test pointers, capped by maxTokens. explore auto-selects CGC when mode===\"cgc\", else uses the ast graph for the same stages.",
+          "validation": "tests with a fake runner + fake ast graph prove explore returns a staged evidence pack, names the seam tests, stays under maxTokens, and degrades cleanly when CGC is unavailable (falls back to ast stages)."
+        },
+        {
+          "task": "Register and document: confirm the tool schema gains mode/context/explore in the Type.Union and the description/promptGuidelines mention the cgc mode and explore recipe. Update docs (docs/agents.md or a codemap doc) with the CGC mode contract: separate falkordb-remote `work` context, read-only, opt-in, and the explicit note that inspo reference repos are queried through CGC and are never merged into the project graph (AGENTS.md namespace invariant). README gets one line under Code map.",
+          "validation": "Grep shows mode/cgc/explore in the tool description and promptGuidelines; docs state the separate-context + read-only + never-merge invariant; README line present."
+        },
+        {
+          "task": "Run the full verification gate and sweep every codemap call site (tool.ts consumers, any test importing codemapOperation/createCodemapTool, docs/code-map-research.md) for the changed surface.",
+          "validation": "pnpm run check passes (typecheck, build, all tests, knip, package smoke); git diff --check clean; focused codemap + config suites green."
+        },
+        {
+          "task": "Commit in logical conventional commits (feat(codemap): cgc mode + explore recipe; docs).",
+          "validation": "git log shows the commit(s); git status clean; each commit contains only its own files."
+        }
+      ],
+      "readyAt": 1786048474284
+    },
+    "recordedAt": 1786050168740
+  },
+  {
     "task": "can we make sure supervisor always active please",
     "checklist": {
       "items": [
@@ -510,38 +551,5 @@
       "readyAt": 1785995307022
     },
     "recordedAt": 1785996059997
-  },
-  {
-    "task": "can we do a deep research look for arxiv what we can make ultra fabric better? clone repo that we can use or based on the arxiv article?",
-    "checklist": {
-      "items": [
-        {
-          "task": "Ground the survey in Ultra's current state: enumerate the improvable runtime surfaces with file:line evidence — prewalk control loop (arm/checklist/handoff), agent admission + budgets (one-shot-manager, consult), evidence routing (src/evidence), compaction/context QoS (src/context/qos.ts, compaction), outcomes judging (outcomes provider, Wilson bounds), and the Slice 8 benchmark/soak milestone from the roadmap — so every research finding maps to a real module",
-          "validation": "Surface list with file:line locators and the current milestone cited from .claude/roadmap.md or docs/ultra-fabric.md"
-        },
-        {
-          "task": "arXiv sweep via the live MCP search surface (mcp.exa.omniroute_web_search / omniroute_web_fetch) across five axes: (a) plan-then-execute / metacognitive agent control loops, (b) context management + compaction for long-horizon agents, (c) tool selection / routing / health-aware fallback, (d) agent reliability, retry, and failure taxonomies, (e) agent benchmarks + soak evaluation (SWE-bench/terminal-bench/tau-bench lineage). Collect paper IDs, one-line verified claims from abstracts, and companion repo URLs",
-          "validation": "Per-axis findings with arXiv IDs and verified snippets; every claim carries a fetched source, no model-memory citations"
-        },
-        {
-          "task": "Rank candidates by (1) measurable fit against existing harnesses (scripts/benchmark-prewalk*.mjs, benchmark-codemap*, outcomes metrics) and (2) implementability under the fork rules (pure module + adapter, zero new deps); shortlist 2-4 with companion repos",
-          "validation": "Ranked shortlist with a named harness metric per candidate and rejected items with one-line reasons"
-        },
-        {
-          "task": "Clone the shortlisted companion repos into sources/ (shallow), confirm git/.cgcignore exclusion still holds, and skim each for the concrete mechanism with file locators — delegate breadth reading if a repo is large, returning locators not dumps",
-          "validation": "sources/ contains the clones (ls), git check-ignore passes, and each clone has 2-4 mechanism locators noted"
-        },
-        {
-          "task": "Record the research: docs/runtime-research.md with per-axis findings (cited), technique-to-module mapping, the ranked slice proposals each with acceptance criteria tied to a named benchmark/metric, and rejected alternatives — no implementation in this task; the user picks the slice",
-          "validation": "Doc exists with all sections; proposals name module, metric, and target delta"
-        },
-        {
-          "task": "Gate (docs + clones only): typecheck to prove no source impact, git diff --check, status; commit docs/runtime-research.md as docs(research); clones stay untracked/ignored; WIP untouched; no push",
-          "validation": "tsc --noEmit 0; commit lists only the research doc; status shows sources/ clones ignored and the WIP set unchanged"
-        }
-      ],
-      "readyAt": 1785992127379
-    },
-    "recordedAt": 1785992464492
   }
 ]

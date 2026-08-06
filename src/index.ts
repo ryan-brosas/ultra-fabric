@@ -15,10 +15,12 @@ import { registerFabricCommand } from "./commands/fabric.js";
 import {
   filterPrewalkContinuationMessages,
   filterPrewalkPlanningMessages,
+  PREWALK_ARMED_MESSAGE_TYPE,
 } from "./prewalk/continuation.js";
 import { restorePrewalkModel } from "./prewalk/model.js";
 import { prewalkChecklistReminder } from "./prewalk/continuation.js";
-import { autoArmPrewalk } from "./prewalk/arm.js";
+import { autoArmPrewalk, scoutOnTaskObserved } from "./prewalk/arm.js";
+import { scoutBridge } from "./prewalk/scout-brief.js";
 import { prewalkRearmDefaults } from "./prewalk/rearm.js";
 import { withTrajectoryRearmDirective } from "./prewalk/handoff.js";
 import type { PendingFabricHandoff } from "./prewalk/handoff.js";
@@ -112,6 +114,9 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     state.sessionApprovals,
   );
   const pendingHandoffs = new Map<string, PendingFabricHandoff>();
+  // Guards the auto-scout so an armed session scouts once per distinct task,
+  // not on every input while armed.
+  let lastScoutedTaskKey = "";
   const toolOwnership = new FabricToolOwnership(pi);
   const fabricUi = new FabricUiController(state, codePreviewSettings);
 
@@ -273,7 +278,8 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     }
     await state.initialize(context);
     if (state.initialized) {
-      await autoArmPrewalk(pi, state.prewalk, state.config, context);
+      const scoutRun = scoutBridge(state.agents);
+      await autoArmPrewalk(pi, state.prewalk, state.config, context, scoutRun ? { scoutRun } : {});
     }
     applyFabricMode();
     fabricUi.start(context);
@@ -288,6 +294,33 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
       context.sessionManager.getSessionId(),
       event.text,
     );
+    // Auto-scout on task observation: the session/task arms carry no task, so
+    // the brief runs here, once per distinct task text, before planning. The
+    // brief rides the armed channel so the lifecycle filter retires it after
+    // planning instead of lingering.
+    const taskKey = event.text.trim();
+    if (taskKey && taskKey !== lastScoutedTaskKey) {
+      const scoutRun = scoutBridge(state.agents);
+      const brief = await scoutOnTaskObserved(
+        state.prewalk,
+        state.config.prewalk,
+        context,
+        taskKey,
+        state.config.agents.runRoot,
+        scoutRun ? { scoutRun } : {},
+      );
+      if (brief) {
+        lastScoutedTaskKey = taskKey;
+        pi.sendMessage(
+          {
+            customType: PREWALK_ARMED_MESSAGE_TYPE,
+            content: "Scout brief:\n" + brief,
+            display: false,
+          },
+          { deliverAs: "nextTurn" },
+        );
+      }
+    }
     await state.publishHostLifecycle("pi.input", event);
   });
 

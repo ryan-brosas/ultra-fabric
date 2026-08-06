@@ -4,7 +4,7 @@ import type { CapturedToolCatalog } from "../capture/catalog.js";
 import type { FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import type { FabricState } from "../fabric-state.js";
 import { armPrewalk } from "../prewalk/arm.js";
-import type { ScoutRunner } from "../prewalk/scout-brief.js";
+import { scoutBridge, type ScoutRunner } from "../prewalk/scout-brief.js";
 import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
 import { openFabricSettings } from "../ui/settings.js";
@@ -164,31 +164,11 @@ const runPrewalk = async (
   // turn; custom messages never fire `input`, so observeTask ignores it.
   const prewalkConfig = state.config.prewalk;
   // Host wiring for the auto-scout: bridge the injectable seam to the real
-  // agent manager so a cheap small model gathers the context brief. Only
-  // wired when autoScout is on; the seam stays optional for hosts without
-  // an agent runtime.
+  // agent manager so a cheap small model gathers the context brief. Shared
+  // with the session/task arming paths via scoutBridge; the seam stays
+  // optional for hosts without an agent runtime.
   const scoutRun =
-    prewalkConfig.autoScout === true && state.agents
-      ? async (request: {
-          task: string;
-          role: "scout" | "explorer";
-          maxTokens: number;
-          timeoutMs: number;
-        }) => {
-          const handle = await state.agents.spawn({
-            task: request.task,
-            role: request.role,
-            maxTokens: request.maxTokens,
-            timeoutMs: request.timeoutMs,
-          });
-          const result = await state.agents.wait(handle.id) as { result?: unknown; model?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } };
-          return {
-            ...(result?.result !== undefined ? { result: result.result } : {}),
-            ...(result?.model !== undefined ? { model: result.model } : {}),
-            ...(result?.usage !== undefined ? { usage: result.usage } : {}),
-          };
-        }
-      : undefined;
+    prewalkConfig.autoScout === true ? scoutBridge(state.agents) : undefined;
   const armDeps: { scoutRun?: ScoutRunner } = {};
   if (scoutRun) armDeps.scoutRun = scoutRun;
   await armPrewalk(

@@ -44,6 +44,34 @@ export const buildScoutBrief = (run: ScoutRunResult): string => {
 import { appendBudgetLedger } from "../agents/budget-ledger.js";
 import path from "node:path";
 
+// Shared bridge from the minimal agent surface to the injectable runner seam.
+// Both the /fabric prewalk command and the session/task arming paths build the
+// runner identically through this helper so the auto-scout fires regardless of
+// which path armed the session. The surface is the one-shot agent manager's
+// spawn/wait pair; the run result shape is defensive (fields may be absent).
+export interface ScoutAgentSurface {
+  spawn(request: {
+    task: string;
+    role: "scout" | "explorer";
+    maxTokens: number;
+    timeoutMs: number;
+  }): Promise<{ id: string }>;
+  wait(id: string): Promise<ScoutRunResult>;
+}
+
+export const scoutBridge = (agents: ScoutAgentSurface | undefined): ScoutRunner | undefined =>
+  agents
+    ? async (request) => {
+        const handle = await agents.spawn(request);
+        const result = await agents.wait(handle.id);
+        return {
+          ...(result?.result !== undefined ? { result: result.result } : {}),
+          ...(result?.model !== undefined ? { model: result.model } : {}),
+          ...(result?.usage !== undefined ? { usage: result.usage } : {}),
+        };
+      }
+    : undefined;
+
 const SCOUT_MAX_TOKENS = 512;
 const SCOUT_TIMEOUT_MS = 60_000;
 
