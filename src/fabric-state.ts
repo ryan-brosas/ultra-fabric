@@ -463,7 +463,18 @@ export class FabricState {
       onCommit: (info) => void this.#publishCompactEvent(info.status, info),
     });
     this.#registry.register(new CompactProvider(this.#compact));
-    this.#registry.register(new CodemapProvider());
+    this.#registry.register(
+      new CodemapProvider(() => {
+        const cgc = this.#config?.codemap;
+        return cgc
+          ? {
+              enabled: cgc.enabled,
+              ...(cgc.context ? { context: cgc.context } : {}),
+              timeoutMs: cgc.timeoutMs,
+            }
+          : undefined;
+      }),
+    );
     const agentConfig = enforceSchema
       ? { ...this.#config.agents, enabled: false }
       : this.#config.agents;

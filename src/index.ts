@@ -155,7 +155,13 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     initialPolicy: inactiveCapturePolicy,
   });
   pi.registerTool(fabricTool);
-  pi.registerTool(createCodemapTool());
+  pi.registerTool(createCodemapTool({
+    cgc: () => ({
+      enabled: state.config.codemap.enabled,
+      ...(state.config.codemap.context ? { context: state.config.codemap.context } : {}),
+      timeoutMs: state.config.codemap.timeoutMs,
+    }),
+  }));
 
   const applyFabricMode = (): void => {
     toolCapture.setPolicy(effectiveToolCaptureConfig(state.config));

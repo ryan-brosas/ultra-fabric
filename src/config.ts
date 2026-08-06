@@ -133,6 +133,19 @@ interface FabricConsultConfig {
   maxTokensPerWorker: number;
 }
 
+interface FabricCodemapConfig {
+  // Read-only CGC (CodeGraphContext) bridge, opt-in and kept separate from the
+  // project's own ast-grep graph: CGC results never merge into the project
+  // namespace, so reference symbol names cannot collide with project ones.
+  enabled: boolean;
+  // "" = global CGC database (the "work" repo tree, which includes inspo
+  // clones). A path prefix (e.g. /home/ryanj/work/inspo/<repo>) scopes the
+  // cypher templates via STARTS WITH on node paths; a registered CGC named
+  // context is passed through as --context.
+  context?: string;
+  timeoutMs: number;
+}
+
 export interface FabricToolCaptureConfig {
   enabled: boolean;
   hideFromModel: boolean;
@@ -262,6 +275,7 @@ export interface FabricConfig {
   executor: FabricExecutorConfig;
   approvals: FabricApprovalConfig;
   mcp: FabricMcpConfig;
+  codemap: FabricCodemapConfig;
   prewalk: FabricPrewalkConfig;
   agents: FabricAgentConfig;
   consult: FabricConsultConfig;
@@ -315,6 +329,10 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     disableOAuth: true,
     allowDynamicServers: true,
     callTimeoutMs: 120_000,
+  },
+  codemap: {
+    enabled: false,
+    timeoutMs: 30_000,
   },
   prewalk: {
     triggerRisks: [],
@@ -695,6 +713,8 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
   const executor = objectValue(input.executor);
   const approvals = objectValue(input.approvals);
   const mcp = objectValue(input.mcp);
+  const codemap = objectValue(input.codemap);
+  const cgc = objectValue(codemap.cgc);
   const prewalk = objectValue(input.prewalk);
   const agents = objectValue(input.agents);
   const consult = objectValue(input.consult);
@@ -912,6 +932,18 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         DEFAULT_FABRIC_CONFIG.mcp.callTimeoutMs,
         1_000,
         900_000,
+      ),
+    },
+    codemap: {
+      enabled: booleanValue(cgc.enabled, DEFAULT_FABRIC_CONFIG.codemap.enabled),
+      ...(typeof cgc.context === "string" && cgc.context.trim()
+        ? { context: cgc.context.trim() }
+        : {}),
+      timeoutMs: boundedInteger(
+        cgc.timeoutMs,
+        DEFAULT_FABRIC_CONFIG.codemap.timeoutMs,
+        1_000,
+        300_000,
       ),
     },
     prewalk: {

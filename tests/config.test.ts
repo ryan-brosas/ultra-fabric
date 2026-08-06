@@ -187,6 +187,27 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ prewalk: { autoScout: true } }).prewalk).toMatchObject({
       autoScout: true,
     });
+    // The CGC read-only bridge is opt-in and separate from the project graph.
+    expect(DEFAULT_FABRIC_CONFIG.codemap).toMatchObject({ enabled: false, timeoutMs: 30_000 });
+    expect(normalizeFabricConfig({}).codemap.enabled).toBe(false);
+    expect(normalizeFabricConfig({ codemap: { cgc: { enabled: true } } }).codemap).toMatchObject({
+      enabled: true,
+      timeoutMs: 30_000,
+    });
+    expect(
+      normalizeFabricConfig({
+        codemap: {
+          cgc: { enabled: true, context: "/home/ryanj/work/inspo/omniroute", timeoutMs: 15_000 },
+        },
+      }).codemap,
+    ).toMatchObject({
+      enabled: true,
+      context: "/home/ryanj/work/inspo/omniroute",
+      timeoutMs: 15_000,
+    });
+    expect(normalizeFabricConfig({ codemap: { cgc: { context: "   " } } }).codemap).not.toHaveProperty(
+      "context",
+    );
     // Agent-utilization levers default on (opencode-style task-first delegation);
     // an explicit false still disables each one. Learning and retirement levers
     // stay opt-in until the Slice 8 benchmark gate.

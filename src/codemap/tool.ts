@@ -11,6 +11,12 @@ import {
   buildHeatCsr, chebyshevVectors, heatField, type Csr,
 } from "./heat.js";
 import { renderHeatField, type RenderNode } from "./render-heat.js";
+import {
+  cgcQuery,
+  cypher,
+  extractCgcJson,
+  type CgcOptions,
+} from "./cgc.js";
 
 // The codemap as an agent tool: "incremental mapping through agent discovery on
 // the tools." Operations, each bounded by an explicit token budget:
@@ -23,7 +29,15 @@ import { renderHeatField, type RenderNode } from "./render-heat.js";
 //   source    - return the AST range text of a name:file symbol key
 // The graph is built once (mtime-cached) and reused across operations.
 
-export type CodemapOperation = "skeleton" | "search" | "focus" | "dwell" | "expand" | "cascade" | "source";
+export type CodemapOperation =
+  | "skeleton"
+  | "search"
+  | "focus"
+  | "dwell"
+  | "expand"
+  | "cascade"
+  | "source"
+  | "explore";
 
 export interface CodemapOpArgs {
   query?: string;
@@ -34,6 +48,12 @@ export interface CodemapOpArgs {
   seed?: string;
   t?: number;
   disclosed?: readonly string[];
+  // "ast" (default) uses the project's own ast-grep graph; "cgc" queries the
+  // installed CodeGraphContext database (separate namespace, read-only).
+  mode?: "ast" | "cgc";
+  // CGC path prefix or named context (mode: "cgc"). Overrides the configured
+  // codemap.cgc.context for this call.
+  context?: string;
 }
 
 export interface CodemapOpResult {
@@ -120,12 +140,237 @@ const rebuildField = (session: HeatSession, graph: CodeGraph): HeatSession => {
   return { ...session, bundleId: bundleIdOf(graph), csr, nodes, tk, seeds: session.seeds };
 };
 
+export interface CgcToolOptions extends CgcOptions {
+  enabled?: boolean;
+}
+
+export interface CodemapToolOptions {
+  cgc?: CgcToolOptions;
+}
+
+const cgcToolEnabled = (opts: CodemapToolOptions | undefined, args: CodemapOpArgs): CgcOptions | null => {
+  const cfg = opts?.cgc;
+  if (!cfg || cfg.enabled !== true) return null;
+  const out: CgcOptions = {};
+  const context = args.context ?? cfg.context;
+  if (context) out.context = context;
+  if (cfg.timeoutMs !== undefined) out.timeoutMs = cfg.timeoutMs;
+  if (cfg.runner) out.runner = cfg.runner;
+  return out;
+};
+
+const cgcQueryLines = (
+  cgc: CgcOptions,
+  cypherText: string,
+  render: (rec: Record<string, unknown>) => string | null,
+): string[] => {
+  const r = cgcQuery(cypherText, cgc);
+  if (!r.ok) return ["cgc " + r.kind + ": " + r.message];
+  const parsed = extractCgcJson(r.text);
+  if (!Array.isArray(parsed)) return ["cgc query returned no records"];
+  const lines: string[] = [];
+  for (const rec of parsed as Array<Record<string, unknown>>) {
+    const l = render(rec);
+    if (l) lines.push(l);
+  }
+  return lines;
+};
+
+const cgcSearch = (query: string, cgc: CgcOptions, maxTokens: number): CodemapOpResult => {
+  const lines: string[] = ["[cgc search: " + query + "]"];
+  lines.push(
+    ...cgcQueryLines(cgc, cypher.symbolSearch(query, cgc.context), (rec) => {
+      const name = rec["f.name"];
+      if (typeof name !== "string") return null;
+      return name + " (" + (rec["f.lang"] ?? "?") + ") " + (rec["f.path"] ?? "?") + ":" + (rec["f.line_number"] ?? "?");
+    }),
+  );
+  lines.push(
+    ...cgcQueryLines(cgc, cypher.fileSearch(query, cgc.context), (rec) => {
+      const p = rec["f.path"];
+      return typeof p === "string" ? p : null;
+    }),
+  );
+  const t = truncateToTokens(lines.join("\n"), maxTokens);
+  return { operation: "search", text: t.text, tokens: t.tokens, entities: [], truncated: t.truncated };
+};
+
+const cgcSkeleton = (cgc: CgcOptions, maxTokens: number): CodemapOpResult => {
+  const lines: string[] = ["[cgc skeleton" + (cgc.context ? " scoped to " + cgc.context : " (global work graph)") + "]"];
+  lines.push(
+    ...cgcQueryLines(cgc, cypher.functionCount(cgc.context), (rec) =>
+      rec["c"] !== undefined ? "functions: " + rec["c"] : null,
+    ),
+  );
+  lines.push(
+    ...cgcQueryLines(cgc, cypher.fileCount(cgc.context), (rec) =>
+      rec["c"] !== undefined ? "files: " + rec["c"] : null,
+    ),
+  );
+  lines.push("## top complexity hotspots");
+  lines.push(
+    ...cgcQueryLines(cgc, cypher.hotspots(20, cgc.context), (rec) => {
+      const name = rec["f.name"];
+      if (typeof name !== "string") return null;
+      return name + " (complexity " + rec["f.cyclomatic_complexity"] + ") " + (rec["f.path"] ?? "?") + ":" + (rec["f.line_number"] ?? "?");
+    }),
+  );
+  const t = truncateToTokens(lines.join("\n"), maxTokens);
+  return { operation: "skeleton", text: t.text, tokens: t.tokens, entities: [], truncated: t.truncated };
+};
+
+const cgcExpand = (entities: readonly string[], cgc: CgcOptions, maxTokens: number): CodemapOpResult => {
+  const lines: string[] = ["[cgc expand]"];
+  for (const e of entities.slice(0, 6)) {
+    if (e.includes("/") && !e.includes(":")) {
+      lines.push("## imports of " + e);
+      lines.push(
+        ...cgcQueryLines(cgc, cypher.importsOf(e), (rec) => {
+          const n = rec["m.name"];
+          return typeof n === "string" ? n : null;
+        }),
+      );
+    } else {
+      const name = e.split(":")[0] ?? e;
+      lines.push("## inheritance of " + name);
+      lines.push(
+        ...cgcQueryLines(cgc, cypher.inheritsOf(name, cgc.context), (rec) => {
+          const n = rec["x.name"];
+          const p = rec["x.path"];
+          return typeof n === "string" ? n + (typeof p === "string" ? " " + p : "") : null;
+        }),
+      );
+    }
+  }
+  const t = truncateToTokens(lines.join("\n"), maxTokens);
+  return { operation: "expand", text: t.text, tokens: t.tokens, entities: [...entities], truncated: t.truncated };
+};
+
+const cgcSource = (entity: string, cgc: CgcOptions, maxTokens: number): CodemapOpResult => {
+  const name = entity.split(":")[0] ?? "";
+  if (!name) {
+    return { operation: "source", text: "source requires a name:file entity", tokens: 0, entities: [], truncated: false };
+  }
+  const lines: string[] = ["[cgc source: " + name + "]"];
+  lines.push(
+    ...cgcQueryLines(cgc, cypher.sourceOf(name, cgc.context), (rec) => {
+      const s = rec["f.source"];
+      return typeof s === "string" ? s : null;
+    }),
+  );
+  const t = truncateToTokens(lines.join("\n"), maxTokens);
+  return { operation: "source", text: t.text, tokens: t.tokens, entities: [name], truncated: t.truncated };
+};
+
+const cgcExplore = (query: string, cgc: CgcOptions, maxTokens: number): CodemapOpResult => {
+  const lines: string[] = ["[cgc explore: " + query + "]", "## symbols"];
+  lines.push(
+    ...cgcQueryLines(cgc, cypher.symbolSearch(query, cgc.context), (rec) => {
+      const name = rec["f.name"];
+      if (typeof name !== "string") return null;
+      return name + " (" + (rec["f.lang"] ?? "?") + ") " + (rec["f.path"] ?? "?") + ":" + (rec["f.line_number"] ?? "?");
+    }),
+  );
+  lines.push("## files");
+  lines.push(
+    ...cgcQueryLines(cgc, cypher.fileSearch(query, cgc.context), (rec) => {
+      const p = rec["f.path"];
+      return typeof p === "string" ? p : null;
+    }),
+  );
+  lines.push("## hotspots");
+  lines.push(
+    ...cgcQueryLines(cgc, cypher.hotspots(20, cgc.context), (rec) => {
+      const name = rec["f.name"];
+      if (typeof name !== "string") return null;
+      return name + " (complexity " + rec["f.cyclomatic_complexity"] + ") " + (rec["f.path"] ?? "?") + ":" + (rec["f.line_number"] ?? "?");
+    }),
+  );
+  lines.push("## tests that pin the seam");
+  const token = query.trim().toLowerCase();
+  lines.push(
+    ...cgcQueryLines(cgc, cypher.testsIn(cgc.context), (rec) => {
+      const p = rec["f.path"];
+      if (typeof p !== "string") return null;
+      return token && p.toLowerCase().includes(token) ? p + "  (matches query)" : p;
+    }),
+  );
+  const t = truncateToTokens(lines.join("\n"), maxTokens);
+  return { operation: "explore", text: t.text, tokens: t.tokens, entities: [], truncated: t.truncated };
+};
+
+const astExplore = (query: string, root: string, maxTokens: number): CodemapOpResult => {
+  const { graph, disclosure, literals } = getCodeGraph(root);
+  const lines: string[] = ["[ast explore: " + query + "]", "## skeleton"];
+  lines.push(minimalSkeleton(disclosure));
+  lines.push("## routed symbols");
+  const r = route(query, { index: graph.index, literals });
+  for (const s of r.symbols.slice(0, 12)) lines.push(s.name + " (" + s.symbolType + ") " + s.file + ":" + s.line);
+  for (const l of r.literals.slice(0, 8)) lines.push("  " + l.kind + " " + l.file + ":" + l.line);
+  const topSymbol = r.symbols[0];
+  const topFile = topSymbol?.file ?? r.literals[0]?.file;
+  if (topFile) {
+    lines.push("## co-change tests for " + topFile);
+    for (const p of predictFileCascade(topFile, { cwd: root, maxCommits: 200 }).slice(0, 10)) {
+      if (/test|spec/i.test(p.file)) lines.push(p.file + "  " + p.score.toFixed(3));
+    }
+  }
+  if (topSymbol) {
+    const src = readSymbolSource(graph.index, root, topSymbol.name + ":" + topSymbol.file);
+    if (src.found) lines.push("## source " + topSymbol.name + " (" + src.line + "-" + src.endLine + ")");
+  }
+  const t = truncateToTokens(lines.join("\n"), maxTokens);
+  return { operation: "explore", text: t.text, tokens: t.tokens, entities: [], truncated: t.truncated };
+};
+
+const cgcOperation = (
+  operation: CodemapOperation,
+  args: CodemapOpArgs,
+  opts: CodemapToolOptions | undefined,
+  maxTokens: number,
+): CodemapOpResult => {
+  const cgc = cgcToolEnabled(opts, args);
+  if (!cgc) {
+    return {
+      operation,
+      text: "cgc mode is disabled (set codemap.cgc.enabled: true in fabric.json)",
+      tokens: 0,
+      entities: [],
+      truncated: false,
+    };
+  }
+  switch (operation) {
+    case "search":
+      return cgcSearch(args.query ?? "", cgc, maxTokens);
+    case "skeleton":
+      return cgcSkeleton(cgc, maxTokens);
+    case "expand":
+      return cgcExpand(args.entities ?? [], cgc, maxTokens);
+    case "source":
+      return cgcSource((args.entities ?? [])[0] ?? "", cgc, maxTokens);
+    case "explore":
+      return cgcExplore(args.query ?? "", cgc, maxTokens);
+    default:
+      return {
+        operation,
+        text: "cgc mode does not implement " + operation + "; use mode ast or explore",
+        tokens: 0,
+        entities: [],
+        truncated: false,
+      };
+  }
+};
+
 export const codemapOperation = (
   operation: CodemapOperation,
   args: CodemapOpArgs,
   root: string,
+  opts?: CodemapToolOptions,
 ): CodemapOpResult => {
   const maxTokens = args.maxTokens ?? 4000;
+  const mode = args.mode ?? "ast";
+  if (mode === "cgc") return cgcOperation(operation, args, opts, maxTokens);
+  if (operation === "explore") return astExplore(args.query ?? "", root, maxTokens);
   const { graph, disclosure, literals } = getCodeGraph(root);
 
   if (operation === "skeleton") {
@@ -245,6 +490,9 @@ export const codemapOperation = (
 
 export interface CodemapToolDeps {
   root?: string;
+  // Static options or a getter resolved at execute time (so the tool picks up
+  // codemap.cgc config after it loads). "ast" mode is unaffected.
+  cgc?: CgcToolOptions | (() => CgcToolOptions | undefined);
 }
 
 export const createCodemapTool = (deps: CodemapToolDeps = {}): ToolDefinition<any, any, any> =>
@@ -252,18 +500,26 @@ export const createCodemapTool = (deps: CodemapToolDeps = {}): ToolDefinition<an
     name: "codemap",
     label: "Code Map",
     description:
-      "AST-compressed code map for incremental navigation. Operations: skeleton (minimal map), search (route a query to symbols/literals), focus (heat-diffuse query seeds through the graph), dwell (expand an active field and return the delta), expand (greedy neighborhood disclosure), cascade (predict co-change cascade from a seed file or symbol), source (return the AST range text of a name:file symbol key). Each response is bounded by maxTokens.",
-    promptSnippet: "AST code map: skeleton, search, focus, dwell, expand, cascade, source",
+      "AST-compressed code map for incremental navigation. Operations: skeleton (minimal map), search (route a query to symbols/literals), focus (heat-diffuse query seeds through the graph), dwell (expand an active field and return the delta), expand (greedy neighborhood disclosure), cascade (predict co-change cascade from a seed file or symbol), source (return the AST range text of a name:file symbol key), explore (bounded staged evidence pack: skeleton, routed symbols, hotspots, test-as-spec pointers, source). mode cgc (opt-in) dispatches search/skeleton/expand/source/explore to the installed CodeGraphContext database - a separate read-only namespace for reference repos such as inspo clones, never merged into the project graph. Each response is bounded by maxTokens.",
+    promptSnippet: "AST code map: skeleton, search, focus, dwell, expand, cascade, source, explore; mode cgc for the CodeGraphContext reference graph",
     promptGuidelines: [
       "Use codemap for: symbol definitions, type signatures, function/class structure, call and import relationships, and dependency neighborhoods.",
       "Call focus with a query to center the map on a task, then dwell to expand it without re-extracting.",
       "Reserve grep for: literal text inside string literals, comments, configuration files, and patterns that are not valid identifiers or code symbols.",
+      "Use explore with a task query for a bounded evidence pack (skeleton, routed symbols, hotspots, seam tests, source) instead of chaining many calls.",
+      "Use mode cgc with a context path (e.g. /home/ryanj/work/inspo/<repo>) to query reference repos through the installed CodeGraphContext database; it is read-only and separate from the project graph.",
     ],
     parameters: Type.Object({
       operation: Type.Union([
         Type.Literal("skeleton"), Type.Literal("search"), Type.Literal("focus"), Type.Literal("dwell"),
-        Type.Literal("expand"), Type.Literal("cascade"), Type.Literal("source"),
+        Type.Literal("expand"), Type.Literal("cascade"), Type.Literal("source"), Type.Literal("explore"),
       ]),
+      mode: Type.Optional(Type.Union([Type.Literal("ast"), Type.Literal("cgc")], {
+        description: "ast (default) uses the project graph; cgc queries the CodeGraphContext database",
+      })),
+      context: Type.Optional(Type.String({
+        description: "CGC path prefix or named context (mode: cgc)",
+      })),
       seed: Type.Optional(Type.String({ description: "file path or name:file symbol key to seed the cascade (operation: cascade)" })),
       query: Type.Optional(Type.String({ description: "search query (operation: search); focus query (operation: focus)" })),
       entities: Type.Optional(Type.Array(Type.String(), { description: "symbol keys name:file to expand from (operation: expand) or read source for (operation: source)" })),
@@ -276,7 +532,8 @@ export const createCodemapTool = (deps: CodemapToolDeps = {}): ToolDefinition<an
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       void toolCallId; void signal; void onUpdate;
       const root = deps.root ?? ctx.cwd;
-      const result = codemapOperation(params.operation, params, root);
+      const cgcDeps = typeof deps.cgc === "function" ? deps.cgc() : deps.cgc;
+      const result = codemapOperation(params.operation, params, root, cgcDeps ? { cgc: cgcDeps } : undefined);
       return {
         content: [{ type: "text", text: result.text }],
         details: { tokens: result.tokens, entities: result.entities, truncated: result.truncated },

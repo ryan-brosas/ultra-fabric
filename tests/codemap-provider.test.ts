@@ -12,9 +12,9 @@ describe("CodemapProvider", () => {
   it("list() returns every descriptor", async () => {
     const { CodemapProvider } = await import("../" + CODEMAP + ".js");
     const items = await new CodemapProvider().list({});
-    expect(items).toHaveLength(7);
+    expect(items).toHaveLength(8);
     const names = items.map((i: { name: string }) => i.name).sort();
-    expect(names).toEqual(["cascade", "dwell", "expand", "focus", "search", "skeleton", "source"]);
+    expect(names).toEqual(["cascade", "dwell", "expand", "explore", "focus", "search", "skeleton", "source"]);
     for (const item of items) {
       expect((item as { inputSchema?: unknown }).inputSchema).toBeDefined();
     }
@@ -40,6 +40,37 @@ describe("CodemapProvider", () => {
     expect(expand).toBeDefined();
     const depth = (expand!.inputSchema as Record<string, unknown>).properties as Record<string, unknown>;
     expect((depth.depth as Record<string, unknown>).maximum).toBe(2);
+  });
+
+  it("describe('explore') requires a query and accepts mode/context", async () => {
+    const { CodemapProvider } = await import("../" + CODEMAP + ".js");
+    const desc = await new CodemapProvider().describe("explore");
+    expect(desc).toBeDefined();
+    const props = (desc!.inputSchema as Record<string, unknown>).properties as Record<string, unknown>;
+    expect((desc!.inputSchema as Record<string, unknown>).required).toContain("query");
+    expect(props.mode).toBeDefined();
+    expect(props.context).toBeDefined();
+  });
+
+  it("invoke('explore') returns a bounded evidence pack in ast mode", { timeout: 60000 }, async () => {
+    const { CodemapProvider } = await import("../" + CODEMAP + ".js");
+    const result = await new CodemapProvider().invoke(
+      "explore",
+      { query: "config", maxTokens: 3000 },
+      { cwd: process.cwd() },
+    );
+    const text = JSON.stringify(result);
+    expect(text).toContain("explore");
+  });
+
+  it("invoke('search', { mode: 'cgc' }) without a cgc getter returns the disabled note", async () => {
+    const { CodemapProvider } = await import("../" + CODEMAP + ".js");
+    const result = await new CodemapProvider().invoke(
+      "search",
+      { query: "config", mode: "cgc" },
+      { cwd: process.cwd() },
+    );
+    expect(JSON.stringify(result)).toContain("disabled");
   });
 
   it("list() includes a cascade descriptor", async () => {

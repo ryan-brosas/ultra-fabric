@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createCodemapTool, codemapOperation, getCodeGraph } from "../src/codemap/tool.js";
+import type { CgcRunner } from "../src/codemap/cgc.js";
 
 const ROOT = process.cwd();
 
@@ -39,5 +40,117 @@ describe("codemap tool surface", () => {
 
   it("memoizes the built graph per root (identity, not timing)", () => {
     expect(getCodeGraph(ROOT)).toBe(getCodeGraph(ROOT));
+  });
+
+  it("exposes the cgc mode and explore operation in the schema", () => {
+    const tool = createCodemapTool();
+    const p = JSON.stringify(tool.parameters);
+    expect(p).toContain("explore");
+    expect(p).toContain("cgc");
+    expect(p).toContain("ast");
+  });
+});
+
+describe("codemap cgc mode", () => {
+  const fakeRunner: CgcRunner = (args) => {
+    const q = args[1] ?? "";
+    if (q.includes("f.source")) {
+      return '[{"f.source":"function trim(s){return s}","f.path":"/inspo/x.ts","f.line_number":10}]';
+    }
+    if (q.includes("cyclomatic")) {
+      return '[{"f.name":"hot","f.path":"/inspo/h.ts","f.line_number":3,"f.cyclomatic_complexity":42}]';
+    }
+    if (q.includes("IMPORTS")) return '[{"m.name":"module-a"}]';
+    if (q.includes("CONTAINS")) {
+      return '[{"f.name":"checkout","f.path":"/inspo/x.ts","f.line_number":10,"f.lang":"typescript"},{"f.path":"/inspo/x.test.ts"}]';
+    }
+    if (q.includes("count(*)")) return '[{"c":28876}]';
+    return "[]";
+  };
+  const cgc = { enabled: true, runner: fakeRunner, context: "/home/ryanj/work/inspo/omniroute" };
+
+  it("search dispatches to CGC symbol+file lookup and stays bounded", () => {
+    const r = codemapOperation("search", { query: "checkout", maxTokens: 1000, mode: "cgc" }, ROOT, { cgc });
+    expect(r.operation).toBe("search");
+    expect(r.tokens).toBeLessThanOrEqual(1000);
+    expect(r.text).toContain("checkout");
+    expect(r.text).toContain("/inspo/x.ts:10");
+    expect(r.text).toContain("/inspo/x.test.ts");
+  });
+
+  it("skeleton reports repo counts and complexity hotspots", () => {
+    const r = codemapOperation("skeleton", { maxTokens: 1000, mode: "cgc" }, ROOT, { cgc });
+    expect(r.text).toContain("28876");
+    expect(r.text).toContain("hot");
+  });
+
+  it("expand lists imports for a file entity", () => {
+    const r = codemapOperation("expand", { entities: ["/inspo/x.ts"], maxTokens: 1000, mode: "cgc" }, ROOT, { cgc });
+    expect(r.text).toContain("module-a");
+  });
+
+  it("source returns the function body", () => {
+    const r = codemapOperation("source", { entities: ["checkout:/inspo/x.ts"], maxTokens: 1000, mode: "cgc" }, ROOT, { cgc });
+    expect(r.text).toContain("function trim");
+  });
+
+  it("returns a clean disabled note when cgc mode is off, without throwing", () => {
+    const r = codemapOperation("search", { query: "x", mode: "cgc" }, ROOT, { cgc: { enabled: false } });
+    expect(r.text).toContain("disabled");
+  });
+
+  it("renders runner errors without throwing", () => {
+    const bad: CgcRunner = () => {
+      throw Object.assign(new Error("boom"), { stderr: "Query Error: nope" });
+    };
+    const r = codemapOperation("search", { query: "x", mode: "cgc" }, ROOT, { cgc: { enabled: true, runner: bad } });
+    expect(r.text).toContain("Query Error");
+  });
+
+  it("ast mode is unchanged when mode is omitted or ast", () => {
+    const r1 = codemapOperation("skeleton", { maxTokens: 500 }, ROOT);
+    const r2 = codemapOperation("skeleton", { maxTokens: 500, mode: "ast" }, ROOT);
+    expect(r1.text).toBe(r2.text);
+  });
+});
+
+describe("codemap explore", () => {
+  const fakeRunner: CgcRunner = (args) => {
+    const q = args[1] ?? "";
+    if (q.includes("cyclomatic")) {
+      return '[{"f.name":"hot","f.path":"/inspo/h.ts","f.line_number":3,"f.cyclomatic_complexity":42}]';
+    }
+    if (q.includes("CONTAINS")) {
+      return '[{"f.name":"checkout","f.path":"/inspo/x.ts","f.line_number":10,"f.lang":"typescript"},{"f.path":"/inspo/x.test.ts"}]';
+    }
+    if (q.includes("test")) return '[{"f.path":"/inspo/x.test.ts"},{"f.path":"/inspo/y.spec.ts"}]';
+    if (q.includes("count(*)")) return '[{"c":28876}]';
+    return "[]";
+  };
+  const cgc = { enabled: true, runner: fakeRunner, context: "/home/ryanj/work/inspo/omniroute" };
+
+  it("returns a bounded staged evidence pack in cgc mode naming the seam tests", () => {
+    const r = codemapOperation("explore", { query: "checkout", maxTokens: 3000, mode: "cgc" }, ROOT, { cgc });
+    expect(r.operation).toBe("explore");
+    expect(r.tokens).toBeLessThanOrEqual(3000);
+    expect(r.text).toMatch(/symbols|symbol/i);
+    expect(r.text).toMatch(/hotspot|complexity/i);
+    expect(r.text).toMatch(/test/i);
+    expect(r.text).toContain("/inspo/x.test.ts");
+  });
+
+  it("degrades cleanly when cgc is unavailable", () => {
+    const bad: CgcRunner = () => {
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    };
+    const r = codemapOperation("explore", { query: "config", maxTokens: 3000, mode: "cgc" }, ROOT, { cgc: { enabled: true, runner: bad } });
+    expect(r.text).toMatch(/unavailable|fell back|ast/i);
+  });
+
+  it("explore in ast mode composes existing stages under budget", () => {
+    const r = codemapOperation("explore", { query: "config", maxTokens: 3000 }, ROOT);
+    expect(r.tokens).toBeLessThanOrEqual(3000);
+    expect(r.text.length).toBeGreaterThan(0);
+    expect(r.text).toMatch(/explore/i);
   });
 });

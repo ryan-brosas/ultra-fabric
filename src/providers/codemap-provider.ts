@@ -4,7 +4,7 @@ import type {
   FabricProvider,
   FabricProviderListRequest,
 } from "../protocol.js";
-import { codemapOperation } from "../codemap/tool.js";
+import { codemapOperation, type CgcToolOptions } from "../codemap/tool.js";
 
 const descriptors: FabricActionDescriptor[] = [
   {
@@ -93,6 +93,22 @@ const descriptors: FabricActionDescriptor[] = [
     risk: "read",
   },
   {
+    name: "explore",
+    description: "Bounded staged evidence pack for a task query: skeleton, routed symbols, complexity hotspots, seam-test pointers, and top source (ast graph), or the CGC reference graph when mode is cgc",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1 },
+        mode: { type: "string", enum: ["ast", "cgc"] },
+        context: { type: "string" },
+        maxTokens: { type: "number", minimum: 100, maximum: 20000 },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    risk: "read",
+  },
+  {
     name: "source",
     description: "Return the AST range text of a name:file symbol key, bounded by maxTokens",
     inputSchema: {
@@ -110,7 +126,25 @@ const descriptors: FabricActionDescriptor[] = [
 
 export class CodemapProvider implements FabricProvider {
   readonly name = "codemap";
-  readonly description = "AST-compressed code map for incremental navigation — symbol search, call/import graph, and progressive disclosure of entity neighborhoods";
+  readonly description = "AST-compressed code map for incremental navigation — symbol search, call/import graph, and progressive disclosure of entity neighborhoods; mode cgc queries the separate read-only CodeGraphContext reference graph";
+
+  #cgc: (() => CgcToolOptions | undefined) | undefined;
+
+  constructor(cgc?: () => CgcToolOptions | undefined) {
+    this.#cgc = cgc;
+  }
+
+  #opts = (args: Record<string, unknown>): { cgc: CgcToolOptions } | undefined => {
+    const cfg = this.#cgc?.();
+    return cfg ? { cgc: cfg } : undefined;
+  };
+
+  #commonArgs = (args: Record<string, unknown>): Record<string, unknown> =>
+    Object.assign(
+      {},
+      args.mode === "cgc" ? { mode: "cgc" as const } : {},
+      typeof args.context === "string" && args.context ? { context: args.context } : {},
+    );
 
   async list(request: FabricProviderListRequest): Promise<FabricActionDescriptor[]> {
     const query = request.query?.toLowerCase();
@@ -126,9 +160,9 @@ export class CodemapProvider implements FabricProvider {
   async invoke(name: string, args: Record<string, unknown>, context: FabricInvocationContext) {
     switch (name) {
       case "skeleton":
-        return codemapOperation("skeleton", { maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
+        return codemapOperation("skeleton", Object.assign({ maxTokens: Number(args.maxTokens ?? 4000) }, this.#commonArgs(args)), context.cwd, this.#opts(args));
       case "search":
-        return codemapOperation("search", { query: String(args.query ?? ""), maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
+        return codemapOperation("search", Object.assign({ query: String(args.query ?? ""), maxTokens: Number(args.maxTokens ?? 4000) }, this.#commonArgs(args)), context.cwd, this.#opts(args));
       case "focus":
         return codemapOperation("focus", { query: String(args.query ?? ""), t: Number(args.t ?? 4), maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
       case "dwell":
@@ -136,9 +170,11 @@ export class CodemapProvider implements FabricProvider {
       case "cascade":
         return codemapOperation("cascade", { seed: String(args.seed ?? ""), maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
       case "expand":
-        return codemapOperation("expand", { entities: Array.isArray(args.entities) ? args.entities.map(String) : [String(args.entities)], direction: args.direction as any, depth: args.depth as any, maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
+        return codemapOperation("expand", Object.assign({ entities: Array.isArray(args.entities) ? args.entities.map(String) : [String(args.entities)], direction: args.direction as any, depth: args.depth as any, maxTokens: Number(args.maxTokens ?? 4000) }, this.#commonArgs(args)), context.cwd, this.#opts(args));
       case "source":
-        return codemapOperation("source", { entities: Array.isArray(args.entities) ? args.entities.map(String) : [String(args.entities)], maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
+        return codemapOperation("source", Object.assign({ entities: Array.isArray(args.entities) ? args.entities.map(String) : [String(args.entities)], maxTokens: Number(args.maxTokens ?? 4000) }, this.#commonArgs(args)), context.cwd, this.#opts(args));
+      case "explore":
+        return codemapOperation("explore", Object.assign({ query: String(args.query ?? ""), maxTokens: Number(args.maxTokens ?? 4000) }, this.#commonArgs(args)), context.cwd, this.#opts(args));
       default:
         throw new Error(`Unknown codemap action: ${name}`);
     }
