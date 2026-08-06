@@ -7,6 +7,8 @@ import { armPrewalk } from "../prewalk/arm.js";
 import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
 import { openFabricSettings } from "../ui/settings.js";
+import { planInit, applyInitPlan } from "../init/scaffold.js";
+import { CURRENT_FABRIC_CONFIG_VERSION } from "../config-migrations.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -766,6 +768,40 @@ const runStatus = (deps: FabricCommandDeps, context: ExtensionContext): void => 
       );
 };
 
+// /fabric init: non-destructive root-level context scaffold. Skips existing
+// files, reports legacy .pi context as a migration notice, never overwrites.
+const runInit = (context: ExtensionContext): void => {
+  const cwd = context.cwd;
+  const probePaths = [
+    "AGENTS.md",
+    "project.md",
+    "roadmap.md",
+    "tech-stack.md",
+    ".pi/fabric.json",
+    ".pi/agents/scout.md",
+    ".pi/agents/explorer.md",
+    ".pi/project.md",
+    ".pi/roadmap.md",
+    ".pi/tech-stack.md",
+  ];
+  const existing = new Set(probePaths.filter((p) => fs.existsSync(path.join(cwd, p))));
+  const plan = planInit(existing, CURRENT_FABRIC_CONFIG_VERSION);
+  const applied = applyInitPlan(plan, {
+    exists: (p) => fs.existsSync(path.join(cwd, p)),
+    write: (p, content) => {
+      const abs = path.join(cwd, p);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content);
+    },
+  });
+  context.ui.notify([
+    "fabric init",
+    "created: " + (applied.created.length > 0 ? applied.created.join(", ") : "(none)"),
+    "skipped (already present): " + (applied.skipped.length > 0 ? applied.skipped.join(", ") : "(none)"),
+    ...plan.migrations,
+  ].join("\n"));
+};
+
 export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps): void {
   const { state, fabricUi, capturedTools, applyFabricMode } = deps;
   pi.registerCommand("fabric", {
@@ -777,6 +813,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         "dashboard",
         "settings",
         "prewalk",
+        "init",
         "reload",
         "providers",
         "captured",
@@ -887,6 +924,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         reload: () => runReload(deps, context),
         settings: () => openFabricSettings(context, { state, applyFabricMode, capturedTools }),
         prewalk: () => runPrewalk(pi, state, context, argumentsList, argumentsText.trim().slice(command.length).trim()),
+        init: () => runInit(context),
         dashboard: () => fabricUi.openDashboard(context),
         ui: () => fabricUi.openDashboard(context),
         providers: () => runProviders(state, context),
