@@ -9,7 +9,7 @@ import type { DetectedContext } from "./detect.js";
 export interface InitFile {
   path: string;
   content: string;
-  action: "create" | "skip";
+  action: "create" | "skip" | "defer";
 }
 
 export interface InitPlan {
@@ -17,7 +17,13 @@ export interface InitPlan {
   migrations: string[];
 }
 
-const LEGACY_CONTEXT = [".pi/project.md", ".pi/roadmap.md", ".pi/tech-stack.md"];
+const LEGACY_ROOT_PAIR: ReadonlyArray<{ legacy: string; root: string }> = [
+  { legacy: ".pi/project.md", root: "project.md" },
+  { legacy: ".pi/roadmap.md", root: "roadmap.md" },
+  { legacy: ".pi/tech-stack.md", root: "tech-stack.md" },
+  { legacy: ".pi/user.md", root: "user.md" },
+];
+const LEGACY_CONTEXT = LEGACY_ROOT_PAIR.map((p) => p.legacy);
 
 const fabricJson = (configVersion: number): string =>
   JSON.stringify({ configVersion, fullCodeMode: false }, null, 2) + "\n";
@@ -99,7 +105,12 @@ export const planInit = (
 ): InitPlan => {
   const files: InitFile[] = [];
   const add = (path: string, content: string): void => {
-    files.push({ path, content, action: existingPaths.has(path) ? "skip" : "create" });
+    if (existingPaths.has(path)) {
+      files.push({ path, content, action: "skip" });
+      return;
+    }
+    const legacy = LEGACY_ROOT_PAIR.find((p) => p.root === path && existingPaths.has(p.legacy));
+    files.push({ path, content, action: legacy ? "defer" : "create" });
   };
   add("AGENTS.md", renderAgentsMd(detected));
   add("project.md", PROJECT_MD);
@@ -111,7 +122,13 @@ export const planInit = (
   add(".pi/agents/explorer.md", EXPLORER_MD);
   const migrations = LEGACY_CONTEXT
     .filter((p) => existingPaths.has(p))
-    .map((p) => "legacy context " + p + " exists; consider moving its content to the root-level sibling (report only — nothing was changed)");
+    .map((p) => {
+      const pair = LEGACY_ROOT_PAIR.find((x) => x.legacy === p);
+      if (pair && !existingPaths.has(pair.root)) {
+        return `legacy context ${p} exists and ${pair.root} does not — copy its content to the root-level ${pair.root} (report only — nothing was changed)`;
+      }
+      return `legacy context ${p} exists; consider moving its content to the root-level sibling (report only — nothing was changed)`;
+    });
   return { files, migrations };
 };
 
@@ -122,10 +139,21 @@ export interface InitIo {
 
 // Adapter: apply a plan through injected exists/write so the command wiring
 // stays thin and tests stay hermetic.
-export const applyInitPlan = (plan: InitPlan, io: InitIo): { created: string[]; skipped: string[] } => {
+export interface InitApplyResult {
+  created: string[];
+  skipped: string[];
+  deferred: string[];
+}
+
+export const applyInitPlan = (plan: InitPlan, io: InitIo): InitApplyResult => {
   const created: string[] = [];
   const skipped: string[] = [];
+  const deferred: string[] = [];
   for (const f of plan.files) {
+    if (f.action === "defer") {
+      deferred.push(f.path);
+      continue;
+    }
     if (f.action === "skip" || io.exists(f.path)) {
       skipped.push(f.path);
       continue;
@@ -133,5 +161,5 @@ export const applyInitPlan = (plan: InitPlan, io: InitIo): { created: string[]; 
     io.write(f.path, f.content);
     created.push(f.path);
   }
-  return { created, skipped };
+  return { created, skipped, deferred };
 };

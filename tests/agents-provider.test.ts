@@ -56,7 +56,6 @@ const setup = (
   const mesh = new MeshStore(path.join(root, "mesh"), 64 * 1024, 100);
   const agents = new AgentManager(process.cwd(), DEFAULT_FABRIC_CONFIG.agents, {
     workerPath: path.resolve("tests/fixtures/fake-worker.mjs"),
-    claudeBinary: path.resolve("tests/fixtures/fake-claude.mjs"),
     runRoot: path.join(root, "runs"),
   });
   agentManagers.push(agents);
@@ -120,7 +119,6 @@ const setup = (
       ownerIdentityId: identity.id,
       name: "main",
       status: "idle",
-      runner: "pi",
       transport: "host",
       capabilities: ["steer", "followUp", "fabric"],
       cwd: process.cwd(),
@@ -185,7 +183,6 @@ describe("AgentsProvider runner support", () => {
       name: "Peer peer",
       kind: "peer",
       status: "idle",
-      runner: "pi",
       transport: "host",
       cwd: process.cwd(),
       sessionId: "peer",
@@ -210,7 +207,6 @@ describe("AgentsProvider runner support", () => {
       ownerIdentityId: "session:test",
       name: "main",
       status: "idle",
-      runner: "pi",
       transport: "host",
       capabilities: ["steer", "followUp", "fabric"],
       cwd: process.cwd(),
@@ -287,7 +283,6 @@ describe("AgentsProvider runner support", () => {
         name: "Peer peer",
         kind: "root",
         rootId: "session:peer",
-        runner: "pi",
       },
       occurredAt: 2,
       publishedAt: 3,
@@ -315,7 +310,6 @@ describe("AgentsProvider runner support", () => {
       ownerIdentityId: "session:test",
       name: "main",
       status: "idle",
-      runner: "pi",
       transport: "host",
       capabilities: [],
       cwd: process.cwd(),
@@ -353,7 +347,6 @@ describe("AgentsProvider runner support", () => {
       parentId: "session:peer",
       name: "remote reviewer",
       status: "running",
-      runner: "pi",
       transport: "process",
       capabilities: ["steer", "followUp", "stop"],
       cwd: process.cwd(),
@@ -390,7 +383,6 @@ describe("AgentsProvider runner support", () => {
       parentId: "session:peer",
       name: "remote advisor",
       status: "idle",
-      runner: "pi",
       transport: "host",
       capabilities: ["steer", "followUp"],
       startedAt: 1,
@@ -699,7 +691,6 @@ describe("AgentsProvider runner support", () => {
       kind: "fabric-agent-tools",
       name: "preview-agent",
       status: "completed",
-      runner: "pi",
       owner: "agent",
       text: "fake worker complete",
       tools: expect.any(Array),
@@ -835,7 +826,6 @@ describe("AgentsProvider runner support", () => {
     };
     await expect(provider.invoke("run", {
       task: "inspect scoped auth",
-      runner: "pi",
       tools: ["read", "grep", "find", "ls"],
       extensions: false,
       recursive: false,
@@ -1030,7 +1020,6 @@ describe("AgentsProvider runner support", () => {
 
     await expect(provider.invoke("models", { runner: "pi" }, pluginContext)).resolves.toEqual([
       {
-        runner: "pi",
         ...makora,
         key: "makora/deepseek-ai/DeepSeek-V4-Pro",
       },
@@ -1045,34 +1034,6 @@ describe("AgentsProvider runner support", () => {
     await expect(provider.invoke("models", { runner: "pi" }, unavailableContext)).resolves.toEqual([]);
   });
 
-  it("enumerates Claude models and preserves runner on persistentAgents", async () => {
-    const { provider } = setup();
-    const models = (await provider.invoke("models", { runner: "claude" }, context)) as Array<{
-      runner: string;
-      key: string;
-      resolvedModel: string;
-    }>;
-    expect(models).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          runner: "claude",
-          key: "claude/haiku",
-          resolvedModel: "claude-haiku-test",
-        }),
-      ]),
-    );
-
-    const persistentAgent = (await provider.invoke(
-      "create",
-      {
-        name: "claude-reviewer",
-        instructions: "Review messages.",
-        runner: "claude",
-      },
-      context,
-    )) as { runner: string };
-    expect(persistentAgent.runner).toBe("claude");
-  });
 });
 
 describe("AgentsProvider persistentAgent ownership privacy", () => {
@@ -1090,7 +1051,6 @@ describe("AgentsProvider persistentAgent ownership privacy", () => {
       parentId: "session:peer",
       name: persistentAgent.name,
       status: "idle",
-      runner: "pi",
       transport: "host",
       capabilities: ["steer", "followUp", "stop", "fabric"],
       startedAt: persistentAgent.createdAt,

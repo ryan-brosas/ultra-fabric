@@ -144,6 +144,14 @@ Failed mutation attempts release the reservation and do not switch models. Trigg
 
 For a host-enforced verification loop, set `prewalk.verificationMode` to `"gated"`. The hidden verify turn must run checks and report `workflow.gate()`; passing evidence settles, `revise` creates one scoped executor handoff, and missing/aborted/crashed evidence blocks at the configured `maxPhaseRevisions` cap. Omit the field for legacy prompt-only verification.
 
+Set `prewalk.delegateContext` to `true` to keep context gathering off Main. With the flag on, the armed planning instruction and the executor continuation both carry an explicit plan-then-delegate discipline: the frontier model plans and the executor implements and verifies, while recon and research go to the `scout`/`explorer` support roles or `consult.run` partition workers that return structured findings or evidence locators instead of whole files. Delegation stays conditional and bounded (one consult.run per fabric_exec, zero workers by default), and the flag defaults to off so zero agents remains the default.
+
+Three more opt-in levers tune the planning/execution split:
+
+- `prewalk.handoffRetirement` (default off) retires Main's planning-phase `read`/`grep`/`find`/`ls` results once the executor continuation is live and accepted. The checklist already carries the plan, so the executor stops replaying every exploration result as input each turn and re-reads only what it touches. Errors and evidence-bearing results always survive. Mirrors the SWE-Edit viewer/editor decomposition, which cut inference cost 17.9% on SWE-Bench Verified.
+- The **easy path** is a checklist disposition, not a config flag: a bounded mid-tier task may call `prewalk.checklist({ easy: true, items })` with 2-4 items. The host still hands off to the executor (unlike trivial) but Main skips deep research. Trivial stays for one-or-two-edit tasks, full for complex ones.
+- `prewalk.reuseChecklists` (default off) records each accepted checklist keyed by task text and seeds the next similar task's armed prompt with the nearest prior plan (token-overlap ranked, bounded to the newest 16, max 4 seed items) so Main adapts instead of re-deriving. Stored as `prewalk-checklists.json` beside the run root.
+
 Prewalk adds no system-prompt instructions. A dedicated hidden planning message is kept only while the frontier phase is armed. Accepting the identity-owned executor continuation removes it before provider inference. The hook also retains only the continuation owned by the current pending/continuing lifecycle and removes stale or legacy Prewalk continuation messages. Successful handoffs settle only after Pi reports no follow-up work remains. **Always re-arm** activates after settlement rather than during the same task. If a captured task settles without a monitored trigger, prewalk disarms instead of leaking into the next task. Failed handoffs remain blocked and never retry automatically. Retry is explicit. An explicit successful `agents.handoff()` takes precedence over automatic prewalk. Prewalk requires full code mode and is unavailable in Schema enforce mode.
 
 ### Pi model-provider extensions
@@ -157,38 +165,6 @@ Ultra Fabric automatically consumes Pi's effective `ModelRegistry`; it does not 
 Install the provider as a global/package extension, or place it in an auto-discovered trusted location, then run `/reload`. Ordinary Pi children inherit normal extension discovery because `agents.extensions` defaults to `true`; Ultra passes the canonical `provider/model-id` key to the child Pi CLI. Setting `extensions: false` deliberately starts Pi with `--no-extensions`, so extension-registered providers are unavailable in that child. A provider loaded only through a one-off parent `pi -e /path/to/provider.ts` flag is not propagated automatically; install/auto-discover it or use `models.json` before selecting its model.
 
 Provider authentication, endpoints, model metadata, and streaming remain owned by Pi and the provider extension. Ultra Fabric does not copy credentials or vendor a Makora-specific transport.
-
-### Claude Code runner
-
-Install and authenticate the official Claude Code CLI (`claude`) normally; Fabric invokes that binary rather than Anthropic's Agent SDK or a third-party API client. Select it per call or globally:
-
-```ts
-const models = await agents.models({ runner: "claude" });
-const haiku = models.find((model) => model.key === "claude/haiku");
-return agents.run({
-  runner: "claude",
-  model: haiku?.key,
-  task: "Review the current diff. Do not edit files.",
-  tools: ["read", "grep", "find", "ls"],
-});
-```
-
-`agents.models({ runner: "claude" })` asks the installed CLI for its initialization model catalog, including aliases, resolved IDs, descriptions, and supported effort levels. The list is not hard-coded and the handshake sends no user prompt or model inference request, so model discovery itself is not billable. Because it launches the configured local binary, model-authored `agents.models` calls carry Fabric's `execute` risk. Fabric caches it for 60 seconds. Claude model keys use `claude/<runtime-value>` (for example `claude/default`, `claude/sonnet`, or `claude/haiku`); Fabric strips that namespace before `--model`.
-
-Claude runs use `claude -p` with stream-JSON input/output, partial messages, `--permission-mode dontAsk`, and both `--tools` and `--allowedTools`. Fabric maps its portable core allowlist as follows:
-
-| Fabric tool  | Claude Code tool |
-| ------------ | ---------------- |
-| `read`       | `Read`           |
-| `grep`       | `Grep`           |
-| `find`, `ls` | `Glob`           |
-| `bash`       | `Bash`           |
-| `edit`       | `Edit`           |
-| `write`      | `Write`          |
-
-Unknown tools fail before launch. `extensions: false` starts Claude in safe mode; the default `true` preserves the user's normal Claude Code customizations while the explicit tool list still controls model-facing tools. JSON schemas use Claude's native `--json-schema`; usage, cost, turns, tool activity, errors, and Claude's session ID are normalized into the ordinary Fabric result and dashboard transcript. One-shot runs add `--no-session-persistence`.
-
-Claude-backed children are intentionally **not recursively Fabric-equipped**: `recursive: true`, `fabric_exec`, and direct `mesh.*` access are rejected. Use `runner: "pi"` for RLM/recursive Fabric, or use a Claude-backed persistent agent for host-managed mailbox/event coordination.
 
 ### Transports
 

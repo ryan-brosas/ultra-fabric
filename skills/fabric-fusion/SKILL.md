@@ -1,7 +1,6 @@
 ---
 name: fabric-fusion
 description: Multi-model deliberation. Two to 8 distinct models answer in parallel with web-capable tools, then a judge compares consensus, contradictions, coverage gaps, unique insights, and blind spots. Use when the cost of being wrong justifies multiple completions.
-disable-model-invocation: true
 ---
 
 # Fabric Fusion
@@ -32,26 +31,9 @@ await workflow.configure({
   description: `${panel.length}-model panel + judge (compare, don't merge)`,
 });
 
-// Resolve models across Pi's registry and Claude Code's runtime catalog.
-// Prefix Claude aliases with claude/ (for example claude/haiku) to select the
-// official CLI runner unambiguously. Claude Code is optional, so discovery is
-// best-effort when the panel contains only Pi models.
-type RunnerModel = FabricModelInfo & { runner: FabricAgentRunner };
-const models: RunnerModel[] = (await tools.models()).map((entry) => ({
-  ...entry,
-  runner: "pi" as const,
-}));
-try {
-  models.push(
-    ...(await agents.models({ runner: "claude" })).map((entry) => ({
-      ...entry,
-      runner: "claude" as const,
-    })),
-  );
-} catch {
-  // The installed Claude CLI is optional; report the combined available list below.
-}
-const resolve = (needle: string): RunnerModel => {
+// Resolve models from Pi's registry.
+const models: FabricModelInfo[] = await tools.models();
+const resolve = (needle: string): FabricModelInfo => {
   const n = needle.toLowerCase();
   const exact = models.filter((entry) => entry.key.toLowerCase() === n);
   if (exact.length === 1) return exact[0];
@@ -73,7 +55,7 @@ const members = panel.map((member) => ({
   label: (member.label || member.model).trim(),
 }));
 const modelIdentities = members.map((member) =>
-  `${member.runner}:${member.provider}:${member.resolvedModel ?? member.id}`
+  `${member.provider}:${member.resolvedModel ?? member.id}`
 );
 if (new Set(modelIdentities).size !== members.length) {
   throw new Error("Fusion requires distinct resolved models, not aliases of the same model.");
@@ -85,8 +67,8 @@ if (members.some((member) => !member.label) ||
 const explicitJudge = π.judge ? resolve(π.judge) : undefined;
 
 type PanelOutcome =
-  | { label: string; model: string; runner: FabricAgentRunner; status: "completed"; response: string }
-  | { label: string; model: string; runner: FabricAgentRunner; status: "failed"; error: string };
+  | { label: string; model: string; status: "completed"; response: string }
+  | { label: string; model: string; status: "failed"; error: string };
 
 // Plain, non-recursive members preserve one level of deliberation.
 await phase("Panel", { total: members.length });
@@ -97,19 +79,18 @@ const outcomes = await parallel(
         `Independently answer this task. Use web search (run gsearch or curl via bash) when fresh sources help, and cite them inline.\n\nTask:\n${task}`,
         {
           label: `panel · ${member.label}`.slice(0, 50),
-          runner: member.runner,
           model: member.key,
           tools: toolset,
           ...(thinking ? { thinking } : {}),
         },
       );
       return {
-        label: member.label, model: member.key, runner: member.runner,
+        label: member.label, model: member.key,
         status: "completed", response,
       };
     } catch (error) {
       return {
-        label: member.label, model: member.key, runner: member.runner,
+        label: member.label, model: member.key,
         status: "failed",
         error: error instanceof Error ? error.message : String(error),
       };

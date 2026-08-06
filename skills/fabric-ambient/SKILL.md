@@ -1,7 +1,6 @@
 ---
 name: fabric-ambient
 description: Creates a persistent Pi Fabric supervisor or advisor profile. Use for ambient supervision, ongoing peer review, an advisor, or a goal watcher without another extension.
-disable-model-invocation: true
 ---
 
 # Fabric Ambient Agents

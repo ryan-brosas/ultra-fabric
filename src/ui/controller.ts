@@ -8,7 +8,6 @@ import type { FabricState } from "../fabric-state.js";
 import type { FabricThinking } from "../thinking.js";
 import type { MeshEvent } from "../mesh/store.js";
 import type { FabricDashboardMessageTarget } from "./dashboard.js";
-import type { ModelSource } from "./model-picker.js";
 import { createDashboardSnapshot } from "./snapshot.js";
 import { isActiveStatus, type FabricDashboardSnapshot, type FabricUiPersistentAgent, type FabricUiAgent } from "./types.js";
 import { FabricWidget, shouldShowFabricWidget } from "./widget.js";
@@ -27,7 +26,6 @@ const emptySnapshot = (): FabricDashboardSnapshot => {
       name: "Main",
       kind: "main",
       status: "idle",
-      runner: "pi",
       transport: "host",
       cwd: process.cwd(),
       startedAt: now,
@@ -126,20 +124,9 @@ export class FabricUiController {
     }
     if (!this.#context) this.start(context);
     else this.#refresh();
-    const [{ FabricDashboard }, { buildClaudeModelSource, buildModelSource }] =
+    const [{ FabricDashboard }, { buildModelSource }] =
       await Promise.all([import("./dashboard.js"), import("./model-picker.js")]);
     const modelSource = buildModelSource(context.modelRegistry);
-    let claudeModelSource: ModelSource | undefined;
-    if (this.#snapshot.persistentAgents.some((persistentAgent) => persistentAgent.runner === "claude")) {
-      try {
-        claudeModelSource = buildClaudeModelSource(await this.state.agents.claudeModels());
-      } catch (error) {
-        context.ui.notify(
-          `Claude model discovery failed: ${error instanceof Error ? error.message : String(error)}`,
-          "warning",
-        );
-      }
-    }
     const reportUpdate = (message: string, update: Promise<unknown>): void => {
       void update
         .then(() => {
@@ -268,7 +255,6 @@ export class FabricUiController {
             ...(this.codePreviewSettings
               ? { codePreviewSettings: this.codePreviewSettings }
               : {}),
-            ...(claudeModelSource ? { claudeModelSource } : {}),
             onTargetMessage,
             onAgentStop,
             agentTranscript: (agent, followLatest) =>

@@ -267,7 +267,7 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     }
     await state.initialize(context);
     if (state.initialized) {
-      autoArmPrewalk(pi, state.prewalk, state.config, context);
+      await autoArmPrewalk(pi, state.prewalk, state.config, context);
     }
     applyFabricMode();
     fabricUi.start(context);

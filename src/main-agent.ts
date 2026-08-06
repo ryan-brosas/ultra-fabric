@@ -10,7 +10,6 @@ export interface FabricMainAgentInfo {
   name: "Main";
   kind: "main";
   status: "idle" | "running" | "remote";
-  runner: "pi";
   transport: "host";
   cwd?: string;
   sessionId?: string;
@@ -118,7 +117,6 @@ export class MainAgentController implements FabricMainAgentTarget {
       name: "Main",
       kind: "main",
       status: this.local ? (context?.isIdle() === false ? "running" : "idle") : "remote",
-      runner: "pi",
       transport: "host",
       ...(this.local ? { cwd: this.cwd, startedAt: this.startedAt } : {}),
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),

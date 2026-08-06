@@ -178,6 +178,9 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ prewalk: { failureMemory: true } }).prewalk).toMatchObject({
       failureMemory: true,
     });
+    expect(normalizeFabricConfig({ prewalk: { autoScout: true } }).prewalk).toMatchObject({
+      autoScout: true,
+    });
     // A configured run root must be absolute so agent evidence lands somewhere predictable.
     expect(normalizeFabricConfig({ agents: { runRoot: "/tmp/fabric-runs" } }).agents.runRoot).toBe(
       "/tmp/fabric-runs",

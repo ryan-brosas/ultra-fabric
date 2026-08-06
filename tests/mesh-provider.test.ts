@@ -27,7 +27,6 @@ const participant = (id: string): FabricParticipantInfo => ({
   parentId: identity.id,
   name: id,
   status: "idle",
-  runner: "pi",
   transport: "host",
   capabilities: ["steer", "followUp", "stop", "fabric"],
   startedAt: 1,

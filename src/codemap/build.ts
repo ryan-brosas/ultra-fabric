@@ -1,8 +1,9 @@
 import { pageRank, type RankEdge } from "./rank.js";
-import { buildSymbolIndex, buildAllEdges, buildNodeKeys } from "./symbols.js";
+import { buildSymbolIndex, buildAllEdges, buildNodeKeys, type SymbolIndex } from "./symbols.js";
 import { expandNeighborhood, buildBothAdjacency, type PrebuiltAdjacency } from "./search.js";
 import { findSourceFiles } from "./lang.js";
 import { runOutlineCached } from "./cache.js";
+import type { RenderNode } from "./render-heat.js";
 
 
 // Query-anchored multi-hop retrieval: instead of a global PageRank over every
@@ -62,6 +63,34 @@ export const buildCodeGraph = (options: { root?: string } = {}) => {
 };
 
 export type CodeGraph = ReturnType<typeof buildCodeGraph>;
+
+// Build RenderNode[] aligned 1:1 with CodeGraph.nodeKeys so the heat field and
+// heat-field renderer can index the same node ordering. Each nodeKey is a
+// "name:file" symbol key; we look it up in the symbol index to attach line and
+// signature. Keys with no matching SymbolNode (rare parent fallbacks) get a
+// minimal entry so the renderer still has a stable per-node id.
+export const buildRenderNodes = (
+  keys: readonly string[],
+  index: SymbolIndex,
+): RenderNode[] => {
+  const nodes: RenderNode[] = [];
+  for (const key of keys) {
+    const sep = key.lastIndexOf(":");
+    const name = key.slice(0, sep);
+    const file = key.slice(sep + 1);
+    const syms = index.byFile.get(file);
+    const sym = syms?.find((s) => s.name === name);
+    nodes.push({
+      id: key,
+      name,
+      kind: sym?.symbolType ?? "decl",
+      file,
+      line: sym?.line ?? 0,
+      sig: sym?.signature?.trim() || name,
+    });
+  }
+  return nodes;
+};
 
 
 

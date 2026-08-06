@@ -1,5 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { CapturedToolCatalog } from "../src/capture/catalog.js";
 import { registerFabricCommand } from "../src/commands/fabric.js";
 import {
@@ -347,7 +350,6 @@ describe("/fabric command", () => {
         list: () => [{
           id: "agent-12345678",
           status: "running",
-          runner: "pi",
           transport: "process",
           name: "review-run",
         }],
@@ -356,7 +358,6 @@ describe("/fabric command", () => {
         list: () => [{
           id: "persistentAgent-12345678",
           status: "idle",
-          runner: "claude",
           queued: 2,
           name: "reviewer",
         }],
@@ -545,5 +546,37 @@ describe("/fabric command", () => {
     expect(message).toContain("pi.edit, pi.write, schema.commit");
     expect(message).toContain("outcomes: on");
     expect(message).toContain("context QoS: on");
+  });
+
+  it("init defers root context files and reports the migration guidance in notify", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "fabric-init-"));
+    mkdirSync(join(scratch, ".pi"), { recursive: true });
+    writeFileSync(join(scratch, ".pi", "project.md"), "# legacy project context\n");
+    let handler: ((argumentsText: string, context: ExtensionContext) => Promise<void>) | undefined;
+    const pi = {
+      registerCommand: vi.fn(
+        (_name: string, definition: { handler: typeof handler }) => {
+          handler = definition.handler;
+        },
+      ),
+    } as unknown as ExtensionAPI;
+    const notify = vi.fn();
+    const context = { cwd: scratch, ui: { notify } } as unknown as ExtensionContext;
+    registerFabricCommand(pi, {
+      state: { ensure: vi.fn().mockResolvedValue(undefined) } as unknown as FabricState,
+      fabricUi: {} as FabricUiController,
+      capturedTools: {} as CapturedToolCatalog,
+      applyFabricMode: vi.fn(),
+      suspendToolCapture: vi.fn(),
+    });
+    await handler!("init", context);
+    const message = notify.mock.calls[0]![0] as string;
+    expect(message).toContain("deferred");
+    expect(message).toContain(".pi/project.md");
+    expect(message).toContain("copy its content to the root-level project.md");
+    const createdLine = message.split("\n").find((line) => line.startsWith("created:"));
+    expect(createdLine).not.toContain("project.md");
+    expect(existsSync(join(scratch, "project.md"))).toBe(false);
+    rmSync(scratch, { recursive: true, force: true });
   });
 });

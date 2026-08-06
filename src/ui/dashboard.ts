@@ -1099,7 +1099,7 @@ export class FabricDashboard implements Component, Focusable {
   }
 
   private modelSourceForPersistentAgent(persistentAgent: FabricUiPersistentAgent): ModelSource | undefined {
-    return persistentAgent.runner === "claude" ? this.claudeModelSource : this.modelSource;
+    return this.modelSource;
   }
 
   private openModelPicker(entity: Entity): void {
@@ -1112,14 +1112,8 @@ export class FabricDashboard implements Component, Focusable {
       theme: this.theme,
       source,
       currentValue: persistentAgent.model ?? INHERIT_VALUE,
-      headerText:
-        persistentAgent.runner === "claude"
-          ? `Model for Claude persistent agent "${persistentAgent.name}". Pick Inherit to use the Claude default.`
-          : `Model for persistent agent "${persistentAgent.name}". Pick Inherit to use the Fabric Pi default.`,
-      inheritName:
-        persistentAgent.runner === "claude"
-          ? "Use the Fabric Claude model (or Claude Code runtime default)"
-          : "Use the Fabric Pi model (or host default)",
+      headerText: `Model for persistent agent "${persistentAgent.name}". Pick Inherit to use the Fabric Pi default.`,
+      inheritName: "Use the Fabric Pi model (or host default)",
       onSelect: (value) => {
         const model = value === INHERIT_VALUE ? undefined : value;
         this.onPersistentAgentModel!(persistentAgent.id, model);
@@ -2445,7 +2439,6 @@ export class FabricDashboard implements Component, Focusable {
       const main = entity.value;
       field("ID", main.id);
       field("Scope", "user-facing Pi session");
-      field("Runner", main.runner);
       field("Model", main.model);
       field("Thinking", main.thinking);
       field("Transport", main.transport);
@@ -2461,7 +2454,6 @@ export class FabricDashboard implements Component, Focusable {
       const peer = entity.value;
       field("ID", peer.id);
       field("Scope", "concurrent root Pi session");
-      field("Runner", peer.runner);
       field("Model", peer.model);
       field("Thinking", peer.thinking);
       field("Transport", peer.transport);
@@ -2473,7 +2465,6 @@ export class FabricDashboard implements Component, Focusable {
     } else if (entity.kind === "agent") {
       const agent = entity.value;
       field("ID", agent.id);
-      field("Runner", agent.runner);
       field("Model", agent.model);
       structuredField("Route", agent.route);
       field("Capability profile", agent.profile);
@@ -2493,7 +2484,6 @@ export class FabricDashboard implements Component, Focusable {
     } else if (entity.kind === "persistentAgent") {
       const persistentAgent = entity.value;
       field("ID", persistentAgent.id);
-      field("Runner", persistentAgent.runner);
       field("Model override", persistentAgent.model ?? "inherit");
       field("Active worker model", persistentAgent.worker?.model);
       field("Thinking override", persistentAgent.thinking ?? "inherit");
@@ -2553,7 +2543,6 @@ export class FabricDashboard implements Component, Focusable {
       const def = entity.value;
       field("Scope", "global template");
       field("ID", def.id);
-      field("Runner", def.runner);
       field("Delivery", `${def.delivery} · ${def.responseMode}`);
       field("Model", def.model ?? "inherit");
       field("Thinking", def.thinking ?? "inherit");
@@ -2573,7 +2562,6 @@ export class FabricDashboard implements Component, Focusable {
       field("Parent", canonical?.parentId);
       field("Owner host", canonical?.ownerHostId);
       field("Owner identity", canonical?.ownerIdentityId);
-      field("Runner", canonical?.runner);
       field("Transport", canonical?.transport);
       field("Capabilities", canonical?.capabilities.join(", "));
       field("Local", canonical ? (canonical.local ? "yes" : "no") : undefined);

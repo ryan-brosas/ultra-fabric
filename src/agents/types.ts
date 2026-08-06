@@ -3,7 +3,7 @@ import type {
   SessionEntry,
   SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
-import type { FabricAgentRunner, FabricAgentTransport } from "../config.js";
+import type { FabricAgentTransport } from "../config.js";
 import type { FabricThinking } from "../thinking.js";
 import type { FabricRunEnvelopeV1 } from "../run/context.js";
 import type { ModelRouteDecision } from "../routing/model-router.js";
@@ -56,7 +56,6 @@ export interface AgentRunRequest {
   turnBudget?: AgentTurnBudget;
   images?: ImageContent[];
   name?: string;
-  runner?: FabricAgentRunner;
   transport?: FabricAgentTransport;
   model?: string;
   route?: ModelRouteDecision;
@@ -122,7 +121,6 @@ export interface AgentRunRecord {
   completion?: string;
   turnBudget?: AgentTurnBudget & { outcome?: "within-budget" | "wrap-up-requested" | "exceeded" };
   status: AgentRunStatus;
-  runner: FabricAgentRunner;
   transport: FabricAgentTransport;
   cwd: string;
   model?: string;
@@ -172,7 +170,6 @@ export interface AgentHandleInfo {
   role: FabricAgentRole;
   name: string;
   status: AgentRunStatus;
-  runner: FabricAgentRunner;
   transport: FabricAgentTransport;
   cwd: string;
   model?: string;
@@ -198,7 +195,6 @@ export interface AgentWorkerOptions {
   id: string;
   role: FabricAgentRole;
   turnBudget?: AgentTurnBudget;
-  runner: FabricAgentRunner;
   name: string;
   taskFile: string;
   imagesFile?: string;
@@ -208,7 +204,6 @@ export interface AgentWorkerOptions {
   schemaFile?: string;
   cwd: string;
   piBinary: string;
-  claudeBinary: string;
   timeoutMs: number;
   depth: number;
   fullCodeMode: boolean;

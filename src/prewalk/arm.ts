@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { runScoutBrief, type ScoutRunner } from "./scout-brief.js";
 import type { FabricConfig } from "../config.js";
 import { checklistSeed, nearestChecklist, prewalkMemoryDir } from "./checklist-memory.js";
 import { failureSeed, nearestFailures, prewalkFailureDir } from "./failure-memory.js";
@@ -11,7 +12,13 @@ import {
 
 // One arming path for the explicit /fabric prewalk command and for configured
 // auto-arming, so both produce the same arm, advisory prompt, and status.
-export const armPrewalk = (
+export interface ArmPrewalkDeps {
+  // Host-supplied cheap-model runner. When absent, the scout is skipped so
+  // host wiring decides whether this host can spawn agents at arm time.
+  scoutRun?: ScoutRunner;
+}
+
+export const armPrewalk = async (
   extension: ExtensionAPI,
   controller: PrewalkController,
   prewalk: FabricConfig["prewalk"],
@@ -19,7 +26,8 @@ export const armPrewalk = (
   model: string,
   task?: string,
   runRoot?: string,
-): void => {
+  deps: ArmPrewalkDeps = {},
+): Promise<void> => {
   controller.arm({
     model,
     sessionId: context.sessionManager.getSessionId(),
@@ -58,6 +66,17 @@ export const armPrewalk = (
   const armedPromptFinal = failureBlock
     ? `${seededPrompt}\n\n${failureBlock}`
     : seededPrompt;
+  // Auto-scout: a cheap small-model pass gathers a compressed context brief
+  // before the frontier model plans. Opt-in (prewalk.autoScout), bounded
+  // output, and never blocks arming. The host supplies the runner; without
+  // one the scout is skipped.
+  const scoutBrief =
+    prewalk.autoScout === true && task && deps.scoutRun
+      ? await runScoutBrief(deps.scoutRun, task, runRoot)
+      : undefined;
+  const armedPromptScouted = scoutBrief
+    ? `${armedPromptFinal}\n\nScout brief:\n${scoutBrief}`
+    : armedPromptFinal;
   const armedMessageType = prewalkArmedMessageType();
   if (
     !hasPrewalkArmedPrompt(context.sessionManager.getBranch(), armedPrompt, armedMessageType)
@@ -65,7 +84,7 @@ export const armPrewalk = (
     extension.sendMessage(
       {
         customType: armedMessageType,
-        content: armedPromptFinal,
+        content: armedPromptScouted,
         display: false,
         details: { model },
       },
@@ -78,17 +97,17 @@ export const armPrewalk = (
 // Configured auto-arming: silent, non-interactive, and only when the arm can
 // actually fire. An unset or malformed model, a missing agent runtime, or an
 // existing arm leaves the session untouched.
-export const autoArmPrewalk = (
+export const autoArmPrewalk = async (
   extension: ExtensionAPI,
   controller: PrewalkController,
   config: FabricConfig,
   context: ExtensionContext,
-): boolean => {
+): Promise<boolean> => {
   const prewalk = config.prewalk;
   if (prewalk.arm === "off") return false;
   const model = prewalk.model?.trim();
   if (!model || !model.includes("/")) return false;
   if (controller.isArmed(context.sessionManager.getSessionId())) return false;
-  armPrewalk(extension, controller, prewalk, context, model, undefined, config.agents.runRoot);
+  await armPrewalk(extension, controller, prewalk, context, model, undefined, config.agents.runRoot);
   return true;
 };

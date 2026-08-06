@@ -1739,7 +1739,6 @@ return [await consult.run(request), await consult.run(request)];
             name: String(args.name),
             task: String(args.task),
             status: "completed",
-            runner: "pi",
             transport: "process",
             cwd,
             model: tokens ? "p/a" : "p/b",
@@ -1843,7 +1842,6 @@ return runConsult({
       expect(scopes).toEqual(expect.arrayContaining([["src/tokens"], ["src/sessions"]]));
       expect(calls).toEqual(expect.arrayContaining([
         expect.objectContaining({
-          runner: "pi",
           recursive: false,
           extensions: false,
           tools: ["read", "grep", "find", "ls"],

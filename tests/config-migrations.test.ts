@@ -117,13 +117,13 @@ describe("Fabric configuration migrations", () => {
 
   it("merges both section names with the canonical section taking precedence", () => {
     const result = migrateFabricConfigDocument({
-      subagents: { runner: "pi", claude: { binary: "old", model: "claude/old" }, defaultTools: ["bash"] },
-      agents: { runner: "claude", claude: { binary: "new" }, defaultTools: ["read"] },
+      subagents: { transport: "process", thinking: "low", defaultTools: ["bash"] },
+      agents: { transport: "auto", defaultTools: ["read"] },
     });
 
     expect(result.document.agents).toEqual({
-      runner: "claude",
-      claude: { binary: "new", model: "claude/old" },
+      transport: "auto",
+      thinking: "low",
       defaultTools: ["read"],
     });
     expect(result.document).not.toHaveProperty("subagents");
@@ -145,12 +145,12 @@ describe("Fabric configuration migrations", () => {
 
   it("migrates each config layer before applying project precedence", () => {
     const paths = fixture();
-    fs.writeFileSync(paths.globalPath, JSON.stringify({ agents: { runner: "claude", maxConcurrent: 2 } }));
-    fs.writeFileSync(paths.projectPath, JSON.stringify({ subagents: { runner: "pi", transport: "tmux" } }));
+    fs.writeFileSync(paths.globalPath, JSON.stringify({ agents: { thinking: "low", maxConcurrent: 2 } }));
+    fs.writeFileSync(paths.projectPath, JSON.stringify({ subagents: { transport: "tmux" } }));
 
     const config = loadFabricConfig({ cwd: paths.cwd, agentDir: paths.agentDir, projectTrusted: true });
-    expect(config.agents).toMatchObject({ runner: "pi", transport: "tmux", maxConcurrent: 2 });
-    expect(JSON.parse(fs.readFileSync(paths.globalPath, "utf8"))).toMatchObject({ configVersion: 3, agents: { runner: "claude" } });
+    expect(config.agents).toMatchObject({ transport: "tmux", maxConcurrent: 2 });
+    expect(JSON.parse(fs.readFileSync(paths.globalPath, "utf8"))).toMatchObject({ configVersion: 3, agents: { thinking: "low" } });
     expect(JSON.parse(fs.readFileSync(paths.projectPath, "utf8"))).toEqual({
       configVersion: 3,
       agents: { runner: "pi", transport: "tmux" },

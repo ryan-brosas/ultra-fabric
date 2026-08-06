@@ -188,7 +188,6 @@ const snapshot = (): FabricDashboardSnapshot => {
         completion: "Return one recommendation, then idle.",
         turnBudget: { maxTurns: 8, graceTurns: 1 },
         status: "idle",
-        runner: "pi",
         events: ["turn_end"],
         topics: ["team.review"],
         delivery: "mailbox",
@@ -278,7 +277,6 @@ describe("Fabric dynamic UI", () => {
       id: "persistentAgent-run-1",
       name: "worker",
       status: "running",
-      runner: "pi",
       transport: "process",
       cwd: "/tmp/project",
     };
@@ -298,7 +296,6 @@ describe("Fabric dynamic UI", () => {
       id: "persistentAgent-run-2",
       name: "worker",
       status: "running",
-      runner: "pi",
       transport: "process",
       cwd: "/tmp/project",
     };
@@ -1101,37 +1098,6 @@ describe("Fabric dynamic UI", () => {
     }
   });
 
-  it("uses the Claude runtime catalog for a Claude persistentAgent", () => {
-    const current = snapshot();
-    current.persistentAgents[0]!.runner = "claude";
-    current.persistentAgents[0]!.model = "claude/haiku";
-    const onPersistentAgentModel = vi.fn();
-    const dashboard = new FabricDashboard(
-      { requestRender: vi.fn() } as unknown as TUI,
-      theme,
-      () => current,
-      vi.fn(),
-      {
-        modelSource: persistentAgentModelSource,
-        claudeModelSource: {
-          models: [{ provider: "claude", id: "haiku", name: "Haiku (runtime)" }],
-          lastUsed: {},
-        },
-        onPersistentAgentModel,
-      },
-    );
-    try {
-      openPersistentAgentDetail(dashboard);
-      dashboard.handleInput("m");
-      const picker = dashboard.render(120).join("\n");
-      expect(picker).toContain('Model for Claude persistent agent "advisor"');
-      expect(picker).toContain("Haiku (runtime)");
-      dashboard.handleInput("\r");
-      expect(onPersistentAgentModel).toHaveBeenCalledWith("persistentAgent-1", "claude/haiku");
-    } finally {
-      dashboard.dispose();
-    }
-  });
 
   it("picking Inherit clears the persistentAgent model override", () => {
     const tui = { requestRender: vi.fn() } as unknown as TUI;
@@ -1660,7 +1626,6 @@ describe("Fabric dynamic UI", () => {
         parentId: "session:peer",
         name: "remote implementor",
         status: "running",
-        runner: "pi",
         transport: "process",
         capabilities: ["steer", "followUp", "stop"],
         startedAt: current.now - 1_000,
@@ -2794,7 +2759,6 @@ describe("Fabric dashboard Agent templates and instructions editor", () => {
           completion: "Return one recommendation, then idle.",
           turnBudget: { maxTurns: 8, graceTurns: 1 },
           status: "idle",
-          runner: "pi",
           events: [],
           topics: [],
           delivery: "mailbox",
@@ -2815,7 +2779,6 @@ describe("Fabric dashboard Agent templates and instructions editor", () => {
           name: "global-reviewer",
           role: "advisor",
           instructions: "You are a global reviewer template.",
-          runner: "pi",
           events: ["turn_end"],
           topics: [],
           delivery: "mailbox",

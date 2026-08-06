@@ -294,7 +294,6 @@ export class LifecycleBroker {
       event.source.ownerIdentityId &&
       participant.kind === event.source.kind &&
       participant.rootId === event.source.rootId &&
-      participant.runner === event.source.runner &&
       participant.ownerHostId === event.source.ownerHostId &&
       participant.ownerIdentityId === event.source.ownerIdentityId
     );

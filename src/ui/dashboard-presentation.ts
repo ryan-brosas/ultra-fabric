@@ -51,7 +51,6 @@ export const entityTail = (entity: Entity, now: number): string => {
             : agent.currentTool ?? (agent.status === "running" ? "thinking" : undefined);
     const parts = [
       summary,
-      agent.runner,
       agent.model,
       agent.usage ? `${formatTokens(agent.usage.input + agent.usage.output)} tok` : undefined,
       agent.toolCalls !== undefined ? `${agent.toolCalls} tools` : undefined,
@@ -62,7 +61,6 @@ export const entityTail = (entity: Entity, now: number): string => {
   if (entity.kind === "persistentAgent") {
     const persistentAgent = entity.value;
     return [
-      persistentAgent.runner,
       persistentAgent.model ?? persistentAgent.worker?.model,
       persistentAgent.worker?.currentTool,
       persistentAgent.worker?.usage
@@ -78,7 +76,6 @@ export const entityTail = (entity: Entity, now: number): string => {
     const def = entity.value;
     return [
       "global template",
-      def.runner,
       def.model ?? "inherit",
       def.responseMode === "directive" ? "directive" : undefined,
       def.delivery !== "mailbox" ? def.delivery : undefined,

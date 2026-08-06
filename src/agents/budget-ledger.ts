@@ -26,7 +26,6 @@ export interface BudgetLedgerEntry {
   cost: number;
   tokens: number;
   ts: number;
-  runner?: string;
   persistentAgentId?: string;
   persistentAgentName?: string;
   input?: number;
@@ -43,7 +42,6 @@ export interface BudgetLedgerSummary {
 export interface BudgetLedgerDetail {
   cost: number;
   tokens: number;
-  byRunner: Record<string, { cost: number; tokens: number }>;
   byPersistentAgent: Record<string, { cost: number; tokens: number }>;
   entries: BudgetLedgerEntry[];
 }
@@ -162,14 +160,13 @@ const parseBudgetLedgerEntry = (value: unknown): BudgetLedgerEntry | undefined =
 
 /**
  * Sum the append-only ledger with full per-attribution breakdown. Reuses the
- * tolerant line-parsing semantics of readBudgetLedger while exposing runner/
+ * tolerant line-parsing semantics of readBudgetLedger while exposing
  * persistentAgent/token-kind rollups for orchestrator decisions.
  */
 export function readBudgetLedgerDetailed(file: string): BudgetLedgerDetail {
   const detail: BudgetLedgerDetail = {
     cost: 0,
     tokens: 0,
-    byRunner: {},
     byPersistentAgent: {},
     entries: [],
   };
@@ -187,10 +184,6 @@ export function readBudgetLedgerDetailed(file: string): BudgetLedgerDetail {
       detail.cost += Number(entry.cost) || 0;
       detail.tokens += Number(entry.tokens) || 0;
       detail.entries.push(entry);
-      const runnerKey = entry.runner ?? "unknown";
-      const runnerRollup = (detail.byRunner[runnerKey] ??= { cost: 0, tokens: 0 });
-      runnerRollup.cost += entry.cost;
-      runnerRollup.tokens += entry.tokens;
       if (entry.persistentAgentId) {
         const persistentAgentRollup = (detail.byPersistentAgent[entry.persistentAgentId] ??= { cost: 0, tokens: 0 });
         persistentAgentRollup.cost += entry.cost;

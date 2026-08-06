@@ -33,7 +33,6 @@ export const createRunningRecord = (
   name: options.name,
   task,
   status: "running",
-  runner: options.runner,
   transport: options.transport,
   cwd: options.cwd,
   ...(options.model ? { model: options.model } : {}),

@@ -235,10 +235,9 @@ describe.skipIf(!hasWorker)("AgentManager real worker e2e", () => {
     expect(usageEvents.length).toBeGreaterThanOrEqual(2);
 
     const first = usageEvents[0]!.data as {
-      cumulativeTokens: number; runner: string; depth: number; input: number; output: number;
+      cumulativeTokens: number; depth: number; input: number; output: number;
     };
     expect(first.cumulativeTokens).toBe(165);
-    expect(first.runner).toBe("pi");
     expect(first.depth).toBe(1);
     expect(first.input).toBe(100);
     expect(first.output).toBe(50);
@@ -248,7 +247,6 @@ describe.skipIf(!hasWorker)("AgentManager real worker e2e", () => {
     expect(second.input).toBe(200);
 
     const detail = readBudgetLedgerDetailed(ledger.file);
-    expect(detail.byRunner.pi).toEqual({ cost: expect.closeTo(0.03), tokens: 495 });
     expect(detail.entries.length).toBeGreaterThanOrEqual(2);
     expect(detail.entries.reduce((sum, entry) => sum + entry.tokens, 0)).toBe(495);
   });

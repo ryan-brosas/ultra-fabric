@@ -3,7 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parse as parseYaml } from "yaml";
-import type { FabricAgentRunner } from "../config.js";
 import { isFabricThinking, type FabricThinking } from "../thinking.js";
 import {
   isFabricPersistentAgentHostEvent,
@@ -31,7 +30,6 @@ export interface AgentRoleProfile {
   behavior: string;
   turnBudget: AgentTurnBudget;
   tools?: string[];
-  runner?: FabricAgentRunner;
   model?: string;
   thinking?: FabricThinking;
   timeoutMs?: number;
@@ -58,7 +56,6 @@ const ALLOWED_FIELDS = new Set([
   "maxTurns",
   "graceTurns",
   "tools",
-  "runner",
   "model",
   "thinking",
   "timeoutMs",
@@ -137,11 +134,6 @@ export const parseAgentRoleProfile = (
     { maxTurns: raw.maxTurns, graceTurns: raw.graceTurns },
     `${filePath} turn budget`,
   );
-  const runner = raw.runner === undefined
-    ? undefined
-    : raw.runner === "pi" || raw.runner === "claude"
-      ? raw.runner
-      : (() => { throw new Error(`${filePath}: runner must be pi or claude`); })();
   const thinking = raw.thinking === undefined
     ? undefined
     : isFabricThinking(raw.thinking)
@@ -206,7 +198,6 @@ export const parseAgentRoleProfile = (
     behavior,
     turnBudget,
     ...(tools ? { tools } : {}),
-    ...(runner ? { runner } : {}),
     ...(typeof raw.model === "string" && raw.model.trim() ? { model: raw.model.trim() } : {}),
     ...(thinking ? { thinking } : {}),
     ...(timeoutMs ? { timeoutMs } : {}),
@@ -399,7 +390,6 @@ export class AgentRoleRegistry {
       turnBudget: boundedBudget(requestedBudget, profile.turnBudget),
       systemPrompt: renderAgentRolePrompt(profile, request.task, request.systemPrompt),
       ...(tools ? { tools: [...tools] } : {}),
-      ...(request.runner ? {} : profile.runner ? { runner: profile.runner } : {}),
       ...(() => {
         const model = this.#resolveModel(role, request.model, profile.model);
         return model ? { model } : {};
@@ -456,7 +446,6 @@ export class AgentRoleRegistry {
         ? {}
         : profile.freshness ? { validWhile: roleFreshnessPredicate(profile.freshness) } : {}),
       ...(tools ? { tools: [...tools] } : {}),
-      ...(request.runner ? {} : profile.runner ? { runner: profile.runner } : {}),
       ...(() => {
         const model = this.#resolveModel(role, request.model, profile.model);
         return model ? { model } : {};

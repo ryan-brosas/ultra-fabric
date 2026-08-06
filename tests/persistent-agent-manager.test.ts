@@ -666,7 +666,6 @@ describe("PersistentAgentRuntime", () => {
       name: "worker",
       task: "startup",
       status: "failed",
-      runner: "pi",
       transport: "process",
       cwd: process.cwd(),
       startedAt: 1,
@@ -707,7 +706,6 @@ describe("PersistentAgentRuntime", () => {
       name: "worker",
       task: "effectful",
       status: "failed",
-      runner: "pi",
       transport: "process",
       cwd: process.cwd(),
       startedAt: 1,
@@ -986,82 +984,6 @@ describe("PersistentAgentRuntime", () => {
     ).toHaveLength(1);
   });
 
-  it("resumes a Claude Code session after a persistent persistentAgent is restored", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-claude-persistentAgent-"));
-    roots.push(root);
-    const invocationLog = path.join(root, "claude-args.jsonl");
-    process.env.FAKE_CLAUDE_LOG = invocationLog;
-    try {
-      const mesh = new MeshStore(path.join(root, "mesh"), 64 * 1024, 100);
-      const agents = new AgentManager(process.cwd(), DEFAULT_FABRIC_CONFIG.agents, {
-        workerPath: path.resolve("src/worker.ts"),
-        claudeBinary: path.resolve("tests/fixtures/fake-claude.mjs"),
-        runRoot: path.join(root, "runs"),
-      });
-      agentManagers.push(agents);
-      const identity: MeshIdentity = {
-        id: "session:test",
-        name: "main",
-        kind: "main",
-        sessionId: "test",
-      };
-      const meshConfig = { ...DEFAULT_FABRIC_CONFIG.mesh, persistentAgentPollMs: 20 };
-      const persistentAgentRoot = path.join(root, "persistentAgents");
-      const first = new PersistentAgentRuntime(
-        "test",
-        identity,
-        mesh,
-        meshConfig,
-        agents,
-        () => {},
-        { persistentAgentRoot, persistent: true },
-      );
-      persistentAgentManagers.push(first);
-      const persistentAgent = await first.create({
-        name: "claude-reviewer",
-        instructions: "Review each mailbox item.",
-        runner: "claude",
-        tools: ["read"],
-      });
-
-      const firstReply = await first.ask(persistentAgent.id, "first message");
-      expect(firstReply.text).toContain("fake claude complete");
-      await waitFor(() => first.status(persistentAgent.id).status === "idle");
-      expect(first.status(persistentAgent.id)).toMatchObject({ runner: "claude", status: "idle" });
-      await first.close();
-      persistentAgentManagers.splice(persistentAgentManagers.indexOf(first), 1);
-
-      const restored = new PersistentAgentRuntime(
-        "test",
-        identity,
-        mesh,
-        meshConfig,
-        agents,
-        () => {},
-        { persistentAgentRoot, persistent: true },
-      );
-      persistentAgentManagers.push(restored);
-      expect(restored.status(persistentAgent.id)).toMatchObject({ runner: "claude", status: "idle" });
-      const secondReply = await restored.ask(persistentAgent.id, "second message");
-      expect(secondReply.text).toContain("fake claude complete");
-
-      const invocations = fs
-        .readFileSync(invocationLog, "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as { argv: string[] });
-      expect(invocations).toHaveLength(2);
-      expect(invocations[0]!.argv).not.toContain("--resume");
-      const resumeAt = invocations[1]!.argv.indexOf("--resume");
-      expect(invocations[1]!.argv[resumeAt + 1]).toBe(
-        "11111111-1111-4111-8111-111111111111",
-      );
-      expect(invocations[0]!.argv).not.toContain("--no-session-persistence");
-      expect(restored.readLog(persistentAgent.id).session.filter((line) => line.parsed)).not.toHaveLength(0);
-    } finally {
-      delete process.env.FAKE_CLAUDE_LOG;
-    }
-  });
 
   it("restores project-scoped persistentAgents across different Pi sessions", async () => {
     // Project scope stores persistentAgents at a shared root (no sessionId segment), so a
@@ -1739,7 +1661,6 @@ describe("PersistentAgentRuntime", () => {
       responseMode: "text",
       triggerTurn: false,
       coalesce: true,
-      runner: "pi",
       model: "anthropic/sonnet",
     });
     // history never crosses the global⇄project boundary
@@ -1963,7 +1884,6 @@ describe("PersistentAgentRuntime extensions flag (read-only Pi persistentAgents)
       const persistentAgent = await persistentAgents.create({
         name: "readonly-nav",
         instructions: "Read-only navigator.",
-        runner: "pi",
         extensions: false,
         tools: ["read"],
         responseMode: "text",
@@ -1981,7 +1901,6 @@ describe("PersistentAgentRuntime extensions flag (read-only Pi persistentAgents)
       const persistentAgent = await persistentAgents.create({
         name: "default-nav",
         instructions: "Default navigator.",
-        runner: "pi",
         responseMode: "text",
       });
       expect(persistentAgent.extensions).toBeUndefined();
@@ -1996,7 +1915,6 @@ describe("PersistentAgentRuntime extensions flag (read-only Pi persistentAgents)
       const created = await setupState.persistentAgents.create({
         name: "persistent-readonly",
         instructions: "Survive restart read-only.",
-        runner: "pi",
         extensions: false,
         tools: ["read"],
         responseMode: "text",

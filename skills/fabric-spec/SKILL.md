@@ -1,7 +1,6 @@
 ---
 name: fabric-spec
 description: Starts a persistent Pi Fabric spec supervisor that audits the main session against a feature design spec and steers only when a requirement lacks verified evidence. Use for strict, unblocked spec compliance while the main agent keeps full freedom to orchestrate.
-disable-model-invocation: true
 ---
 
 # Fabric Spec Supervisor

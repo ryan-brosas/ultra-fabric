@@ -34,6 +34,35 @@ const descriptors: FabricActionDescriptor[] = [
     risk: "read",
   },
   {
+    name: "focus",
+    description: "Heat-diffuse query seeds through the code graph (t=4) and render hot/warm/glow tiers bounded by maxTokens",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1 },
+        t: { type: "number", minimum: 1, maximum: 64 },
+        maxTokens: { type: "number", minimum: 100, maximum: 20000 },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    risk: "read",
+  },
+  {
+    name: "dwell",
+    description: "Expand an active focus field (diffusion time grows) and return the delta against already-disclosed nodes",
+    inputSchema: {
+      type: "object",
+      properties: {
+        t: { type: "number", minimum: 1, maximum: 64 },
+        disclosed: { type: "array", items: { type: "string" } },
+        maxTokens: { type: "number", minimum: 100, maximum: 20000 },
+      },
+      additionalProperties: false,
+    },
+    risk: "read",
+  },
+  {
     name: "cascade",
     description: "Predict co-change cascade from a seed file or name:file symbol key, blending git history and AST dependency channels",
     inputSchema: {
@@ -100,6 +129,10 @@ export class CodemapProvider implements FabricProvider {
         return codemapOperation("skeleton", { maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
       case "search":
         return codemapOperation("search", { query: String(args.query ?? ""), maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
+      case "focus":
+        return codemapOperation("focus", { query: String(args.query ?? ""), t: Number(args.t ?? 4), maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
+      case "dwell":
+        return codemapOperation("dwell", Object.assign({ maxTokens: Number(args.maxTokens ?? 4000) }, args.t != null ? { t: Number(args.t) } : {}, Array.isArray(args.disclosed) ? { disclosed: args.disclosed.map(String) } : {}), context.cwd);
       case "cascade":
         return codemapOperation("cascade", { seed: String(args.seed ?? ""), maxTokens: Number(args.maxTokens ?? 4000) }, context.cwd);
       case "expand":

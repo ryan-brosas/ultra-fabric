@@ -4,6 +4,7 @@ import type { CapturedToolCatalog } from "../capture/catalog.js";
 import type { FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import type { FabricState } from "../fabric-state.js";
 import { armPrewalk } from "../prewalk/arm.js";
+import type { ScoutRunner } from "../prewalk/scout-brief.js";
 import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
 import { openFabricSettings } from "../ui/settings.js";
@@ -161,7 +162,45 @@ const runPrewalk = async (
   // Hidden advisory framing is queued for the next prompt (rules before
   // the task when one is submitted below). nextTurn never triggers a
   // turn; custom messages never fire `input`, so observeTask ignores it.
-  armPrewalk(pi, state.prewalk, state.config.prewalk, context, model, task || undefined, state.config.agents.runRoot);
+  const prewalkConfig = state.config.prewalk;
+  // Host wiring for the auto-scout: bridge the injectable seam to the real
+  // agent manager so a cheap small model gathers the context brief. Only
+  // wired when autoScout is on; the seam stays optional for hosts without
+  // an agent runtime.
+  const scoutRun =
+    prewalkConfig.autoScout === true && state.agents
+      ? async (request: {
+          task: string;
+          role: "scout" | "explorer";
+          maxTokens: number;
+          timeoutMs: number;
+        }) => {
+          const handle = await state.agents.spawn({
+            task: request.task,
+            role: request.role,
+            maxTokens: request.maxTokens,
+            timeoutMs: request.timeoutMs,
+          });
+          const result = await state.agents.wait(handle.id) as { result?: unknown; model?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } };
+          return {
+            ...(result?.result !== undefined ? { result: result.result } : {}),
+            ...(result?.model !== undefined ? { model: result.model } : {}),
+            ...(result?.usage !== undefined ? { usage: result.usage } : {}),
+          };
+        }
+      : undefined;
+  const armDeps: { scoutRun?: ScoutRunner } = {};
+  if (scoutRun) armDeps.scoutRun = scoutRun;
+  await armPrewalk(
+    pi,
+    state.prewalk,
+    prewalkConfig,
+    context,
+    model,
+    task || undefined,
+    state.config.agents.runRoot,
+    armDeps,
+  );
   const modeLabel = "Main will switch in place at the first host-observed mutation";
   const rearm = state.config.prewalk.arm === "task" ? "; re-arm per task" : "";
   context.ui.notify(

@@ -30,12 +30,12 @@ const configFor = (overrides: Record<string, unknown>) =>
   });
 
 describe("autoArmPrewalk", () => {
-  it("arms from configuration and queues the advisory prompt", () => {
+  it("arms from configuration and queues the advisory prompt", async () => {
     const controller = new PrewalkController();
     const ctx = context();
     const ext = extension();
 
-    expect(autoArmPrewalk(ext.value, controller, configFor({}), ctx.value)).toBe(true);
+    expect(await autoArmPrewalk(ext.value, controller, configFor({}), ctx.value)).toBe(true);
     expect(controller.isArmed("session-1")).toBe(true);
     expect(controller.status()).toMatchObject({
       state: "armed",
@@ -54,44 +54,44 @@ describe("autoArmPrewalk", () => {
     );
   });
 
-  it("stays idle when arm is off", () => {
+  it("stays idle when arm is off", async () => {
     const controller = new PrewalkController();
     const ext = extension();
     const config = normalizeFabricConfig({ prewalk: { arm: "off", model: "anthropic/executor" } });
 
-    expect(autoArmPrewalk(ext.value, controller, config, context().value)).toBe(false);
+    expect(await autoArmPrewalk(ext.value, controller, config, context().value)).toBe(false);
     expect(controller.isArmed()).toBe(false);
     expect(ext.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("refuses an unset or malformed model instead of prompting", () => {
+  it("refuses an unset or malformed model instead of prompting", async () => {
     const controller = new PrewalkController();
     const ext = extension();
     const unset = normalizeFabricConfig({ prewalk: { arm: "session" } });
-    expect(autoArmPrewalk(ext.value, controller, unset, context().value)).toBe(false);
+    expect(await autoArmPrewalk(ext.value, controller, unset, context().value)).toBe(false);
 
     const malformed = configFor({ model: "executor-without-provider" });
-    expect(autoArmPrewalk(ext.value, controller, malformed, context().value)).toBe(false);
+    expect(await autoArmPrewalk(ext.value, controller, malformed, context().value)).toBe(false);
     expect(controller.isArmed()).toBe(false);
   });
 
-  it("still arms research without agents because it stays in session", () => {
+  it("still arms research without agents because it stays in session", async () => {
     const controller = new PrewalkController();
     const ext = extension();
     const config = normalizeFabricConfig({
       prewalk: { arm: "session", model: "anthropic/executor", mode: "research" },
       agents: { enabled: false },
     });
-    expect(autoArmPrewalk(ext.value, controller, config, context().value)).toBe(true);
+    expect(await autoArmPrewalk(ext.value, controller, config, context().value)).toBe(true);
     expect(controller.status()).toMatchObject({ state: "armed" });
   });
 
-  it("never re-arms over a live arm", () => {
+  it("never re-arms over a live arm", async () => {
     const controller = new PrewalkController();
     const ext = extension();
     const config = configFor({});
-    expect(autoArmPrewalk(ext.value, controller, config, context().value)).toBe(true);
-    expect(autoArmPrewalk(ext.value, controller, config, context().value)).toBe(false);
+    expect(await autoArmPrewalk(ext.value, controller, config, context().value)).toBe(true);
+    expect(await autoArmPrewalk(ext.value, controller, config, context().value)).toBe(false);
     expect(ext.sendMessage).toHaveBeenCalledTimes(1);
   });
 

@@ -1,5 +1,5 @@
 import type { ExtensionEvent } from "@earendil-works/pi-coding-agent";
-import type { FabricAgentRunner, FabricAgentTransport } from "../../config.js";
+import type { FabricAgentTransport } from "../../config.js";
 import type { FabricThinking } from "../../thinking.js";
 import type {
   FabricPersistentAgentBudgetInput,
@@ -141,7 +141,6 @@ export interface FabricPersistentAgentRequest {
   /** Required for steer/followUp; must be false or omitted for mailbox/nextTurn. */
   triggerTurn?: boolean;
   coalesce?: boolean;
-  runner?: FabricAgentRunner;
   model?: string;
   thinking?: FabricThinking;
   tools?: string[];
@@ -173,7 +172,6 @@ export interface FabricPersistentAgentInfo {
   completion: string;
   turnBudget: AgentTurnBudget;
   status: FabricPersistentAgentStatus;
-  runner: FabricAgentRunner;
   events: FabricPersistentAgentHostEvent[];
   topics: string[];
   delivery: FabricPersistentAgentDelivery;
@@ -295,5 +293,4 @@ export interface AgentTemplateDefinition extends FabricPersistentAgentRequest {
   responseMode: FabricPersistentAgentResponseMode;
   triggerTurn: boolean;
   coalesce: boolean;
-  runner: FabricAgentRunner;
 }

@@ -1,4 +1,4 @@
-import type { FabricAgentRunner, FabricAgentTransport } from "../config.js";
+import type { FabricAgentTransport } from "../config.js";
 import type { MeshIdentity } from "../mesh/store.js";
 import type { AgentUsage } from "../agents/types.js";
 
@@ -21,7 +21,6 @@ export interface FabricParticipantRecord {
   parentId?: string;
   name: string;
   status: string;
-  runner: FabricAgentRunner;
   transport: FabricAgentTransport | "host";
   capabilities: FabricParticipantCapability[];
   cwd?: string;
@@ -83,7 +82,6 @@ export interface FabricPeerInfo {
   name: string;
   kind: "peer";
   status: "idle" | "running";
-  runner: "pi";
   transport: "host";
   cwd: string;
   sessionId: string;

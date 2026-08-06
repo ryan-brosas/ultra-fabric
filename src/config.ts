@@ -85,6 +85,10 @@ interface FabricPrewalkConfig {
   // next similar task's planning phase with them. Default off (opt-in until
   // measured by the Slice 8 A/B benchmark).
   failureMemory?: boolean;
+  // Run a cheap small-model scout before the frontier model plans and inject
+  // the compressed context brief into the armed prompt. Opt-in; requires the
+  // host to supply a scout runner. Default off.
+  autoScout?: boolean;
   // Reasoning effort for the in-session executor. Unset inherits agents.thinking.
   thinking?: FabricThinking;
   verificationMode?: FabricPrewalkVerificationMode;
@@ -938,6 +942,9 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         : {}),
       ...(booleanValue(prewalk.failureMemory, false)
         ? { failureMemory: true }
+        : {}),
+      ...(booleanValue(prewalk.autoScout, false)
+        ? { autoScout: true }
         : {}),
     },
     agents: {

@@ -7,17 +7,10 @@ import {
   DEFAULT_FABRIC_CONFIG,
   MAX_AGENT_TIMEOUT_MS,
   MIN_AGENT_TIMEOUT_MS,
-  type FabricAgentRunner,
   type FabricAgentConfig,
   type FabricAgentTransport,
   type FabricRetentionConfig,
 } from "../config.js";
-import {
-  discoverClaudeModels,
-  mapClaudeTools,
-  normalizeClaudeModel,
-  type ClaudeModelInfo,
-} from "./claude-cli.js";
 import { tokenUsagePayloadFromValue } from "../lifecycle/types.js";
 import type { FabricTokenUsagePayload } from "../lifecycle/types.js";
 import { Semaphore } from "./semaphore.js";
@@ -107,7 +100,6 @@ interface ManagedAgent {
   goal?: string;
   completion?: string;
   turnBudget?: AgentTurnBudget;
-  runner: FabricAgentRunner;
   recursive: boolean;
   cwd: string;
   statusFile: string;
@@ -178,7 +170,6 @@ const readRecord = (filePath: string): AgentRunRecord | undefined => {
       kind: "agent",
       lifecycle: "one-shot",
       role: normalizeFabricAgentRole(record.role),
-      runner: record.runner === "claude" ? "claude" : "pi",
     };
   } catch {
     return undefined;
@@ -307,7 +298,6 @@ const failedRecord = (
     ...(managed.completion ? { completion: managed.completion } : {}),
     ...(managed.turnBudget ? { turnBudget: { ...managed.turnBudget } } : {}),
     status,
-    runner: managed.runner,
     transport: managed.transport.kind,
     cwd: managed.cwd,
     startedAt: now,
@@ -348,7 +338,6 @@ export class OneShotAgentManager {
   readonly #fabricExtensionPath: string;
   readonly #consultScopeExtensionPath: string;
   readonly #piBinary: string;
-  readonly #claudeBinary: string;
   readonly #currentDepth: number;
   readonly #fullCodeMode: boolean;
   readonly #mainAgentId: string | undefined;
@@ -367,7 +356,6 @@ export class OneShotAgentManager {
   #retentionTimer: NodeJS.Timeout | undefined;
   #retentionSweep: Promise<void> | undefined;
   #budgetSummaryCache: { at: number; value: FabricBudgetSummary } | undefined;
-  #claudeModelsCache: { at: number; value: ClaudeModelInfo[] } | undefined;
   #uiListRevision = 0;
   #uiListCache:
     | { revision: number; value: Array<AgentRunRecord | AgentHandleInfo> }
@@ -382,7 +370,6 @@ export class OneShotAgentManager {
       fabricExtensionPath?: string;
       consultScopeExtensionPath?: string;
       piBinary?: string;
-      claudeBinary?: string;
       runRoot?: string;
       fullCodeMode?: boolean;
       mainAgentId?: string;
@@ -412,8 +399,6 @@ export class OneShotAgentManager {
     this.#consultScopeExtensionPath = options.consultScopeExtensionPath ??
       fileURLToPath(new URL(consultScopeModule, import.meta.url));
     this.#piBinary = options.piBinary ?? process.env.PI_FABRIC_PI_BINARY ?? "pi";
-    this.#claudeBinary =
-      options.claudeBinary ?? process.env.PI_FABRIC_CLAUDE_BINARY ?? config.claude.binary;
     this.#onBackgroundComplete = options.onBackgroundComplete;
     this.#onLifecycle = options.onLifecycle;
     this.#preparePiModel = options.preparePiModel;
@@ -492,36 +477,18 @@ export class OneShotAgentManager {
     ) {
       throw new Error("Agent maxTokens must be a positive integer");
     }
-    const runner = request.runner ?? this.config.runner;
-    if (runner !== "pi" && runner !== "claude") {
-      throw new Error(`Unsupported Fabric agent runner: ${String(runner)}`);
-    }
-    if (request.consultReadScope !== undefined && runner !== "pi") {
-      throw new Error("Ultra Consult read scopes require the Pi runner");
-    }
     if (request.consultReadScope !== undefined && (
       !Array.isArray(request.consultReadScope) || request.consultReadScope.length > 32 ||
       request.consultReadScope.some((scope) => typeof scope !== "string")
     )) {
       throw new Error("Ultra Consult read scope is malformed");
     }
-    if (runner === "claude" && request.recursive) {
-      throw new Error(
-        "Claude runner does not support recursive Fabric. Use a Pi runner for recursive: true, or omit recursive for Claude Code tools.",
-      );
-    }
-    if (request.sessionSeed && runner !== "pi") {
-      throw new Error("Trajectory handoff sessions are only supported by the Pi runner");
-    }
     if (request.sessionSeed && request.sessionFile) {
       throw new Error("A agent request cannot combine sessionSeed with sessionFile");
     }
-    const tools = this.#childTools(request, runner);
-    if (runner === "claude") mapClaudeTools(tools);
-    const model =
-      request.model ?? (runner === "claude" ? this.config.claude.model : this.config.model);
-    if (runner === "claude" && model) normalizeClaudeModel(model);
-    if (runner === "pi" && model) await this.#prepareModel(model);
+    const tools = this.#childTools(request);
+    const model = request.model ?? this.config.model;
+    if (model) await this.#prepareModel(model);
     if (this.#budget) {
       const spent = readBudgetLedger(this.#budget.file).cost;
       if (spent >= this.#budget.budget) {
@@ -591,7 +558,7 @@ export class OneShotAgentManager {
       const turnBudget = request.turnBudget
         ? resolveAgentTurnBudget(request.turnBudget, "Agent request turnBudget")
         : undefined;
-      const recursive = runner === "pi" && request.recursive === true;
+      const recursive = request.recursive === true;
       const extensions = recursive ? true : (request.extensions ?? this.config.extensions);
       const workerArguments = [
         "--id",
@@ -601,8 +568,6 @@ export class OneShotAgentManager {
         "--role",
         role,
         ...(turnBudget ? ["--turn-budget", JSON.stringify(turnBudget)] : []),
-        "--runner",
-        runner,
         "--task-file",
         taskFile,
         ...(imagesFile ? ["--images-file", imagesFile] : []),
@@ -616,8 +581,6 @@ export class OneShotAgentManager {
         agentCwd,
         "--pi-binary",
         this.#piBinary,
-        "--claude-binary",
-        this.#claudeBinary,
         "--timeout-ms",
         String(timeoutMs),
         "--depth",
@@ -706,7 +669,6 @@ export class OneShotAgentManager {
         ...(request.goal ? { goal: request.goal } : {}),
         ...(request.completion ? { completion: request.completion } : {}),
         ...(turnBudget ? { turnBudget } : {}),
-        runner,
         recursive,
         cwd: agentCwd,
         statusFile,
@@ -844,16 +806,6 @@ export class OneShotAgentManager {
     return this.#runs.get(id)?.runDirectory;
   }
 
-  async claudeModels(refresh = false): Promise<ClaudeModelInfo[]> {
-    const now = Date.now();
-    if (!refresh && this.#claudeModelsCache && now - this.#claudeModelsCache.at < 60_000) {
-      return structuredClone(this.#claudeModelsCache.value);
-    }
-    const value = await discoverClaudeModels(this.#claudeBinary, this.cwd);
-    this.#claudeModelsCache = { at: now, value };
-    return structuredClone(value);
-  }
-
   async stop(id: string): Promise<AgentRunResult> {
     const managed = this.#requireRun(id);
     if (managed.settled) return this.wait(id);
@@ -923,19 +875,10 @@ export class OneShotAgentManager {
     return this.#appendSteer(id, { type: "set_follow_up_mode", mode });
   }
 
-  // Request an advisory compaction of a running Pi-runner child's context.
   // Appended to the same steer.jsonl channel as steer(); the worker queues it
   // until child agent_settled, then correlates Pi's compact response and
-  // compaction_end before closing the one-shot RPC channel. Rejected for
-  // Claude-runner children — the official Claude Code CLI exposes no compact
-  // RPC; a fresh run is the only way to reset a Claude child's context.
+  // compaction_end before closing the one-shot RPC channel.
   compact(id: string, instructions?: string): AgentSteerResult {
-    const managed = this.#requireRun(id);
-    if (managed.runner === "claude") {
-      throw new Error(
-        "Fabric agent compaction is only supported for Pi-runner children; Claude Code sessions cannot be compacted through Fabric.",
-      );
-    }
     return this.#appendSteer(id, {
       type: "compact",
       ...(typeof instructions === "string" && instructions ? { instructions } : {}),
@@ -1024,7 +967,6 @@ export class OneShotAgentManager {
     deadline: number,
   ): Promise<boolean> {
     if (
-      managed.runner !== "pi" ||
       managed.startupAttempts >= AGENT_STARTUP_MAX_ATTEMPTS ||
       managed.settled ||
       this.#closing ||
@@ -1258,7 +1200,6 @@ export class OneShotAgentManager {
     appendBudgetLedger(this.#budget.file, {
       id: managed.id,
       depth: this.#currentDepth + 1,
-      runner: managed.runner,
       ...(managed.persistentAgentId ? { persistentAgentId: managed.persistentAgentId } : {}),
       ...(managed.persistentAgentName ? { persistentAgentName: managed.persistentAgentName } : {}),
       cost,
@@ -1310,7 +1251,6 @@ export class OneShotAgentManager {
           name: managed.persistentAgentName ?? managed.name,
           kind: managed.persistentAgentId ? "persistentAgent" : "agent",
           rootId: this.#mainAgentId ?? managed.id,
-          runner: managed.runner,
           ...(this.#hostId ? { ownerHostId: this.#hostId } : {}),
           ...(this.#identityId ? { ownerIdentityId: this.#identityId } : {}),
         },
@@ -1325,11 +1265,11 @@ export class OneShotAgentManager {
     }
   }
 
-  #childTools(request: AgentRunRequest, runner: FabricAgentRunner): string[] {
+  #childTools(request: AgentRunRequest): string[] {
     const tools = [...(request.tools ?? this.config.defaultTools)].filter(
       (tool) => tool !== "fabric_exec",
     );
-    if (runner === "pi" && request.recursive) tools.push("fabric_exec");
+    if (request.recursive) tools.push("fabric_exec");
     return [...new Set(tools)];
   }
 
@@ -1408,7 +1348,6 @@ export class OneShotAgentManager {
       ...(managed.turnBudget ? { turnBudget: { ...managed.turnBudget } } : {}),
       name: managed.name,
       status,
-      runner: managed.runner,
       transport: managed.transport.kind,
       cwd: managed.cwd,
       ...(managed.model ? { model: managed.model } : {}),
@@ -1473,7 +1412,6 @@ export class OneShotAgentManager {
       ...(managed.goal ? { goal: managed.goal } : {}),
       ...(managed.completion ? { completion: managed.completion } : {}),
       ...(managed.turnBudget ? { turnBudget: { ...managed.turnBudget, ...record.turnBudget } } : {}),
-      runner: managed.runner,
       logFile: path.join(managed.runDirectory, "events.jsonl"),
       ...(nestedAgents.length > 0 ? { nestedAgents } : {}),
       ...(budget ? { budget } : {}),

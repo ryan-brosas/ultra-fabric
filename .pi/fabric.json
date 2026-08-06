@@ -2,11 +2,13 @@
   "configVersion": 3,
   "prewalk": {
     "thinking": "max",
+    "delegateContext": true,
+    "handoffRetirement": true,
+    "reuseChecklists": true,
     "verificationMode": "gated",
     "maxPhaseRevisions": 5,
-    "model": "makora/deepseek-ai/DeepSeek-V4-Flash",
-    "alwaysRearm": true,
-    "autoArm": true,
+    "model": "omniroute/opencode-go/deepseek-v4-flash",
+    "arm": "off",
     "triggerRefs": [
       "fabric.prewalk.checklist",
       "pi.edit",
@@ -21,7 +23,14 @@
     "model": "omniroute/opencode-go/deepseek-v4-flash",
     "transport": "localterm",
     "thinking": "max",
-    "maxDepth": 6
+    "maxDepth": 6,
+    "roleModels": {
+      "scout": "omniroute/opencode-go/deepseek-v4-flash",
+      "advisor": "omniroute/opencode-go/deepseek-v4-flash",
+      "coordinator": "omniroute/opencode-go/deepseek-v4-flash",
+      "explorer": "omniroute/opencode-go/deepseek-v4-flash",
+      "supervisor": "omniroute/opencode-go/deepseek-v4-flash"
+    }
   },
   "compaction": {
     "thresholds": {

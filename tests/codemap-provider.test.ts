@@ -12,9 +12,9 @@ describe("CodemapProvider", () => {
   it("list() returns every descriptor", async () => {
     const { CodemapProvider } = await import("../" + CODEMAP + ".js");
     const items = await new CodemapProvider().list({});
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(7);
     const names = items.map((i: { name: string }) => i.name).sort();
-    expect(names).toEqual(["cascade", "expand", "search", "skeleton", "source"]);
+    expect(names).toEqual(["cascade", "dwell", "expand", "focus", "search", "skeleton", "source"]);
     for (const item of items) {
       expect((item as { inputSchema?: unknown }).inputSchema).toBeDefined();
     }

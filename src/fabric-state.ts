@@ -138,7 +138,6 @@ const agentParticipantRecords = (
         parentId: parent,
         name: record.name,
         status: record.status,
-        runner: record.runner,
         transport: record.transport,
         capabilities: [
           ...(active ? (["steer", "followUp", "stop"] as const) : []),
@@ -178,11 +177,10 @@ const persistentAgentParticipantRecord = (
   parentId,
   name: persistentAgent.name,
   status: persistentAgent.status,
-  runner: persistentAgent.runner,
   transport: "host",
   capabilities: [
     ...(persistentAgent.status === "stopped" ? [] : (["steer", "followUp", "stop"] as const)),
-    ...(persistentAgent.runner === "pi" && persistentAgent.extensions !== false ? (["fabric"] as const) : []),
+    ...(persistentAgent.extensions !== false ? (["fabric"] as const) : []),
   ],
   ...(persistentAgent.model ? { model: persistentAgent.model } : {}),
   ...(persistentAgent.thinking ? { thinking: persistentAgent.thinking } : {}),
@@ -798,7 +796,6 @@ export class FabricState {
         name: self.name,
         kind: self.kind,
         rootId: self.rootId,
-        runner: self.runner,
         ownerHostId: self.ownerHostId,
         ownerIdentityId: self.ownerIdentityId,
       },

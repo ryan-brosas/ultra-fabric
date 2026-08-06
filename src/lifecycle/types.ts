@@ -1,4 +1,3 @@
-import type { FabricAgentRunner } from "../config.js";
 import type { MeshEvent, MeshIdentity } from "../mesh/store.js";
 import type { FabricParticipantKind } from "../topology/types.js";
 
@@ -28,7 +27,6 @@ export interface FabricLifecycleSource {
   name: string;
   kind: FabricParticipantKind;
   rootId: string;
-  runner: FabricAgentRunner;
   ownerHostId?: string;
   ownerIdentityId?: string;
 }
@@ -59,14 +57,13 @@ export interface FabricLifecycleEvent {
  * Attributed token usage for one token-bearing child event.
  *
  * The worker emits one of these per assistant message (Pi) or per usage-bearing
- * assistant/result frame (Claude), tagged with the run/runner/depth identity the
+ * assistant/result frame, tagged with the run/depth identity the
  * manager passes in. Cumulative tokens mirror in + cacheRead + cacheWrite at
  * the moment the event fired; cost is micro-USD from the runner's own report.
  */
 export interface FabricTokenUsagePayload {
   runId: string;
   name: string;
-  runner: FabricAgentRunner;
   depth: number;
   persistentAgentId?: string;
   persistentAgentName?: string;
@@ -82,11 +79,9 @@ export const tokenUsagePayloadFromValue = (
   value: unknown,
 ): FabricTokenUsagePayload | undefined => {
   if (!isObject(value)) return undefined;
-  const runner = value.runner === "pi" || value.runner === "claude" ? value.runner : undefined;
   if (
     typeof value.runId !== "string" ||
     typeof value.name !== "string" ||
-    runner === undefined ||
     typeof value.depth !== "number" ||
     typeof value.cumulativeTokens !== "number" ||
     typeof value.input !== "number" ||
@@ -161,10 +156,8 @@ export const lifecycleEventFromMesh = (
   }
   const source = event.data.source;
   const kind = participantKind(source.kind);
-  const runner = source.runner === "pi" || source.runner === "claude" ? source.runner : undefined;
   if (
     !kind ||
-    !runner ||
     typeof source.id !== "string" ||
     typeof source.name !== "string" ||
     typeof source.rootId !== "string" ||
@@ -179,7 +172,6 @@ export const lifecycleEventFromMesh = (
     name: source.name,
     kind,
     rootId: source.rootId,
-    runner,
     ...(typeof source.ownerHostId === "string" ? { ownerHostId: source.ownerHostId } : {}),
     ...(typeof source.ownerIdentityId === "string"
       ? { ownerIdentityId: source.ownerIdentityId }

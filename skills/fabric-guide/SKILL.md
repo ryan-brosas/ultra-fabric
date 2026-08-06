@@ -1,7 +1,6 @@
 ---
 name: fabric-guide
 description: Recommends the right user-invoked Pi Fabric workflow without running it. Use when you want help choosing among workflow, council, fusion, RLM, Schema, ambient persistent agents, or swarm.
-disable-model-invocation: true
 ---
 
 # Fabric Guide

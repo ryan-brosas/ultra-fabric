@@ -2,7 +2,6 @@ export const GUEST_TYPE_DECLARATIONS = `
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 type FabricTransport = "auto" | "process" | "tmux" | "screen" | "localterm" | "herdr";
-type FabricAgentRunner = "pi" | "claude";
 type FabricThinking = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 interface FabricAction {
   ref: string;
@@ -57,7 +56,6 @@ interface FabricAgentRoleProfile {
   completion: string;
   turnBudget: FabricAgentTurnBudget;
   tools?: string[];
-  runner?: FabricAgentRunner;
   model?: string;
   thinking?: FabricThinking;
   timeoutMs?: number;
@@ -83,7 +81,6 @@ interface FabricAgentRequest {
   goal?: string;
   completion?: string;
   turnBudget?: FabricAgentTurnBudget;
-  runner?: FabricAgentRunner;
   transport?: FabricTransport;
   model?: string;
   profile?: string;
@@ -137,7 +134,6 @@ interface FabricMainAgentInfo {
   name: "Main";
   kind: "main";
   status: "idle" | "running" | "remote";
-  runner: "pi";
   transport: "host";
   cwd?: string;
   sessionId?: string;
@@ -153,7 +149,6 @@ interface FabricPeerInfo {
   name: string;
   kind: "peer";
   status: "idle" | "running";
-  runner: "pi";
   transport: "host";
   cwd: string;
   sessionId: string;
@@ -179,7 +174,6 @@ interface FabricParticipantInfo {
   parentId?: string;
   name: string;
   status: string;
-  runner: FabricAgentRunner;
   transport: FabricTransport | "host";
   capabilities: FabricParticipantCapability[];
   cwd?: string;
@@ -218,7 +212,6 @@ interface FabricLifecycleSource {
   name: string;
   kind: FabricWireParticipantKind;
   rootId: string;
-  runner: FabricAgentRunner;
   ownerHostId?: string;
   ownerIdentityId?: string;
 }
@@ -261,7 +254,6 @@ interface FabricAgentHandle {
   completion?: string;
   turnBudget?: FabricAgentTurnBudget;
   status: string;
-  runner: FabricAgentRunner;
   transport: FabricTransport;
   cwd: string;
   model?: string;
@@ -304,7 +296,6 @@ interface FabricAgentResult extends FabricAgentHandle {
   pendingMessages?: { steering: string[]; followUp: string[] };
 }
 interface FabricModelInfo {
-  runner?: FabricAgentRunner;
   provider: string;
   id: string;
   name: string;
@@ -507,7 +498,6 @@ interface FabricPersistentAgentRequestBase {
   topics?: string[];
   responseMode?: "text" | "directive";
   coalesce?: boolean;
-  runner?: FabricAgentRunner;
   model?: string;
   thinking?: FabricThinking;
   tools?: string[];
@@ -536,7 +526,6 @@ interface FabricPersistentAgentInfo {
   completion: string;
   turnBudget: FabricAgentTurnBudget;
   status: "idle" | "queued" | "running" | "stopped";
-  runner: FabricAgentRunner;
   events: FabricPersistentAgentHostEvent[];
   topics: string[];
   delivery: FabricPersistentAgentDelivery;
@@ -722,7 +711,6 @@ type FabricMcpApi = Record<string, FabricMcpServer> & {
 interface FabricCouncilRunOptions {
   task: string;
   roles: string[];
-  runner?: FabricAgentRunner;
   transport?: FabricTransport;
   model?: string;
   thinking?: FabricThinking;
@@ -1197,9 +1185,22 @@ interface FabricPrewalkChecklistItem {
 interface FabricPrewalkChecklist {
   items: FabricPrewalkChecklistItem[];
   readyAt: number;
+  // Trivial-path escape: a task that clearly fits in one or two small edits
+  // records the trivial disposition through the same checklist call, so the
+  // controller suppresses the mutation boundary and the executor handoff
+  // instead of forcing the 5-9 item ceremony and a model swap.
+  trivial?: boolean;
+  // Easy-path router: a bounded mid-tier task still hands off to the executor
+  // (unlike trivial) but relaxes the planning ceremony to 2-4 items so Main
+  // skips deep research on it.
+  easy?: boolean;
 }
 interface FabricPrewalkApi {
-  checklist(input: { items: FabricPrewalkChecklistItem[] }): Promise<FabricPrewalkChecklist>;
+  checklist(
+    input:
+      | { trivial: true }
+      | { items: FabricPrewalkChecklistItem[]; easy?: boolean; trivial?: false },
+  ): Promise<FabricPrewalkChecklist>;
 }
 
 interface FabricWorkflowAgentOptions extends Omit<FabricAgentRequest, "task"> {

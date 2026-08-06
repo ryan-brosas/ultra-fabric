@@ -14,7 +14,7 @@ interface MessageShape {
 }
 
 const RETIRABLE = new Set(["read", "grep", "find", "ls"]);
-const MARKER_KIND = "pi-fabric.context-qos";
+export const MARKER_KIND = "pi-fabric.context-qos";
 
 const canonical = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(canonical);

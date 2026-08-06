@@ -64,15 +64,10 @@ export const parseWorkerOptions = (
     throw new Error("Worker turnBudget must contain positive maxTurns and non-negative graceTurns");
   }
   const turnBudget = parsedTurnBudget as AgentWorkerOptions["turnBudget"];
-  const runner = required(args, "runner");
-  if (runner !== "pi" && runner !== "claude") {
-    throw new Error(`Unsupported Fabric agent runner: ${runner}`);
-  }
   return {
     id: required(args, "id"),
     role,
     ...(turnBudget ? { turnBudget } : {}),
-    runner,
     name: required(args, "name"),
     taskFile: required(args, "task-file"),
     ...(imagesFile ? { imagesFile } : {}),
@@ -82,7 +77,6 @@ export const parseWorkerOptions = (
     ...(schemaFile ? { schemaFile } : {}),
     cwd: required(args, "cwd"),
     piBinary: required(args, "pi-binary"),
-    claudeBinary: required(args, "claude-binary"),
     timeoutMs: Number(required(args, "timeout-ms")),
     depth: Number(required(args, "depth")),
     fullCodeMode: required(args, "full-code-mode") === "true",

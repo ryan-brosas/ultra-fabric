@@ -43,7 +43,6 @@ const stubState = () =>
       name: "Main",
       kind: "main",
       status: "idle",
-      runner: "pi",
       transport: "host",
       cwd: "/tmp/project",
       sessionId: "test",

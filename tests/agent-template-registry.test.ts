@@ -39,7 +39,6 @@ describe("AgentTemplateRegistry", () => {
     expect(created.name).toBe("reviewer");
     expect(created.events).toEqual(["turn_end"]);
     expect(created.delivery).toBe("steer");
-    expect(created.runner).toBe("pi");
     expect(created.model).toBeUndefined();
 
     expect(registry.list()).toHaveLength(1);
@@ -135,7 +134,6 @@ describe("AgentTemplateRegistry", () => {
     const { registry } = setup();
     const created = registry.create({
       ...baseRequest,
-      runner: "claude",
       model: "claude/haiku",
       extensions: false,
     });
@@ -144,7 +142,6 @@ describe("AgentTemplateRegistry", () => {
     expect(request).not.toHaveProperty("createdAt");
     expect(request).not.toHaveProperty("updatedAt");
     expect(request.name).toBe("reviewer");
-    expect(request.runner).toBe("claude");
     expect(request.model).toBe("claude/haiku");
     expect(request.extensions).toBe(false);
 

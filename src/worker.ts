@@ -24,7 +24,6 @@ const spawnCli = (
   ? crossSpawn(process.execPath, [command, ...args], options)
   : crossSpawn(command, [...args], options);
 
-type ClaudeCliModule = typeof import("./agents/claude-cli.js");
 type CompactControlModule = typeof import("./agents/compact-control.js");
 type WorkerOptionsModule = typeof import("./worker/options.js");
 type WorkerRunRecordModule = typeof import("./worker/run-record.js");
@@ -54,19 +53,11 @@ const loadCompactControl = async (): Promise<CompactControlModule> => {
   return import(sourceModulePath) as Promise<CompactControlModule>;
 };
 
-const loadClaudeCli = async (): Promise<ClaudeCliModule> => {
-  if (!import.meta.url.endsWith(".ts")) return import("./agents/claude-cli.js");
-  const sourceModulePath = "./agents/claude-cli.ts";
-  return import(sourceModulePath) as Promise<ClaudeCliModule>;
-};
-
 const MAX_STDERR_CHARS = 20_000;
 const MAX_EVENT_LINE_CHARS = 4 * 1024 * 1024;
 const STEER_READ_CHUNK_BYTES = 256 * 1024;
 const MAX_STEER_LINE_BYTES = 64 * 1024;
 const MAX_STEER_COMMANDS_PER_POLL = 256;
-const MAX_CLAUDE_PENDING_INPUTS = 256;
-const MAX_CLAUDE_PENDING_TOOLS = 1_000;
 const KILL_GRACE_MS = 5_000;
 
 const extractText = (message: Record<string, unknown>): string => {
@@ -110,7 +101,6 @@ const readImages = (filePath: string | undefined): ImageContent[] => {
   return images;
 };
 
-const numberField = (value: unknown): number => (typeof value === "number" ? value : 0);
 
 const stringField = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -225,43 +215,23 @@ interface WorkerRunState {
   sawAgentError: boolean;
   retryPending: boolean;
   turnBudgetStopTimer: NodeJS.Timeout | undefined;
-  claudeSteeringMode: "all" | "one-at-a-time";
-  claudeFollowUpMode: "all" | "one-at-a-time";
-  claudeCanFollowUp: boolean;
-  claudeResultSeen: boolean;
-  claudeCloseTimer: NodeJS.Timeout | undefined;
   steerOffset: number;
   steerRemainder: Buffer;
   skippingOversizedSteerLine: boolean;
 }
 
-type ClaudeInputKind = "initial" | "steer" | "follow_up";
-
 interface WorkerRunDeps {
   options: AgentWorkerOptions;
   child: ChildProcess;
   record: AgentRunRecord;
-  claudeCli: ClaudeCliModule | undefined;
   compactControl: InstanceType<CompactControlModule["ChildCompactControl"]>;
-  claudeSentInputs: Array<{ kind: ClaudeInputKind; message: string }>;
-  claudeSteering: string[];
-  claudeFollowUps: string[];
-  claudeTools: Map<string, string>;
-  claudeCompletedUsage: AgentUsage;
-  claudeCurrentUsage: AgentUsage;
   logStream: ReturnType<typeof fs.createWriteStream>;
-  sessionStream: ReturnType<typeof fs.createWriteStream> | undefined;
   lastEmittedUsage: AgentUsage;
   latestRunText: (text: string) => string;
   extractUsageDelta: (message: Record<string, unknown>) => { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number } | undefined;
   applyUsage: (record: AgentRunRecord, message: Record<string, unknown>) => void;
   update: () => void;
   enforceTurnBudget: () => void;
-  enqueueClaudeControl: (queue: string[], message: string) => void;
-  updateClaudeQueue: () => void;
-  flushClaudeSteering: () => void;
-  flushClaudeFollowUps: () => void;
-  scheduleClaudeClose: () => void;
 }
 
 function emitTokenUsage(state: WorkerRunState, deps: WorkerRunDeps, delta?: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; }): void {
@@ -278,7 +248,6 @@ function emitTokenUsage(state: WorkerRunState, deps: WorkerRunDeps, delta?: { in
   emitLifecycle(state, deps, "tokens.usage", {
     runId: deps.options.id,
     name: deps.options.name,
-    runner: deps.options.runner,
     depth: deps.options.depth,
     ...(deps.options.persistentAgentId ? { persistentAgentId: deps.options.persistentAgentId } : {}),
     ...(deps.options.persistentAgentName ? { persistentAgentName: deps.options.persistentAgentName } : {}),
@@ -355,30 +324,7 @@ function pollSteer(state: WorkerRunState, deps: WorkerRunDeps): void {
         continue;
       }
       try {
-        if (deps.options.runner === "claude") {
-          if (state.claudeCloseTimer) clearTimeout(state.claudeCloseTimer);
-          state.claudeCloseTimer = undefined;
-          if (command.type === "steer" && typeof command.message === "string") {
-            deps.enqueueClaudeControl(deps.claudeSteering, command.message);
-            deps.flushClaudeSteering();
-          } else if (command.type === "follow_up" && typeof command.message === "string") {
-            deps.enqueueClaudeControl(deps.claudeFollowUps, command.message);
-            if (state.claudeCanFollowUp && deps.claudeSentInputs.length === 0) deps.flushClaudeFollowUps();
-          } else if (
-            command.type === "set_steering_mode" &&
-            (command.mode === "all" || command.mode === "one-at-a-time")
-          ) {
-            state.claudeSteeringMode = command.mode;
-            deps.flushClaudeSteering();
-          } else if (
-            command.type === "set_follow_up_mode" &&
-            (command.mode === "all" || command.mode === "one-at-a-time")
-          ) {
-            state.claudeFollowUpMode = command.mode;
-            if (state.claudeCanFollowUp && deps.claudeSentInputs.length === 0) deps.flushClaudeFollowUps();
-          }
-          deps.updateClaudeQueue();
-        } else if (command.type === "steer" && typeof command.message === "string") {
+        if (command.type === "steer" && typeof command.message === "string") {
           deps.child.stdin?.write(JSON.stringify({ type: "steer", message: command.message }) + "\n");
         } else if (command.type === "follow_up" && typeof command.message === "string") {
           deps.child.stdin?.write(JSON.stringify({ type: "follow_up", message: command.message }) + "\n");
@@ -398,198 +344,16 @@ function pollSteer(state: WorkerRunState, deps: WorkerRunDeps): void {
   }
 }
 
-function processClaudeEvent(state: WorkerRunState, deps: WorkerRunDeps, event: Record<string, unknown>): void {
-  if (event.type === "system" && event.subtype === "init") {
-    const sessionId = stringField(event.session_id);
-    if (sessionId) deps.record.runnerSessionId = sessionId;
-    const model = stringField(event.model);
-    if (model && !deps.record.model) deps.record.model = model;
-    deps.update();
-    return;
-  }
-  if (event.type === "assistant") {
-    const message = event.message;
-    if (typeof message !== "object" || message === null || Array.isArray(message)) return;
-    const assistant = message as Record<string, unknown>;
-    const text = extractText(assistant);
-    if (text) {
-      deps.record.text = deps.latestRunText(text);
-      process.stdout.write(`\n${text}\n`);
-    }
-    const content = assistant.content;
-    if (Array.isArray(content)) {
-      for (const block of content) {
-        if (typeof block !== "object" || block === null || Array.isArray(block)) continue;
-        const part = block as Record<string, unknown>;
-        if (part.type !== "tool_use") continue;
-        const id = stringField(part.id);
-        const name = stringField(part.name);
-        if (!id || !name || deps.claudeTools.has(id)) continue;
-        deps.claudeTools.set(id, name);
-        while (deps.claudeTools.size > MAX_CLAUDE_PENDING_TOOLS) {
-          const oldestToolId = deps.claudeTools.keys().next().value;
-          if (oldestToolId === undefined) break;
-          deps.claudeTools.delete(oldestToolId);
-        }
-        deps.record.toolCalls++;
-        deps.record.currentTool = name;
-        process.stdout.write(`→ ${name}\n`);
-      }
-    }
-    const usage = assistant.usage;
-    if (typeof usage === "object" && usage !== null && !Array.isArray(usage)) {
-      const values = usage as Record<string, unknown>;
-      const delta = {
-        input: numberField(values.input_tokens),
-        output: numberField(values.output_tokens),
-        cacheRead: numberField(values.cache_read_input_tokens),
-        cacheWrite: numberField(values.cache_creation_input_tokens),
-        cost: 0,
-      };
-      deps.claudeCurrentUsage.input += delta.input;
-      deps.claudeCurrentUsage.output += delta.output;
-      deps.claudeCurrentUsage.cacheRead += delta.cacheRead;
-      deps.claudeCurrentUsage.cacheWrite += delta.cacheWrite;
-      syncClaudeUsage(state, deps);
-      emitTokenUsage(state, deps, delta);
-    }
-    if (typeof event.error === "string") {
-      state.sawAgentError = true;
-      state.terminalError = event.error;
-    }
-    enforceTokenLimit(state, deps);
-    deps.update();
-    return;
-  }
-  if (event.type === "user") {
-    const message = event.message;
-    if (typeof message !== "object" || message === null || Array.isArray(message)) return;
-    const content = (message as Record<string, unknown>).content;
-    if (!Array.isArray(content)) return;
-    for (const block of content) {
-      if (typeof block !== "object" || block === null || Array.isArray(block)) continue;
-      const part = block as Record<string, unknown>;
-      if (part.type !== "tool_result") continue;
-      const id = stringField(part.tool_use_id);
-      if (id) deps.claudeTools.delete(id);
-    }
-    const current = [...deps.claudeTools.values()].at(-1);
-    if (current) deps.record.currentTool = current;
-    else delete deps.record.currentTool;
-    deps.update();
-    return;
-  }
-  if (event.type === "stream_event") {
-    const streamEvent = event.event;
-    if (typeof streamEvent !== "object" || streamEvent === null || Array.isArray(streamEvent)) return;
-    const stream = streamEvent as Record<string, unknown>;
-    if (stream.type !== "content_block_start") return;
-    const contentBlock = stream.content_block;
-    if (typeof contentBlock !== "object" || contentBlock === null || Array.isArray(contentBlock)) return;
-    const block = contentBlock as Record<string, unknown>;
-    const name = stringField(block.name);
-    if (block.type === "tool_use" && name) {
-      deps.record.currentTool = name;
-      deps.update();
-    }
-    return;
-  }
-  if (event.type !== "result") return;
-  state.claudeResultSeen = true;
-  const sessionId = stringField(event.session_id);
-  if (sessionId) deps.record.runnerSessionId = sessionId;
-  const resultText = typeof event.result === "string" ? event.result : "";
-  if (resultText) deps.record.text = deps.latestRunText(resultText);
-  if (event.structured_output !== undefined) deps.record.value = event.structured_output;
-  deps.record.turns += Math.max(0, Math.floor(numberField(event.num_turns)));
-  const resultUsage =
-    typeof event.usage === "object" && event.usage !== null && !Array.isArray(event.usage)
-      ? (event.usage as Record<string, unknown>)
-      : undefined;
-  // The result frame supersedes the assistant-frame stream for this turn:
-  // fold any unreported assistant tokens into the result delta so cumulative
-  // attribution stays exact without double-counting assistant emissions.
-  const resultDelta = resultUsage
-    ? {
-        input: numberField(resultUsage.input_tokens) - deps.claudeCurrentUsage.input,
-        output: numberField(resultUsage.output_tokens) - deps.claudeCurrentUsage.output,
-        cacheRead:
-          numberField(resultUsage.cache_read_input_tokens) - deps.claudeCurrentUsage.cacheRead,
-        cacheWrite:
-          numberField(resultUsage.cache_creation_input_tokens) - deps.claudeCurrentUsage.cacheWrite,
-        cost: Math.max(0, numberField(event.total_cost_usd)),
-      }
-    : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: Math.max(0, numberField(event.total_cost_usd)) };
-  deps.claudeCompletedUsage.input += resultUsage
-    ? numberField(resultUsage.input_tokens)
-    : deps.claudeCurrentUsage.input;
-  deps.claudeCompletedUsage.output += resultUsage
-    ? numberField(resultUsage.output_tokens)
-    : deps.claudeCurrentUsage.output;
-  deps.claudeCompletedUsage.cacheRead += resultUsage
-    ? numberField(resultUsage.cache_read_input_tokens)
-    : deps.claudeCurrentUsage.cacheRead;
-  deps.claudeCompletedUsage.cacheWrite += resultUsage
-    ? numberField(resultUsage.cache_creation_input_tokens)
-    : deps.claudeCurrentUsage.cacheWrite;
-  deps.claudeCompletedUsage.cost += Math.max(0, numberField(event.total_cost_usd));
-  deps.claudeCurrentUsage.input = 0;
-  deps.claudeCurrentUsage.output = 0;
-  deps.claudeCurrentUsage.cacheRead = 0;
-  deps.claudeCurrentUsage.cacheWrite = 0;
-  syncClaudeUsage(state, deps);
-  emitTokenUsage(state, deps, resultDelta);
-  enforceTokenLimit(state, deps);
-  const failed = event.is_error === true || event.subtype !== "success";
-  if (failed) {
-    state.sawAgentError = true;
-    const errors = Array.isArray(event.errors)
-      ? event.errors.filter((value): value is string => typeof value === "string").join(" · ")
-      : "";
-    state.terminalError = errors || resultText || `Claude returned ${String(event.subtype ?? "an error")}`;
-    deps.claudeSteering.splice(0);
-    deps.claudeFollowUps.splice(0);
-  } else {
-    state.sawAgentError = false;
-    if (!state.terminalStatus) state.terminalError = undefined;
-  }
-  if (failed || state.terminalStatus) deps.claudeSentInputs.splice(0);
-  else deps.claudeSentInputs.shift();
-  state.claudeCanFollowUp = !failed && !state.terminalStatus;
-  delete deps.record.currentTool;
-  deps.updateClaudeQueue();
-  if (failed || state.terminalStatus) {
-    deps.child.stdin?.end();
-    return;
-  }
-  deps.flushClaudeSteering();
-  if (deps.claudeSentInputs.length === 0 && deps.claudeSteering.length === 0) {
-    deps.flushClaudeFollowUps();
-  }
-  if (
-    deps.claudeSentInputs.length === 0 &&
-    deps.claudeSteering.length === 0 &&
-    deps.claudeFollowUps.length === 0
-  ) {
-    deps.scheduleClaudeClose();
-  }
-}
-
 function processEvent(state: WorkerRunState, deps: WorkerRunDeps, line: string): void {
   if (process.env.PI_FABRIC_INJECT_CRASH === "stream") throw new Error("simulated stream crash");
   if (!line.trim()) return;
   deps.logStream.write(`${line}\n`);
-  deps.sessionStream?.write(`${line}\n`);
   let event: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(line);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
     event = parsed as Record<string, unknown>;
   } catch {
-    return;
-  }
-  if (deps.options.runner === "claude") {
-    processClaudeEvent(state, deps, event);
     return;
   }
   deps.compactControl.observe(event);
@@ -733,16 +497,6 @@ function emitLifecycle(state: WorkerRunState, deps: WorkerRunDeps, event: string
   }
 }
 
-function syncClaudeUsage(state: WorkerRunState, deps: WorkerRunDeps): void {
-  deps.record.usage = {
-    input: deps.claudeCompletedUsage.input + deps.claudeCurrentUsage.input,
-    output: deps.claudeCompletedUsage.output + deps.claudeCurrentUsage.output,
-    cacheRead: deps.claudeCompletedUsage.cacheRead + deps.claudeCurrentUsage.cacheRead,
-    cacheWrite: deps.claudeCompletedUsage.cacheWrite + deps.claudeCurrentUsage.cacheWrite,
-    cost: deps.claudeCompletedUsage.cost,
-  };
-}
-
 function enforceTokenLimit(state: WorkerRunState, deps: WorkerRunDeps): void {
   if (state.terminalStatus || !deps.options.maxTokens || deps.options.maxTokens <= 0) return;
   const total =
@@ -796,11 +550,6 @@ const main = async (): Promise<void> => {
   fs.mkdirSync(path.dirname(options.logFile), { recursive: true });
   const logStream = fs.createWriteStream(options.logFile, { flags: "a", mode: 0o600 });
   logStream.on("error", () => {});
-  const sessionStream =
-    options.runner === "claude" && options.sessionFile
-      ? fs.createWriteStream(options.sessionFile, { flags: "a", mode: 0o600 })
-      : undefined;
-  sessionStream?.on("error", () => {});
 
   const schema = options.schemaFile
     ? fs.readFileSync(options.schemaFile, "utf8")
@@ -811,7 +560,7 @@ const main = async (): Promise<void> => {
   if (!options.extensions) piArguments.push("--no-extensions");
   if (options.fabricExtensionPath) piArguments.push("-e", options.fabricExtensionPath);
   if (options.consultReadScope !== undefined) {
-    if (options.runner !== "pi" || !options.consultScopeExtensionPath) {
+    if (!options.consultScopeExtensionPath) {
       throw new Error("Ultra Consult read scope requires a Pi guard extension");
     }
     // Consult must receive only its task, explicit tools, schema, and scope guard.
@@ -837,22 +586,8 @@ const main = async (): Promise<void> => {
       `Your final response must contain only JSON matching this schema, without Markdown fences:\n${schema}`,
     );
   }
-  const claudeCli = options.runner === "claude" ? await loadClaudeCli() : undefined;
-  const childArguments =
-    options.runner === "claude"
-      ? claudeCli!.buildClaudeArguments({
-          tools: options.tools,
-          extensions: options.extensions,
-          persistentSession: Boolean(options.sessionFile),
-          ...(options.model ? { model: options.model } : {}),
-          ...(thinking ? { thinking } : {}),
-          ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-          ...(schema ? { schema } : {}),
-          ...(options.runnerSessionId ? { runnerSessionId: options.runnerSessionId } : {}),
-          name: options.name,
-        })
-      : piArguments;
-  const childBinary = options.runner === "claude" ? options.claudeBinary : options.piBinary;
+  const childArguments = piArguments;
+  const childBinary = options.piBinary;
 
   const child = spawnCli(childBinary, childArguments, {
     cwd: options.cwd,
@@ -899,11 +634,6 @@ const main = async (): Promise<void> => {
     sawAgentError: false,
     retryPending: false,
     turnBudgetStopTimer: undefined,
-    claudeSteeringMode: "one-at-a-time",
-    claudeFollowUpMode: "one-at-a-time",
-    claudeCanFollowUp: false,
-    claudeResultSeen: false,
-    claudeCloseTimer: undefined,
     steerOffset: 0,
     steerRemainder: Buffer.alloc(0),
     skippingOversizedSteerLine: false,
@@ -964,116 +694,24 @@ const main = async (): Promise<void> => {
 
 
 
-  const claudeTools = new Map<string, string>();
-  const claudeCompletedUsage = emptyUsage();
-  const claudeCurrentUsage = emptyUsage();
-
-  const claudeSentInputs: Array<{ kind: ClaudeInputKind; message: string }> = [];
-  const claudeSteering: string[] = [];
-  const claudeFollowUps: string[] = [];
-  const enqueueClaudeControl = (queue: string[], message: string): void => {
-    const pendingInputs = claudeSentInputs.length + claudeSteering.length + claudeFollowUps.length;
-    if (pendingInputs >= MAX_CLAUDE_PENDING_INPUTS) return;
-    queue.push(message);
-  };
-
-  const updateClaudeQueue = (): void => {
-    const sentSteering = claudeSentInputs
-      .filter((entry) => entry.kind === "steer")
-      .map((entry) => entry.message);
-    const sentFollowUps = claudeSentInputs
-      .filter((entry) => entry.kind === "follow_up")
-      .map((entry) => entry.message);
-    record.pendingMessages = {
-      steering: [...sentSteering, ...claudeSteering],
-      followUp: [...sentFollowUps, ...claudeFollowUps],
-    };
-    update();
-  };
-
-  const writeClaudeInput = (
-    kind: ClaudeInputKind,
-    message: string,
-    inputImages: readonly ImageContent[] = [],
-  ): void => {
-    if (state.claudeCloseTimer) clearTimeout(state.claudeCloseTimer);
-    state.claudeCloseTimer = undefined;
-    if (!child.stdin || child.stdin.writableEnded || child.stdin.destroyed) return;
-    claudeSentInputs.push({ kind, message });
-    if (kind === "follow_up") state.claudeCanFollowUp = false;
-    child.stdin.write(
-      `${JSON.stringify(claudeCli!.claudeUserMessage(message, inputImages))}\n`,
-    );
-    updateClaudeQueue();
-  };
-
-  const flushClaudeSteering = (): void => {
-    if (claudeSteering.length === 0) return;
-    const alreadySent = claudeSentInputs.some((entry) => entry.kind === "steer");
-    if (state.claudeSteeringMode === "one-at-a-time" && alreadySent) return;
-    const count = state.claudeSteeringMode === "all" ? claudeSteering.length : 1;
-    for (const message of claudeSteering.splice(0, count)) {
-      writeClaudeInput("steer", message);
-    }
-  };
-
-  const flushClaudeFollowUps = (): void => {
-    if (claudeFollowUps.length === 0 || claudeSteering.length > 0) return;
-    if (claudeSentInputs.some((entry) => entry.kind === "steer")) return;
-    const alreadySent = claudeSentInputs.some((entry) => entry.kind === "follow_up");
-    if (state.claudeFollowUpMode === "one-at-a-time" && alreadySent) return;
-    const count = state.claudeFollowUpMode === "all" ? claudeFollowUps.length : 1;
-    for (const message of claudeFollowUps.splice(0, count)) {
-      writeClaudeInput("follow_up", message);
-    }
-  };
-
-  const scheduleClaudeClose = (): void => {
-    if (state.claudeCloseTimer || state.terminalStatus) return;
-    state.claudeCloseTimer = setTimeout(() => {
-      state.claudeCloseTimer = undefined;
-      if (
-        claudeSentInputs.length === 0 &&
-        claudeSteering.length === 0 &&
-        claudeFollowUps.length === 0
-      ) {
-        child.stdin?.end();
-      }
-    }, 300);
-    state.claudeCloseTimer.unref();
-  };
   const deps: WorkerRunDeps = {
     options,
     child,
     record,
-    claudeCli,
     compactControl,
-    claudeSentInputs,
-    claudeSteering,
-    claudeFollowUps,
-    claudeTools,
-    claudeCompletedUsage,
-    claudeCurrentUsage,
     logStream,
-    sessionStream,
     lastEmittedUsage,
     latestRunText,
     extractUsageDelta,
     applyUsage,
     update,
     enforceTurnBudget,
-    enqueueClaudeControl,
-    updateClaudeQueue,
-    flushClaudeSteering,
-    flushClaudeFollowUps,
-    scheduleClaudeClose,
   };
 
 
 
   child.stdin?.on("error", () => {});
-  if (options.runner === "claude") writeClaudeInput("initial", task, images);
-  else {
+  {
     child.stdin?.write(
       `${JSON.stringify({
         type: "prompt",
@@ -1158,7 +796,6 @@ const main = async (): Promise<void> => {
   });
 
   if (steerTimer) clearInterval(steerTimer);
-  if (state.claudeCloseTimer) clearTimeout(state.claudeCloseTimer);
   if (state.turnBudgetStopTimer) clearTimeout(state.turnBudgetStopTimer);
   clearTimeout(timeout);
   if (process.env.PI_FABRIC_INJECT_CRASH === "close") throw new Error("simulated close crash");
@@ -1186,14 +823,7 @@ const main = async (): Promise<void> => {
   }
   record.finishedAt = Date.now();
   record.updatedAt = record.finishedAt;
-  const childCompleted =
-    exitCode === 0 &&
-    !state.sawAgentError &&
-    (options.runner === "pi" ||
-      (state.claudeResultSeen &&
-        claudeSentInputs.length === 0 &&
-        claudeSteering.length === 0 &&
-        claudeFollowUps.length === 0));
+  const childCompleted = exitCode === 0 && !state.sawAgentError;
   record.status = state.terminalStatus ?? (childCompleted ? "completed" : "failed");
   if (options.turnBudget) {
     const exceeded = state.terminalError?.startsWith("Agent turn budget reached:") === true;
@@ -1207,8 +837,8 @@ const main = async (): Promise<void> => {
     record.error =
       state.stderr.trim() ||
       (exitCode === 0
-        ? `${options.runner === "claude" ? "Claude" : "Pi"} agent reported an error before exiting`
-        : `${options.runner === "claude" ? "Claude" : "Pi"} exited with code ${exitCode ?? "unknown"}`);
+        ? "Pi agent reported an error before exiting"
+        : `Pi exited with code ${exitCode ?? "unknown"}`);
   }
   if (record.status === "completed" && options.schemaFile) {
     try {
@@ -1239,9 +869,7 @@ const main = async (): Promise<void> => {
   process.stdout.write(`\n[pi-fabric] ${record.status}\n`);
   await Promise.all([
     new Promise<void>((resolve) => logStream.end(resolve)),
-    sessionStream
-      ? new Promise<void>((resolve) => sessionStream.end(resolve))
-      : Promise.resolve(),
+    Promise.resolve(),
   ]);
   process.exitCode = record.status === "completed" ? 0 : 1;
 };

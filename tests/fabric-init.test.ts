@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planInit } from "../src/init/scaffold.js";
+import { planInit, applyInitPlan } from "../src/init/scaffold.js";
 
 // /fabric init: root-level context scaffold. Pure planner — no I/O.
 
@@ -134,6 +134,31 @@ describe("planInit", () => {
     const plan = planInit(new Set(), V);
     const cfg = JSON.parse(plan.files.find((f) => f.path === ".pi/fabric.json")!.content) as { configVersion: number };
     expect(cfg.configVersion).toBe(V);
+  });
+
+  it("defers root creation when only the legacy .pi sibling exists", () => {
+    const plan = planInit(new Set([".pi/project.md"]), V);
+    const byPath = new Map(plan.files.map((f) => [f.path, f.action]));
+    expect(byPath.get("project.md")).toBe("defer");
+    const migration = plan.migrations.find(
+      (m) => m.includes(".pi/project.md") && m.includes("root-level project.md"),
+    );
+    expect(migration).toBeDefined();
+  });
+
+  it("applyInitPlan writes nothing for deferred files and reports them apart", () => {
+    const plan = planInit(new Set([".pi/roadmap.md"]), V);
+    const writes: string[] = [];
+    const applied = applyInitPlan(plan, {
+      exists: () => false,
+      write: (p) => {
+        writes.push(p);
+      },
+    });
+    expect(applied.deferred).toContain("roadmap.md");
+    expect(applied.created).not.toContain("roadmap.md");
+    expect(applied.skipped).not.toContain("roadmap.md");
+    expect(writes).not.toContain("roadmap.md");
   });
 
   it("skips existing files and reports legacy .pi context", () => {

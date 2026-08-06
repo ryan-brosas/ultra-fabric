@@ -783,7 +783,6 @@ const inspectorLines = (
       if (entity.value.model) content.push(`model ${safeText(entity.value.model)}`);
       if (entity.value.task) content.push(...wrapInspector(theme, "task", entity.value.task, inner - 2));
     } else if (entity.kind === "persistentAgent") {
-      content.push(`runner ${entity.value.runner}`);
       content.push(`queue  ${entity.value.queued}`);
       if (entity.value.topics.length > 0) content.push(`${entity.value.topics.length} subscriptions`);
     } else if (entity.kind === "meshTopic") {

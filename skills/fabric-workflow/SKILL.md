@@ -1,7 +1,6 @@
 ---
 name: fabric-workflow
 description: Runs dynamic or durable Pi Fabric workflows with atomic finite-budget fan-out, explicit delegation admission, structured agents, path leases, safe run context, evidence gates, and outcome evaluation. Use for large audits, migrations, parallel research, or explicit workflow requests.
-disable-model-invocation: true
 ---
 
 # Fabric Dynamic Workflow

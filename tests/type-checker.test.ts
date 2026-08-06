@@ -71,6 +71,58 @@ return { recalled, current, mode: status.mode, hypothesis: hypothesis.hypothesis
     expect(result.errors).toEqual([]);
   });
 
+  it("accepts prewalk checklist escapes documented in the guest surface", () => {
+    const trivial = typeCheckFabricCode(
+      'return prewalk.checklist({ trivial: true });',
+      GUEST_TYPE_DECLARATIONS,
+    );
+    expect(trivial.errors).toEqual([]);
+    const easy = typeCheckFabricCode(
+      `
+return prewalk.checklist({
+  easy: true,
+  items: [
+    { task: "Flip the flag", validation: "The flag is flipped" },
+    { task: "Run the gate", validation: "The gate passes" },
+  ],
+});
+`,
+      GUEST_TYPE_DECLARATIONS,
+    );
+    expect(easy.errors).toEqual([]);
+  });
+
+  it("accepts research-mode prewalk.checklist({ items })", () => {
+    const result = typeCheckFabricCode(
+      `
+return prewalk.checklist({
+  items: [
+    { task: "Probe the surface", validation: "The probe returns" },
+    { task: "Implement the fix", validation: "The fix is green" },
+    { task: "Gate the slice", validation: "The gate passes" },
+    { task: "Sweep call sites", validation: "No stray consumers" },
+    { task: "Run the module tests", validation: "The module is green" },
+  ],
+});
+`,
+      GUEST_TYPE_DECLARATIONS,
+    );
+    expect(result.errors).toEqual([]);
+  });
+
+  it("still rejects trivial-with-items like the runtime does", () => {
+    const result = typeCheckFabricCode(
+      `
+return prewalk.checklist({
+  trivial: true,
+  items: [{ task: "T", validation: "V" }],
+});
+`,
+      GUEST_TYPE_DECLARATIONS,
+    );
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
   it("rejects misspelled first-class provider argument keys", () => {
     const result = typeCheckFabricCode(
       'await compact.request({ reasno: "context pressure" }); return "never";',

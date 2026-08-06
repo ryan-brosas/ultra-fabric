@@ -33,7 +33,6 @@ describe("Ultra Consult worker boundary", () => {
       maxEvidencePerFinding: 2,
     })).toMatchObject({
       name: "consult-critic",
-      runner: "pi",
       model: "p/reviewer",
       tools: ["read", "grep", "find", "ls"],
       recursive: false,

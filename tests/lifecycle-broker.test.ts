@@ -43,7 +43,6 @@ const participant = (
   ownerIdentityId: identity.id,
   name: identity.name,
   status: "idle",
-  runner: "pi",
   transport: "host",
   capabilities: ["steer", "followUp", "fabric"],
   ...(identity.sessionId ? { sessionId: identity.sessionId } : {}),

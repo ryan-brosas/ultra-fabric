@@ -831,18 +831,13 @@ const runRequest = (
   const tools = profile ? [...profile.tools] : stringArray(args.tools);
   const timeoutMs = longerTimeoutOverride(args.timeoutMs, manager);
   const role = normalizeFabricAgentRole(args.role);
-  const roleProfile = manager.roles.require(role, "one-shot");
-  const runner = args.runner === "pi" || args.runner === "claude"
-    ? args.runner
-    : roleProfile.runner ?? manager.config.runner;
   const inheritedModel =
-    runner === "pi" && !manager.config.model && context.extensionContext.model
+    !manager.config.model && context.extensionContext.model
       ? `${context.extensionContext.model.provider}/${context.extensionContext.model.id}`
       : undefined;
   return {
     task: String(args.task),
     role,
-    runner,
     ...(typeof args.goal === "string" ? { goal: args.goal } : {}),
     ...(typeof args.completion === "string" ? { completion: args.completion } : {}),
     ...(typeof args.turnBudget === "object" && args.turnBudget !== null && !Array.isArray(args.turnBudget)
@@ -921,9 +916,6 @@ const routedRunRequest = async (
     fallbackModels.length > 0 ||
     (typeof args.requirements === "object" && args.requirements !== null);
   if (!routingRequested) return request;
-  if ((request.runner ?? manager.config.runner) !== "pi") {
-    throw new Error("Capability routing is supported only for Pi provider/id models");
-  }
   const requestedModel =
     request.model ?? manager.config.model ??
     (context.extensionContext.model
@@ -998,7 +990,6 @@ const compactHandoffResult = (
   agent: {
     id: result.id,
     name: result.name,
-    runner: result.runner,
     transport: result.transport,
     ...(result.model ? { model: result.model } : {}),
     ...(result.route ? { route: result.route } : {}),
@@ -1036,12 +1027,8 @@ const persistentAgentRequest = (
     ? { version: 1 as const, source: (args.validWhile as { source: string }).source }
     : undefined;
   const role = normalizeFabricAgentRole(args.role, "advisor");
-  const roleProfile = manager.roles.require(role, "persistent");
-  const runner = args.runner === "pi" || args.runner === "claude"
-    ? args.runner
-    : roleProfile.runner ?? manager.config.runner;
   const inheritedModel =
-    inheritModel && runner === "pi" && !manager.config.model && context.extensionContext.model
+    inheritModel && !manager.config.model && context.extensionContext.model
       ? `${context.extensionContext.model.provider}/${context.extensionContext.model.id}`
       : undefined;
   return {
@@ -1053,7 +1040,6 @@ const persistentAgentRequest = (
     ...(typeof args.turnBudget === "object" && args.turnBudget !== null && !Array.isArray(args.turnBudget)
       ? { turnBudget: args.turnBudget as NonNullable<FabricPersistentAgentRequest["turnBudget"]> }
       : {}),
-    runner,
     ...(events ? { events } : {}),
     ...(topics ? { topics } : {}),
     ...(args.delivery === "mailbox" ||
@@ -1124,7 +1110,6 @@ const attachAgentToolPreview = (
       id: status.id,
       name: status.persistentAgentName ?? status.name,
       status: status.status,
-      runner: status.runner,
       owner: status.persistentAgentId ? "persistentAgent" : "agent",
       ...("text" in status && status.text
         ? { text: tailCodePoints(status.text, AGENT_PREVIEW_TEXT_CODE_POINTS) }
@@ -1352,7 +1337,6 @@ export class AgentsProvider implements FabricProvider {
       context,
       this.manager,
     );
-    request.runner = "pi";
     request.sessionSeed = sessionSeed;
     const handle = await this.manager.spawn(request, context.signal);
     context.activity?.({
@@ -1398,7 +1382,7 @@ export class AgentsProvider implements FabricProvider {
           name: handle.name,
         });
         context.update(
-          `Agent ${handle.name} started via ${handle.runner}/${handle.transport}${handle.attachCommand ? ` · ${handle.attachCommand}` : ""}`,
+          `Agent ${handle.name} started via ${handle.transport}${handle.attachCommand ? ` · ${handle.attachCommand}` : ""}`,
         );
         return waitWithProgress(
           this.manager,
@@ -1424,7 +1408,7 @@ export class AgentsProvider implements FabricProvider {
           name: handle.name,
         });
         context.update(
-          `Agent ${handle.name} started via ${handle.runner}/${handle.transport}${handle.attachCommand ? ` · ${handle.attachCommand}` : ""}`,
+          `Agent ${handle.name} started via ${handle.transport}${handle.attachCommand ? ` · ${handle.attachCommand}` : ""}`,
         );
         return handle;
       }
@@ -1535,25 +1519,9 @@ export class AgentsProvider implements FabricProvider {
         };
       }
       case "models": {
-        const runner =
-          args.runner === "pi" || args.runner === "claude"
-            ? args.runner
-            : this.manager.config.runner;
-        if (runner === "claude") {
-          const models = await this.manager.claudeModels(args.refresh === true);
-          return models.map((model) => ({
-            runner: "claude",
-            provider: "claude",
-            id: model.value,
-            name: model.displayName,
-            key: `claude/${model.value}`,
-            ...model,
-          }));
-        }
         try {
           const available = context.extensionContext.modelRegistry.getAvailable();
           return available.map((model) => ({
-            runner: "pi",
             provider: String(model.provider),
             id: String(model.id),
             name: String(model.name ?? model.id),

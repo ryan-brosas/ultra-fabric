@@ -40,8 +40,8 @@ describe("config completeness lint", () => {
 
   it("the lint fails when a required default is removed", () => {
     const fakeDefaults = { ...DEFAULT_FABRIC_CONFIG, agents: { ...DEFAULT_FABRIC_CONFIG.agents } };
-    delete (fakeDefaults.agents as Record<string, unknown>).runner;
+    delete (fakeDefaults.agents as Record<string, unknown>).transport;
     const result = checkCompleteness("FabricAgentConfig", fakeDefaults as unknown as Record<string, unknown>, "agents");
-    expect(result.missing).toContain("runner");
+    expect(result.missing).toContain("transport");
   });
 });

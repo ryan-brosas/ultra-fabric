@@ -101,7 +101,7 @@ This is a one-task smoke comparison with three stochastic attempts across differ
 
 ## Prewalk handoff
 
-Prewalk lets a frontier model plan and take the first concrete implementation step, then hands the **same session** to a faster executor. The switch is in-session: the executor inherits the live conversation and the real tool set, so no plan has to be re-serialised into a fresh context. One path, no modes.
+Prewalk lets a frontier model plan and take the first concrete implementation step, then hands the **same session** to a faster executor. The switch is in-session: the executor inherits the live conversation and the real tool set, so no plan has to be re-serialised into a fresh context. One path, no modes. Set `prewalk.delegateContext` to keep recon and research on `scout`/`explorer` roles or `consult.run` workers, so Main's context stays lean while the executor implements; `prewalk.handoffRetirement` then retires Main's planning-phase tool results from the executor transcript, and `prewalk.reuseChecklists` seeds repeat tasks with their prior plan. See [docs/agents.md](docs/agents.md#automatic-prewalk).
 
 Three isolated clean-room runs on 2026-08-04, each a fresh `pi -p` session in an empty workspace with `--session-dir`, planner `claude-bridge/claude-opus-5`, executor `makora/zai-org/GLM-5.2-NVFP4`, and the standalone `pi-prewalk` extension uninstalled so attribution is unambiguous.
 

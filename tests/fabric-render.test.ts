@@ -311,7 +311,6 @@ pi.write({ path: "nested.md", metadata: { content: π.wrong }, text: π.right })
               id: "agent-child-12345678",
               name: "researcher",
               status: "running",
-              runner: "pi",
               owner: "agent",
               text: "I previously inspected the repository.",
               tools: [
@@ -454,7 +453,6 @@ pi.write({ path: "nested.md", metadata: { content: π.wrong }, text: π.right })
               id: "agent-child-123",
               name: "implementor",
               status: "running",
-              runner: "pi",
               owner: "agent",
               tools: [
                 {
@@ -501,7 +499,6 @@ pi.write({ path: "nested.md", metadata: { content: π.wrong }, text: π.right })
               id: "agent-child-123",
               name: "implementor",
               status: "running",
-              runner: "pi",
               owner: "agent",
               text: "Inspecting the routing configuration now.\nThe response stays expanded.",
               tools: [
@@ -547,7 +544,6 @@ pi.write({ path: "nested.md", metadata: { content: π.wrong }, text: π.right })
               id: "agent-reader",
               name: "reader",
               status: "running",
-              runner: "pi",
               owner: "agent",
               text: "Reviewing the routing configuration.",
               tools: [],
@@ -563,7 +559,6 @@ pi.write({ path: "nested.md", metadata: { content: π.wrong }, text: π.right })
               id: "agent-searcher",
               name: "searcher",
               status: "running",
-              runner: "pi",
               owner: "agent",
               text: "I will inspect the tests.",
               tools: [
@@ -607,7 +602,6 @@ pi.write({ path: "nested.md", metadata: { content: π.wrong }, text: π.right })
               id: "agent-child-123",
               name: "implementor",
               status: "running",
-              runner: "pi",
               owner: "agent",
               text: Array.from({ length: 10 }, (_, index) => `narrative ${index + 1}`).join("\n"),
               tools: Array.from({ length: 8 }, (_, index) => ({
@@ -661,7 +655,6 @@ pi.write({ path: "nested.md", metadata: { content: π.wrong }, text: π.right })
               id: "agent-child-123",
               name: "implementor",
               status: "running",
-              runner: "pi",
               owner: "agent",
               tools: [
                 {
