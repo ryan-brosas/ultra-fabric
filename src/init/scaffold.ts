@@ -6,7 +6,7 @@
 
 import type { DetectedContext } from "./detect.js";
 
-export interface InitFile {
+interface InitFile {
   path: string;
   content: string;
   action: "create" | "skip" | "defer";

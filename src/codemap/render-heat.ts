@@ -126,43 +126,4 @@ export const renderHeatField = (
   };
 };
 
-// Grouped reveal for sketches and impacts.
-export interface GroupLine { label: string; mass: number; detail: string; }
 
-export const renderGroups = (
-  groups: GroupLine[],
-  opts: { header: string; budget: number },
-): HeatRenderResult => {
-  const ordered = [...groups].sort((a, b) => b.mass - a.mass || (a.label < b.label ? -1 : 1));
-  const renderK = (k: number): string => {
-    const body = ordered.slice(0, k).map((gl) => `${gl.label.padEnd(2)} ${gl.detail}`);
-    const rest = ordered.length - k;
-    const footer = rest > 0 ? [`\n… ${rest} groups below threshold`] : [];
-    return [opts.header, ...body, ...footer].join("\n");
-  };
-  let hi = ordered.length;
-  let best = renderK(hi);
-  if (tokenEstimate(best) > opts.budget) {
-    let lo = 0;
-    best = renderK(0);
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const text = renderK(mid);
-      if (tokenEstimate(text) <= opts.budget) {
-        best = text;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-  }
-  return {
-    text: best,
-    tokens: tokenEstimate(best),
-    shown: Math.min(ordered.length, ordered.length),
-    suppressed: 0,
-    litTotal: ordered.length,
-    truncated: best.split("\n").some((l) => l.startsWith("…")),
-    revealedIds: [],
-  };
-};

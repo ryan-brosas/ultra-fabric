@@ -118,9 +118,6 @@ const normalizeSchema = (schema: unknown): Record<string, unknown> =>
 // number of distinct MCP tools; reset on demand.
 const searchHealth = new Map<string, EvidenceHealth>();
 
-export const resetSearchHealth = (): void => {
-  searchHealth.clear();
-};
 
 const normalizeMcpResult = (result: unknown): unknown => {
   if (typeof result !== "object" || result === null || Array.isArray(result)) return result;

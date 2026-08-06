@@ -459,7 +459,7 @@ describe("expensive skill program behavior", () => {
     expect(result).toMatchObject({ status: "partial", analysis: {} });
     expect(judgeModel).toBe("p/two");
     expect(result.failures).toContainEqual({
-      label: "first", model: "p/one", runner: "pi", status: "failed",
+      label: "first", model: "p/one", status: "failed",
       error: "first provider failed",
     });
   });

@@ -1,6 +1,7 @@
 ---
 name: fabric-supervisor
 description: Creates or reuses Ultra Fabric's native persistent supervisor role for one concrete, measurable goal. Use for long-running Main-session drift, blocker, and completion supervision. Do not use for one-shot review or ordinary advice; use an Agent reviewer or fabric-advisor instead.
+disable-model-invocation: true
 ---
 
 # Fabric Supervisor

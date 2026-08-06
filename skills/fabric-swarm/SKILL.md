@@ -1,6 +1,7 @@
 ---
 name: fabric-swarm
 description: Creates a self-organizing team of persistent Pi Fabric agents with durable topics, mailboxes, and compare-and-swap tasks. Use for messenger-like collaboration and long-lived delegated work.
+disable-model-invocation: true
 ---
 
 # Fabric Swarm
@@ -52,7 +53,7 @@ const persistentAgents = await Promise.all(
     agents.create({
       name: role.name,
       role: "specialist",
-      runner: "pi",
+
       instructions: role.instructions,
       topics: [topic],
       responseMode: "directive",

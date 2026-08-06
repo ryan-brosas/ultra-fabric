@@ -2,12 +2,12 @@
 // module returns structured context used to fill the scaffold templates.
 // No I/O imports; the adapter gathers probes with fs/exec effects.
 
-export interface McpServerProbe {
+interface McpServerProbe {
   name: string;
   toolCount: number;
 }
 
-export interface IdentityProbe {
+interface IdentityProbe {
   gh: string | null; // gh api user login
   git: string | null; // git config user.name
 }
@@ -21,7 +21,7 @@ export interface DetectionProbes {
   identity?: IdentityProbe;
 }
 
-export interface DetectedCommand {
+interface DetectedCommand {
   build?: string;
   test?: string;
   lint?: string;

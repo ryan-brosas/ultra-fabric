@@ -19,7 +19,7 @@ export interface RouteOverrides {
   weights?: Readonly<Record<string, number>>;
 }
 
-export interface EvidenceAttempt {
+interface EvidenceAttempt {
   tool: string;
   server: string;
   timeoutMs: number;

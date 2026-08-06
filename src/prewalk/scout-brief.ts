@@ -21,9 +21,9 @@ export type ScoutRunner = (request: {
 // Bound the brief so the frontier planning prompt never grows without limit.
 // 2k characters is comfortably inside a small prompt block while carrying the
 // files, symbols, and one-line observations a scout should return.
-export const MAX_SCOUT_BRIEF_CHARS = 2000;
+const MAX_SCOUT_BRIEF_CHARS = 2000;
 
-export const scoutBriefPrompt = (task: string): string =>
+const scoutBriefPrompt = (task: string): string =>
   "Read-only context scout. Do not edit any file. Explore the repository and " +
   "return a compressed brief for the task below: up to 8 lines, each line a " +
   "file path with a one-line responsibility note. End with a 2-line summary " +

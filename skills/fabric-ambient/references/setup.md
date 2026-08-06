@@ -8,17 +8,8 @@ const role = π.role || "worker";
 const triggerTurn = π.triggerTurn === "true";
 const desiredTools = ["read", "grep", "find", "ls"];
 let model: string | undefined;
-let runner: FabricAgentRunner | undefined;
 if (π.model) {
-  const models: Array<FabricModelInfo & { runner: FabricAgentRunner }> = (
-    await tools.models()
-  ).map((entry) => ({ ...entry, runner: "pi" as const }));
-  try {
-    models.push(...(await agents.models({ runner: "claude" })).map((entry) => ({
-      ...entry,
-      runner: "claude" as const,
-    })));
-  } catch {}
+  const models: FabricModelInfo[] = await tools.models();
   const needle = π.model.toLowerCase();
   const exact = models.filter((entry) => entry.key.toLowerCase() === needle);
   const fuzzy = exact.length === 0
@@ -35,22 +26,19 @@ if (π.model) {
     );
   }
   model = fuzzy[0].key;
-  runner = fuzzy[0].runner;
 }
 
 const existing = (await agents.list({ lifecycle: "persistent" })).find(
   (agent) => agent.name === π.name && agent.status !== "stopped",
 );
 if (existing) {
-  const runnerMatches = !runner || existing.runner === runner;
   const warnings = [
     ...(existing.status !== "idle" ? [`persistent agent is ${existing.status}; wait until idle or stop it before reconfiguration`] : []),
     ...(existing.role !== role ? [`recreate for role=${role}`] : []),
     ...(existing.responseMode !== "directive" ? ["recreate for responseMode=directive"] : []),
     ...(existing.coalesce !== true ? ["recreate for coalesce=true"] : []),
     ...(existing.topics.length !== 0 ? ["recreate without topic subscriptions"] : []),
-    ...(!runnerMatches ? [`runner "${runner}" requires recreation`] : []),
-    ...(runnerMatches && model && existing.model !== model ? [`model "${model}" requires a dashboard change or recreation`] : []),
+    ...(model && existing.model !== model ? [`model "${model}" requires a dashboard change or recreation`] : []),
   ];
   if (warnings.length) return { reused: false, agent: existing, warnings };
 
@@ -84,7 +72,6 @@ const persistentAgent = await agents.create({
   triggerTurn,
   coalesce: true,
   tools: desiredTools,
-  ...(runner ? { runner } : {}),
   ...(model ? { model } : {}),
 });
 return { started: true, agent: persistentAgent };

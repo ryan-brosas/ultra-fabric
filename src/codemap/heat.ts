@@ -107,7 +107,7 @@ const gammaLn = (x: number): number => {
   return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(acc);
 };
 
-export const chooseOrder = (t: number): number => Math.min(90, Math.ceil(2.2 * t) + 16);
+const chooseOrder = (t: number): number => Math.min(90, Math.ceil(2.2 * t) + 16);
 
 // Chebyshev coefficient c_k(t) of e^{-tL} under M = L - I.
 const heatCoeff = (k: number, t: number): number => {

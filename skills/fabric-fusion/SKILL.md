@@ -1,6 +1,7 @@
 ---
 name: fabric-fusion
 description: Multi-model deliberation. Two to 8 distinct models answer in parallel with web-capable tools, then a judge compares consensus, contradictions, coverage gaps, unique insights, and blind spots. Use when the cost of being wrong justifies multiple completions.
+disable-model-invocation: true
 ---
 
 # Fabric Fusion
@@ -121,10 +122,7 @@ if (completed.length === 1) {
   };
 }
 
-const judgeModel = explicitJudge ?? {
-  key: completed[0].model,
-  runner: completed[0].runner,
-};
+const judgeModel = explicitJudge ?? resolve(completed[0].model);
 await phase("Judge", { total: 1 });
 try {
   const analysis = await agent<FusionAnalysis>(
@@ -136,7 +134,6 @@ try {
       JSON.stringify(completed),
     {
       label: "fusion judge",
-      runner: judgeModel.runner,
       model: judgeModel.key,
       tools: toolset,
       ...(thinking ? { thinking } : {}),
@@ -181,4 +178,4 @@ For same-model role diversity, recommend `/skill:fabric-council` for the user to
 
 ## Completion criterion
 
-Return `success`, `partial`, or `failed` with explicit panel coverage. Successful judging returns only the structured comparison; raw responses return only when judging fails or fewer than two models complete. A partial result is usable and must not trigger an automatic full-panel rerun. Failures retain label, canonical model key, and runner; retry only failed models or the judge when that missing coverage matters.
+Return `success`, `partial`, or `failed` with explicit panel coverage. Successful judging returns only the structured comparison; raw responses return only when judging fails or fewer than two models complete. A partial result is usable and must not trigger an automatic full-panel rerun. Failures retain label and canonical model key; retry only failed models or the judge when that missing coverage matters.

@@ -16,7 +16,7 @@ import { classifyFailure, type FailureCategory } from "./failure.js";
 export type EvidenceExec = (server: string, tool: string) => Promise<unknown>;
 export type EvidenceRecord = (tool: string, success: boolean, elapsedMs: number) => void;
 
-export interface AttemptProvenance {
+interface AttemptProvenance {
   server: string;
   tool: string;
   ok: boolean;

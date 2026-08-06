@@ -153,7 +153,7 @@ describe("Fabric configuration migrations", () => {
     expect(JSON.parse(fs.readFileSync(paths.globalPath, "utf8"))).toMatchObject({ configVersion: 3, agents: { thinking: "low" } });
     expect(JSON.parse(fs.readFileSync(paths.projectPath, "utf8"))).toEqual({
       configVersion: 3,
-      agents: { runner: "pi", transport: "tmux" },
+      agents: { transport: "tmux" },
     });
   });
 
