@@ -87,6 +87,8 @@ The whole outline is roughly 56K tokens. That fits a modern context window but s
 
 The graph is built once per root and cached on file mtime, so repeated calls within a turn stay cheap. Language coverage comes from ast-grep, so TypeScript, JavaScript, Go, Python, Rust, and Java all index through one path. `@ast-grep/cli` ships as a declared dependency, so there is nothing to install separately. See [code map research](docs/code-map-research.md) for the measured baselines and the AST-rank fusion plan.
 
+`mode: "cgc"` (opt-in via `codemap.cgc`) queries the installed CodeGraphContext database for reference repos — a separate read-only namespace, never merged into the project graph — and `explore` returns a bounded staged evidence pack (skeleton, routed symbols, complexity hotspots, seam-test pointers, source) for the "how do I get sufficient context cheaply" case.
+
 ## Prewalk handoff
 
 Prewalk lets a frontier model plan and take the first concrete implementation step, then hands the **same session** to a faster executor. The switch is in-session: the executor inherits the live conversation and the real tool set, so no plan has to be re-serialised into a fresh context. One path, no modes. The context levers for the split — `delegateContext`, `handoffRetirement`, `autoScout`, `reuseChecklists`, `failureMemory` — are covered under [Compaction and context](#compaction-and-context). See [docs/agents.md](docs/agents.md#automatic-prewalk) for the full protocol.

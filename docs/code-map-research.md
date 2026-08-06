@@ -613,6 +613,52 @@ Benchmark (benchmark-expand-depth.mjs, dist build, 161 commits):
 | 2     | 0.120                          | 0.120              | 4738   |
 | 3     | 0.122                          | 0.122              | 4870   |
 
+## 13. CGC Reference Mode (2026-08-08)
+
+The codemap tool gains an opt-in `mode: "cgc"` that dispatches
+`search`/`skeleton`/`expand`/`source`/`explore` to the installed
+CodeGraphContext CLI (0.5.2, falkordb-remote at 127.0.0.1). This is a **separate
+namespace**: CGC keeps its own global database over the operator's configured
+root (the `work` repo, which includes the inspo reference clones), and its results are never
+merged into the project's ast-grep graph, so reference symbol names cannot
+collide with project ones.
+
+### Contract
+
+- Read-only: only `cgc query` and `cgc stats` are invoked; nothing mutates
+  CGC state (no index/delete/writes).
+- Opt-in: `codemap.cgc.enabled` defaults `false`. Enable it in
+  `fabric.json` with optional `context` (a path prefix such as
+  `<root>/inspo/<repo>` scoping cypher queries via `STARTS WITH`,
+  or a registered CGC named context) and `timeoutMs` (default 30000).
+- Degradation: a missing binary, dead database, or timeout returns a clean
+  unavailable/timeout note in the tool result; it never throws into the model.
+- Output contract: `cgc query` prints bootstrap lines followed by a JSON array
+  of scalar projections (raw nodes are not JSON-serializable). The runner
+  extracts from the first `[` to the last `]` after stripping ANSI codes.
+
+### Schema notes (probed live, 2026-08-08)
+
+Node labels: `Function`, `File`, `Class`, `Module`, `Parameter`,
+`Variable`. Relationships: `IMPORTS` (File→Module), `CONTAINS`
+(Function→File, Class→members), `HAS_PARAMETER` (Function→Parameter),
+`INHERITS` (Class→Class/ExternalClass). Function properties include
+`name`, `path`, `line_number`, `end_line`, `lang`, `source` (full
+body), and `cyclomatic_complexity`. This build has no `CALLS` edges for TS
+repos, so call-graph stages are served by structure plus co-change instead.
+
+### Operations
+
+- `search`: function name `CONTAINS` plus file path lookup.
+- `skeleton`: function/file counts and top complexity hotspots.
+- `expand`: imports of a file, inheritance of a class.
+- `source`: full function body via the `source` property.
+- `explore`: the bounded evidence pipeline (symbols → files → hotspots →
+  seam-test pointers) capped by `maxTokens`; ast mode runs the same stages on
+  the project graph with co-change cascade for test pinning.
+- `focus`/`dwell`/`cascade` remain ast-only and return a pointer when
+  requested in cgc mode.
+
 Coverage is flat within noise and tokens are unchanged; the depth-2 cap still holds.
 The import graph already covered tests/scripts (imports.ts walks the repo); this
 aligns the symbol graph with it. Baseline vs naive (doc \u00a710) is unchanged in spirit.
