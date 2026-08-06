@@ -71,7 +71,13 @@ export const runCgc = (runner: CgcRunner, args: string[], timeoutMs: number): Cg
 export const cgcQuery = (cypher: string, opts: CgcOptions = {}): CgcResult => {
   const runner = opts.runner ?? defaultCgcRunner;
   const args = ["query", cypher];
-  if (opts.context) args.push("--context", opts.context);
+  // Path-prefix contexts scope name in the cypher (STARTS WITH), never as
+  // --context: CGC only accepts a registered context name there, and passing a
+  // path throws with the bootstrap lines on stderr. Only a registered name
+  // (no leading slash) becomes the --context flag.
+  if (opts.context && !opts.context.startsWith("/")) {
+    args.push("--context", opts.context);
+  }
   return runCgc(runner, args, opts.timeoutMs ?? DEFAULT_CGC_TIMEOUT_MS);
 };
 

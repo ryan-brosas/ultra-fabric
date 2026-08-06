@@ -82,6 +82,18 @@ describe("cgcQuery", () => {
     cgcQuery("MATCH (n) RETURN n", { runner: spy });
     expect(spy).toHaveBeenCalledWith(["query", "MATCH (n) RETURN n"]);
   });
+
+  it("never passes a path-prefix context as --context (in-cypher scoping only)", () => {
+    const spy = vi.fn<CgcRunner>(() => "[]");
+    cgcQuery("MATCH (n) RETURN n", { runner: spy, context: "/home/ryanj/work/inspo/omniroute" });
+    expect(spy).toHaveBeenCalledWith(["query", "MATCH (n) RETURN n"]);
+  });
+
+  it("still passes a registered CGC context name as --context", () => {
+    const spy = vi.fn<CgcRunner>(() => "[]");
+    cgcQuery("MATCH (n) RETURN n", { runner: spy, context: "work" });
+    expect(spy).toHaveBeenCalledWith(["query", "MATCH (n) RETURN n", "--context", "work"]);
+  });
 });
 
 describe("defaultCgcRunner", () => {
