@@ -11,7 +11,13 @@ import type { RankEdge } from "./rank.js";
 
 export interface CascadeOptions {
   cwd?: string;
-  historyWeight?: number; // 0..1; 1 = pure history, 0 = pure dependency
+  // 0..1; 1 = pure history, 0 = pure dependency. Default 0.5 is deliberate:
+  // the held-out TRAIN selection swings (0.25 on WINDOW=60, 0.75 on
+  // WINDOW=200, both on the current tree) while cascade dominates the graph
+  // and naive arms on both splits, so the win is "history channel stays live"
+  // rather than a specific value. Neither measured selection is stable enough
+  // to hardcode. See docs/code-map-research.md §10/§11.
+  historyWeight?: number;
   maxCommits?: number;
 }
 

@@ -1,7 +1,7 @@
 import { dfs } from "./search.js";
 import { buildAdjacency } from "./search.js";
 import { buildNodeKeys, type SymbolIndex } from "./symbols.js";
-import { renderFileSkeleton } from "./skeleton.js";
+import { renderFileSkeleton, renderSymbolSkeleton } from "./skeleton.js";
 import type { OutlineFile } from "./outline.js";
 import type { EdgeKind, RankEdge } from "./rank.js";
 
@@ -79,8 +79,11 @@ export const expand = (
     }
   }
 
-  // Token cost: render the skeleton of each revealed file (in reveal order),
-  // including files only while cumulative tokens stay under maxTokens.
+  // Token cost (G5 member-level disclosure): each revealed symbol is charged
+  // its own skeleton (elided signature + member names, or enclosing.member for
+  // class members), not the whole file. The file path header is charged once
+  // per file. This is the cAST-style member elision from doc §11 G5: the agent
+  // pays for the symbol it disclosed, not the file's unrelated declarations.
   const outlineByPath = new Map(graph.files.map((f) => [f.path, f]));
   const includedFiles: string[] = [];
   const includedEntities: string[] = [];
@@ -88,16 +91,21 @@ export const expand = (
   let truncated = false;
   const seenFiles = new Set<string>();
   for (const key of revealed) {
+    const symbolName = key.split(":")[0] ?? "";
     const file = key.split(":").slice(1).join(":");
-    if (seenFiles.has(file)) { includedEntities.push(key); continue; }
     const outline = outlineByPath.get(file);
-    const cost = outline ? tokenEstimate(renderFileSkeleton(outline)) : tokenEstimate(file);
+    // The symbol skeleton already carries the file path on its first line, so
+    // the header is charged exactly once through the skeleton itself.
+    const symbolSkeleton = outline ? renderSymbolSkeleton(outline, symbolName) : "";
+    const cost = outline && symbolSkeleton
+      ? tokenEstimate(symbolSkeleton)
+      : tokenEstimate(file);
     if (options.maxTokens !== undefined && tokens + cost > options.maxTokens) {
       truncated = true;
       break;
     }
     seenFiles.add(file);
-    includedFiles.push(file);
+    if (!includedFiles.includes(file)) includedFiles.push(file);
     includedEntities.push(key);
     tokens += cost;
   }

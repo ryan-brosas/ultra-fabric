@@ -22,6 +22,27 @@ const elideBody = (signature: string): string => {
   return signature.slice(0, cut).trimEnd() + " " + marker + " ...";
 };
 
+// Member-level disclosure (G5): render one symbol instead of the whole file.
+// An item renders its elided signature and member names; a member renders as
+// enclosing.member with its line. Unknown names render empty so the caller can
+// fall back to charging the file path.
+export const renderSymbolSkeleton = (file: OutlineFile, symbolName: string): string => {
+  const item = file.items.find((i) => i.name === symbolName && !i.isImport);
+  if (item) {
+    const head = elideBody(item.signature) || item.name + " (" + item.symbolType + ")";
+    const lines = [file.path + "\n  " + item.range.line + ": " + head];
+    for (const m of item.members) lines.push("       " + m.name + " (" + m.symbolType + ")");
+    return lines.join("\n");
+  }
+  for (const parent of file.items) {
+    const member = parent.members.find((m) => m.name === symbolName);
+    if (member) {
+      return file.path + "\n  " + member.range.line + ": " + parent.name + "." + member.name + " (" + member.symbolType + ")";
+    }
+  }
+  return "";
+};
+
 export const renderFileSkeleton = (file: OutlineFile): string => {
   const lines: string[] = [file.path];
   for (const item of file.items) {

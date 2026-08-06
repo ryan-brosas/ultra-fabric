@@ -24,7 +24,9 @@ const walkSources = (dir: string, acc: string[] = []): string[] => {
   return acc;
 };
 
-const IMPORT_RE = /from\s+["']([^"']+)["']/g;
+// Match static from-imports, CommonJS require(), dynamic import(), and
+// bare side-effect imports (import "./polyfill.js").
+const IMPORT_RE = /(?:from\s+|require\(\s*|import\(\s*|import\s+)["']([^"']+)["']/g;
 
 export interface ImportEdgeResult {
   nodes: string[];
@@ -47,9 +49,17 @@ export const extractImportEdges = (root: string): ImportEdgeResult => {
       // Skip bare package specifiers (node:fs, vitest, etc.)
       if (!spec.startsWith(".") && !spec.startsWith("/")) continue;
       const target = resolve(dirname(file), spec).replace(/\.js$/, ".ts");
-      const rel = toRel(target);
-      if (nodeSet.has(rel)) {
-        edges.push({ from: toRel(file), to: rel, weight: 1, kind: "imports" });
+      // Extensionless specifiers resolve by trying the supported source
+      // extensions in order against the indexed node set.
+      const candidates = /\.(ts|tsx|js|jsx|mts|cts)$/.test(target)
+        ? [target]
+        : SUPPORTED_EXTS.map((ext) => target + ext);
+      for (const candidate of candidates) {
+        const rel = toRel(candidate);
+        if (nodeSet.has(rel)) {
+          edges.push({ from: toRel(file), to: rel, weight: 1, kind: "imports" });
+          break;
+        }
       }
     }
   }

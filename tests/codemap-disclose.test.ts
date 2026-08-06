@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { runOutline } from "../src/codemap/outline.js";
+import { runOutline, type OutlineFile } from "../src/codemap/outline.js";
 import { buildSymbolIndex, buildAllEdges } from "../src/codemap/symbols.js";
 import { expand, buildDisclosureGraph, minimalSkeleton, type DisclosureGraph } from "../src/codemap/disclose.js";
+import { renderFileSkeleton, renderSymbolSkeleton } from "../src/codemap/skeleton.js";
 
 const root = process.cwd();
 const paths = ["src/codemap/calls.ts", "src/codemap/symbols.ts", "src/codemap/rank.ts", "src/codemap/build.ts"];
@@ -50,6 +51,71 @@ describe("expand token cost", () => {
     const r = expand(graph, [extractCallEdgesKey], { direction: "both", depth: 3, maxTokens: 50 });
     expect(r.tokens).toBeLessThanOrEqual(50);
     expect(r.truncated).toBe(true);
+  });
+});
+
+describe("member-level disclosure (G5)", () => {
+  const fixture: OutlineFile = {
+    path: "src/fixture.ts",
+    language: "typescript",
+    items: [
+      {
+        symbolType: "function",
+        name: "expand",
+        range: { line: 48, column: 0, endLine: 95, endColumn: 1 },
+        signature: "export const expand = (graph: DisclosureGraph, entities: readonly string[]): ExpandResult => { return graph; }",
+        astKind: "variable_declarator",
+        isImport: false,
+        isExported: true,
+        members: [],
+      },
+      {
+        symbolType: "class",
+        name: "Controller",
+        range: { line: 100, column: 0, endLine: 160, endColumn: 1 },
+        signature: "export class Controller {",
+        astKind: "class_declaration",
+        isImport: false,
+        isExported: true,
+        members: [
+          { symbolType: "method", name: "arm", range: { line: 110, column: 2, endLine: 130, endColumn: 3 }, isPublic: true },
+          { symbolType: "method", name: "disarm", range: { line: 140, column: 2, endLine: 150, endColumn: 3 }, isPublic: true },
+        ],
+      },
+    ],
+  };
+
+  it("renders a symbol skeleton with elided signature and line number", () => {
+    const skel = renderSymbolSkeleton(fixture, "expand");
+    expect(skel).toContain("src/fixture.ts");
+    expect(skel).toContain("48:");
+    expect(skel).toContain("expand");
+    expect(skel).toContain("...");
+    expect(skel).not.toContain("return graph");
+  });
+
+  it("renders a class member skeleton with the enclosing class", () => {
+    const skel = renderSymbolSkeleton(fixture, "arm");
+    expect(skel).toContain("Controller.arm");
+    expect(skel).toContain("110");
+    expect(skel).not.toContain("disarm");
+  });
+
+  it("returns empty for an unknown symbol", () => {
+    expect(renderSymbolSkeleton(fixture, "nope")).toBe("");
+  });
+
+  it("expand charges the revealed symbol skeleton, not the whole file", () => {
+    // Build a disclosure graph over a real multi-item file and reveal exactly
+    // one entity; the charged cost must track the member skeleton, which is
+    // strictly cheaper than rendering the file skeleton.
+    const one = expand(graph, [extractCallEdgesKey], { direction: "downstream", depth: 1 });
+    const wholeFile = files
+      .filter((f) => one.files.includes(f.path))
+      .map((f) => renderFileSkeleton(f))
+      .join("\n");
+    expect(one.tokens).toBeGreaterThan(0);
+    expect(one.tokens).toBeLessThan(Math.ceil(wholeFile.length / 4));
   });
 });
 
