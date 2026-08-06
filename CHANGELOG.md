@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.31.1-ultra.8 - 2026-08-06
+## 0.31.1-ultra.9 - 2026-08-06
+
+- bench: fabric-prewalk becomes a first-class DeepSWE matrix config with an isolated prewalk-first fabric.json, omniroute provider upload, and config-aware model selection.
+- bench: add live Prewalk DeepSWE run evidence for `scc-bounded-memory-spilling` (reward 1, P2P 286/286, F2P 31/31) under `bench/results/live-prewalk/`.
+
 
 - **CI-safe cross-repo benchmark.** The codemap focus/dwell bench skips its
   on-demand fixture clones (`sources/`, `/tmp/codemap-bench`) when absent,
