@@ -50,7 +50,18 @@ describe("planInit", () => {
     const plan = planInit(new Set(), V);
     const byPath = new Map(plan.files.map((f) => [f.path, f.content]));
     const project = byPath.get("project.md")!;
-    for (const s of ["Non-goals", "Users", "Current milestone", "Decisions", "Risks", "Links"]) {
+    for (const s of [
+      "Purpose",
+      "Users and success",
+      "Boundaries and invariants",
+      "Architecture",
+      "Agent utilization",
+      "Code-graph links",
+      "Source ownership",
+      "Tests and integrations",
+      "Verification and operations",
+      "Decisions, risks, and questions",
+    ]) {
       expect(project.toLowerCase()).toContain(s.toLowerCase());
     }
     const roadmap = byPath.get("roadmap.md")!;
@@ -84,13 +95,25 @@ describe("planInit", () => {
     const user = byPath.get("user.md")!;
     expect(user).toContain("@octocat");
     expect(user).toContain("detected via gh CLI");
+    for (const s of [
+      "Identity",
+      "Outcomes",
+      "Communication",
+      "Workflow",
+      "Tools and environment",
+      "Privacy and secrets",
+      "Durable reminders",
+      "Unknowns",
+    ]) {
+      expect(user.toLowerCase()).toContain(s.toLowerCase());
+    }
   });
 
   it("keeps placeholders when detection is absent and user.md asks the user", () => {
     const plan = planInit(new Set(), V);
     const byPath = new Map(plan.files.map((f) => [f.path, f.content]));
     expect(byPath.get("AGENTS.md")).toContain("<build command>");
-    expect(byPath.get("user.md")).toContain("GitHub username");
+    expect(byPath.get("user.md")).toContain("gh auth status");
   });
 
   it("skips user.md when it already exists", () => {
