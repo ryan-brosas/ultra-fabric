@@ -20,7 +20,7 @@
 
 ## What Ultra Fabric is
 
-Ultra Fabric is a Pi extension for context engineering. It reads code structurally instead of scanning text, hands long tasks across models in one live session, keeps the session's context host-owned and compact, and delegates only what an explicit, bounded agent budget allows. Main keeps task intent and final authority; zero agents remains the default.
+Ultra Fabric is a Pi extension for context engineering. It reads code structurally instead of scanning text, hands long tasks across models in one live session, keeps the session's context host-owned and compact, and delegates only what an explicit, bounded agent budget allows. Main keeps task intent and final authority; utilization levers default on and every child stays bounded by admission, turn budgets, and spend caps.
 
 Four focus areas:
 
@@ -152,11 +152,13 @@ The session owns its context. A `compact` provider is always available (no confi
 
 Requests are bounded: instructions up to 8 KiB, and up to 16 preserve items of at most 2 KiB each (`src/compaction/instructions.ts`). See [docs/architecture.md](docs/architecture.md#model-context-economy) for the output-side economy (capped returns, artifact staging, omission markers).
 
-The same principle shapes the Prewalk context split. `prewalk.delegateContext` keeps recon and research on `scout`/`explorer` roles or `consult.run` workers so Main's context stays lean while the executor implements; `prewalk.handoffRetirement` then retires Main's planning-phase `read`/`grep`/`find`/`ls` results from the executor transcript once the continuation is live and accepted — errors and evidence-bearing results always survive — mirroring the SWE-Edit viewer/editor decomposition that cut inference cost 17.9% on SWE-Bench Verified. `prewalk.autoScout` runs the cheap scout role before planning and injects a bounded 2k-character context brief, and `prewalk.reuseChecklists` seeds repeat tasks with their prior plan (newest 16, max 4 seed items). `prewalk.failureMemory` seeds the next similar task's plan with the failure patterns the gate previously rejected, with scout spend attributed in the budget ledger under `prewalk:scout`. See [docs/agents.md](docs/agents.md#automatic-prewalk).
+The same principle shapes the Prewalk context split. The utilization levers default on: `prewalk.autoScout` runs the cheap scout pass before planning, and `prewalk.delegateContext` carries the plan-then-delegate discipline into the armed and continuation prompts; set either to `false` to opt out. With delegateContext, recon and research land on `scout`/`explorer` roles or `consult.run` workers so Main's context stays lean while the executor implements; `prewalk.handoffRetirement` then retires Main's planning-phase `read`/`grep`/`find`/`ls` results from the executor transcript once the continuation is live and accepted — errors and evidence-bearing results always survive — mirroring the SWE-Edit viewer/editor decomposition that cut inference cost 17.9% on SWE-Bench Verified. `prewalk.reuseChecklists` seeds repeat tasks with their prior plan (newest 16, max 4 seed items). `prewalk.failureMemory` seeds the next similar task's plan with the failure patterns the gate previously rejected, with scout spend attributed in the budget ledger under `prewalk:scout`. See [docs/agents.md](docs/agents.md#automatic-prewalk).
 
 ## Agents
 
 An agent is either one-shot or persistent. Roles like scout, worker, advisor, and supervisor are profiles on that one runtime, not separate systems. List them with `(await agents.roles()).roles`, pick one with `role`, and override its goal, completion contract, or turn budget per call. Add your own in `~/.pi/agent/agents/*.md` or trusted project profiles in `.pi/agents/*.md`.
+
+Agent utilization is task-first: Prewalk's `autoScout` and `delegateContext` default on, so a bounded scout brief lands before planning and recon rides cheap `scout`/`explorer` children on their own context budget while Main synthesizes file:line findings. A role's model resolves by precedence — per-call request, then `agents.roleModels` in `fabric.json`, then the profile pin — so delegation always lands on a deliberately chosen model. The scaffolded AGENTS.md (`fabric init`) steers Main to fan out explorer or scout children with whole questions before reading files itself. Every child stays bounded by admission policy, turn budgets, and token or dollar caps; set `prewalk.delegateContext: false` and `prewalk.autoScout: false` for a fully zero-agents posture.
 
 The built-in `supervisor` is runtime behavior, not a skill: it subscribes to settled and error events, steers only when useful, coalesces repeats, and drops stale directives, with a four-turn activation bound. `/skill:fabric-supervisor` only creates or reuses that role for a concrete goal.
 
@@ -203,14 +205,14 @@ Requires Node.js 24+ and Pi 0.80.6+. Fabric checks the host version at startup a
 Pin an exact experimental version so it does not move:
 
 ```bash
-pi install npm:ultra-fabric@0.31.1-ultra.1
+pi install npm:ultra-fabric@0.31.1-ultra.9
 ```
 
 If `pi-fabric` is installed, replace it rather than loading both:
 
 ```bash
 pi remove npm:pi-fabric
-pi install npm:ultra-fabric@0.31.1-ultra.1
+pi install npm:ultra-fabric@0.31.1-ultra.9
 ```
 
 Restart Pi after changing extension packages.

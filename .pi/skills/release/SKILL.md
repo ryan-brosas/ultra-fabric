@@ -17,9 +17,10 @@ Publishing is driven entirely by pushing a `v*` tag. GitHub Actions publishes ov
 
 1. Bump `version` in `package.json`. Prereleases use the `0.31.1-ultra.N` shape.
 2. Add a `CHANGELOG.md` section directly under `# Changelog`, formatted `## <version> - <YYYY-MM-DD>` followed by bullets.
-3. Commit exactly those two files: `chore(release): mark <version>`.
-4. Create an **annotated** tag whose message is the tag name: `git tag -a v<version> -m "v<version>"`.
-5. Push the branch, then push the tag by explicit ref:
+3. Update the `README.md` Install pin (`pi install npm:ultra-fabric@<version>`, both commands) to the version being published. Historical evidence tables that name older versions stay untouched.
+4. Commit exactly those three files: `chore(release): mark <version>`.
+5. Create an **annotated** tag whose message is the tag name: `git tag -a v<version> -m "v<version>"`.
+6. Push the branch, then push the tag by explicit ref:
 
    ```sh
    git push origin main
