@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, readdirSync, statSync, type Dirent } from "node:fs";
 import path from "node:path";
 
 export const MINIMUM_PI_HOST_VERSION = "0.80.6";
@@ -78,4 +78,58 @@ export const piHostCompatibilityWarning = (
   const comparison = compareVersions(version, MINIMUM_PI_HOST_VERSION);
   if (comparison === undefined || comparison >= 0) return undefined;
   return "Pi Fabric requires Pi >= " + MINIMUM_PI_HOST_VERSION + "; detected " + version + ". Persistent Agent triggerTurn and other host continuations may be ignored. Upgrade Pi before relying on persistent Agent delivery.";
+};
+
+// The Pi host loads dist at startup and keeps the loaded modules in memory, so a
+// rebuild mid-session is not picked up until restart. This caused real confusion
+// (e.g. codemap.explore reachable in a fresh node import but absent from the
+// running host). staleBuildWarning compares the mtime of the passed entry (the
+// loaded extension module) against the newest src file; when the loaded entry is
+// the dist build and dist is older than src, the session is running stale code.
+const walkSources = (dir: string, acc: string[] = []): string[] => {
+  let entries: Dirent[] | undefined;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true }) as Dirent[];
+  } catch {
+    return acc;
+  }
+  for (const entry of entries ?? []) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== "node_modules" && entry.name !== ".git") walkSources(full, acc);
+    } else if (entry.name.endsWith(".ts")) {
+      acc.push(full);
+    }
+  }
+  return acc;
+};
+
+export const staleBuildWarning = (loadedEntryPath: string): string | undefined => {
+  const root = path.dirname(path.dirname(loadedEntryPath));
+  const loadedIsDist = path.basename(path.dirname(loadedEntryPath)) === "dist";
+  if (!loadedIsDist) return undefined;
+  const distEntry = path.join(root, "dist", "index.js");
+  const srcDir = path.join(root, "src");
+  if (!existsSync(distEntry) || !existsSync(srcDir)) return undefined;
+  const sourceFiles = walkSources(srcDir);
+  if (sourceFiles.length === 0) return undefined;
+  let newestSrc = 0;
+  for (const file of sourceFiles) {
+    try {
+      const mtime = statSync(file).mtimeMs;
+      if (mtime > newestSrc) newestSrc = mtime;
+    } catch {
+      // Unreadable source file: skip; the indicator is best-effort.
+    }
+  }
+  let distMtime = 0;
+  try {
+    distMtime = statSync(distEntry).mtimeMs;
+  } catch {
+    return undefined;
+  }
+  if (newestSrc > distMtime) {
+    return "The loaded Ultra Fabric build is stale: src/ is newer than dist/index.js, so this session is running pre-rebuild behavior. Run pnpm build, then restart Pi to pick up new functionality.";
+  }
+  return undefined;
 };

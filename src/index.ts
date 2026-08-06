@@ -52,7 +52,7 @@ import { buildSkillReferenceGuidance } from "./core/skill-references.js";
 import { createFabricExecTool } from "./fabric-exec-tool.js";
 import { createCodemapTool } from "./codemap/tool.js";
 import { FabricState } from "./fabric-state.js";
-import { piHostCompatibilityWarning } from "./host-compatibility.js";
+import { piHostCompatibilityWarning, staleBuildWarning } from "./host-compatibility.js";
 import {
   FABRIC_PROVIDER_REGISTER_EVENT,
   type FabricProviderRegistration,
@@ -256,6 +256,11 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
       if (warning) {
         console.warn(`[pi-fabric] ${warning}`);
         if (context.hasUI) context.ui.notify(warning, "warning");
+      }
+      const stale = staleBuildWarning(FABRIC_EXTENSION_ENTRY_PATH);
+      if (stale) {
+        console.warn(`[pi-fabric] ${stale}`);
+        if (context.hasUI) context.ui.notify(stale, "warning");
       }
     }
     const projectTrusted =

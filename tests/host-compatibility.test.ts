@@ -7,6 +7,7 @@ import {
   detectPiHostVersion,
   MINIMUM_PI_HOST_VERSION,
   piHostCompatibilityWarning,
+  staleBuildWarning,
 } from "../src/host-compatibility.js";
 
 const roots: string[] = [];
@@ -47,5 +48,55 @@ describe("Pi host compatibility", () => {
     expect(piHostCompatibilityWarning("0.80.5")).toContain("requires Pi >= 0.80.6");
     expect(piHostCompatibilityWarning("0.80.6")).toBeUndefined();
     expect(piHostCompatibilityWarning(undefined)).toBeUndefined();
+  });
+
+  it("warns when the loaded dist build is older than the source (stale build)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-stale-build-"));
+    roots.push(root);
+    const distDir = path.join(root, "dist");
+    const srcDir = path.join(root, "src");
+    fs.mkdirSync(distDir);
+    fs.mkdirSync(srcDir);
+    fs.writeFileSync(path.join(distDir, "index.js"), "// built");
+    fs.writeFileSync(path.join(srcDir, "config.ts"), "export const x = 1;");
+    const now = new Date();
+    fs.utimesSync(path.join(srcDir, "config.ts"), now, now);
+    fs.utimesSync(
+      path.join(distDir, "index.js"),
+      new Date(now.getTime() - 60_000),
+      new Date(now.getTime() - 60_000),
+    );
+    const warning = staleBuildWarning(path.join(root, "dist", "index.js"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("stale");
+    expect(warning).toContain("restart");
+  });
+
+  it("returns undefined when dist is newer than src (fresh build)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fresh-build-"));
+    roots.push(root);
+    const distDir = path.join(root, "dist");
+    const srcDir = path.join(root, "src");
+    fs.mkdirSync(distDir);
+    fs.mkdirSync(srcDir);
+    fs.writeFileSync(path.join(distDir, "index.js"), "// built");
+    fs.writeFileSync(path.join(srcDir, "config.ts"), "export const x = 1;");
+    const now = new Date();
+    fs.utimesSync(path.join(srcDir, "config.ts"), now, now);
+    fs.utimesSync(
+      path.join(distDir, "index.js"),
+      new Date(now.getTime() + 60_000),
+      new Date(now.getTime() + 60_000),
+    );
+    expect(staleBuildWarning(path.join(root, "dist", "index.js"))).toBeUndefined();
+  });
+
+  it("returns undefined when the loaded entry is not a dist build (dev source mode)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-dev-mode-"));
+    roots.push(root);
+    const srcDir = path.join(root, "src");
+    fs.mkdirSync(srcDir);
+    fs.writeFileSync(path.join(srcDir, "index.ts"), "export const x = 1;");
+    expect(staleBuildWarning(path.join(root, "src", "index.ts"))).toBeUndefined();
   });
 });
