@@ -598,3 +598,21 @@ Rejected/deferred:
 | cascade TEST R@4K/R@8K (WINDOW=60) | n/a | 0.162/0.242 (cascade dominates graph 0.076/0.108 and naive 0.018/0.027) |
 
 Reproduce: `node scripts/benchmark-expand-depth.mjs`; `node scripts/validate-codemap-holdout.mjs --window=N`; edge stats via `.measure-scope.mjs` (ephemeral, not committed).
+## 12. Wider Graph Roots (2026-08-06)
+
+The source scan (lang.ts findSourceFiles) walked only `src/`, so symbols defined in
+`tests/` and `scripts/` were invisible to the AST index and agents fell back to grep
+for exactly those queries. Widened to `src/`, `tests/`, `scripts/` with explicit
+skips (node_modules, dist, .git, .pi, sources/, bench/) mirroring .cgcignore.
+
+Benchmark (benchmark-expand-depth.mjs, dist build, 161 commits):
+
+| Depth | Coverage (src-only, post-scope) | Coverage (widened) | Tokens |
+|-------|--------------------------------|--------------------|--------|
+| 1     | 0.113                          | 0.111              | 4544   |
+| 2     | 0.120                          | 0.120              | 4738   |
+| 3     | 0.122                          | 0.122              | 4870   |
+
+Coverage is flat within noise and tokens are unchanged; the depth-2 cap still holds.
+The import graph already covered tests/scripts (imports.ts walks the repo); this
+aligns the symbol graph with it. Baseline vs naive (doc \u00a710) is unchanged in spirit.

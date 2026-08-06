@@ -33,19 +33,28 @@ export const SUPPORTED_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".g
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
-// Discover source files under `src/` for any supported language. Paths come back
-// root-relative with forward slashes on every platform, because the code map keys
-// its graph on POSIX paths.
+// Discover source files under `src/`, `tests/`, and `scripts/` for any supported
+// language. Paths come back root-relative with forward slashes on every platform,
+// because the code map keys its graph on POSIX paths.
+const SOURCE_ROOTS = ["src", "tests", "scripts"];
+
+// Directories that never contribute to the first-party symbol graph even when a
+// root walk would reach them (mirrors .cgcignore: sources/ and bench/ hold
+// vendored clones and benchmark artifacts).
+const SKIP_DIRS = new Set(["node_modules", "dist", ".git", ".pi", "sources", "bench"]);
+
 export const findSourceFiles = (root: string, extensions?: readonly string[]): string[] => {
   const exts = extensions ?? SUPPORTED_EXTS;
   const found: string[] = [];
   const walk = (rel: string): void => {
     for (const entry of readdirSync(join(root, rel), { withFileTypes: true })) {
       const childRel = rel + "/" + entry.name;
-      if (entry.isDirectory()) walk(childRel);
-      else if (exts.some((ext) => entry.name.endsWith(ext))) found.push(childRel);
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        walk(childRel);
+      } else if (exts.some((ext) => entry.name.endsWith(ext))) found.push(childRel);
     }
   };
-  walk("src");
+  for (const r of SOURCE_ROOTS) walk(r);
   return found.sort();
 };
