@@ -31,7 +31,7 @@ const GROUND = [
   ['predictFileCascade', 'src/codemap/cascade.ts'],
   ['buildLiteralIndex', 'src/codemap/literals.ts'],
   ['expandNeighborhood', 'src/codemap/search.ts'],
-  ['FabricWorkStore', 'src/lifecycle/store.ts'],
+  ['DurableWorkflowStore', 'src/workflows/durable.ts'],
   ['normalizeFabricConfig', 'src/config.ts'],
 ];
 const lat = [];

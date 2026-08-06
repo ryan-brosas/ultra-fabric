@@ -101,7 +101,7 @@ This is a one-task smoke comparison with three stochastic attempts across differ
 
 ## Prewalk handoff
 
-Prewalk lets a frontier model plan and take the first concrete implementation step, then hands the **same session** to a faster executor. The switch is in-session: the executor inherits the live conversation and the real tool set, so no plan has to be re-serialised into a fresh context. One path, no modes. Set `prewalk.delegateContext` to keep recon and research on `scout`/`explorer` roles or `consult.run` workers, so Main's context stays lean while the executor implements; `prewalk.handoffRetirement` then retires Main's planning-phase tool results from the executor transcript, and `prewalk.reuseChecklists` seeds repeat tasks with their prior plan. See [docs/agents.md](docs/agents.md#automatic-prewalk).
+Prewalk lets a frontier model plan and take the first concrete implementation step, then hands the **same session** to a faster executor. The switch is in-session: the executor inherits the live conversation and the real tool set, so no plan has to be re-serialised into a fresh context. One path, no modes. Set `prewalk.delegateContext` to keep recon and research on `scout`/`explorer` roles or `consult.run` workers, so Main's context stays lean while the executor implements; `prewalk.handoffRetirement` then retires Main's planning-phase tool results from the executor transcript, and `prewalk.reuseChecklists` seeds repeat tasks with their prior plan. `prewalk.autoScout` runs the cheap scout role before planning and injects a bounded 2k-character context brief, and `prewalk.failureMemory` seeds the next similar task's plan with the failure patterns the gate previously rejected, with scout spend attributed in the budget ledger under `prewalk:scout`. See [docs/agents.md](docs/agents.md#automatic-prewalk).
 
 Three isolated clean-room runs on 2026-08-04, each a fresh `pi -p` session in an empty workspace with `--session-dir`, planner `claude-bridge/claude-opus-5`, executor `makora/zai-org/GLM-5.2-NVFP4`, and the standalone `pi-prewalk` extension uninstalled so attribution is unambiguous.
 
@@ -262,6 +262,8 @@ pnpm build
 ```
 
 The suite covers configuration, schema validation, language-aware quality enforcement, provider dispatch, tool interception and execution, QuickJS isolation, Pi built-in invocation, Ultra Consult admission and evidence, agents, Claude stream-JSON and model discovery, workflows, durable mesh state, persistent-agent mailboxes, and runner restoration. Claude fixtures never make a billable request.
+
+Measured on `main` (2026-08-06): `pnpm run check` passes 178 test files / 1766 tests in ~2m21s. The codemap AST benchmark over 162 queries reports cascade Recall@8K 0.217 vs 0.014 for naive file ranking and 35,101 tokens-to-cover vs 43,650 (full-outline reference 58,477); the held-out split (52 train / 52 test) reports cascade Recall@8K 0.288 vs 0.008 naive, and the stress harness passes determinism, budget, and recall checks. `pnpm benchmark:prewalk` validates a 20-task contract corpus without model calls and exits `SKIP` when no result file is supplied; the real-model collectors default to a safe skip.
 
 ## License
 

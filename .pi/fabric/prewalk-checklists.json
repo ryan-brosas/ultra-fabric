@@ -1,5 +1,79 @@
 [
   {
+    "task": "can we do a full deepswe test all the test that we have, then update our metrics on readme, we can differentiate this from original like we are steering this more on prewalk, token optimization, and well agent utilization for context handlign and such.... and well codemode better I guess?",
+    "checklist": {
+      "items": [
+        {
+          "task": "Inventory every committed test, check, smoke, benchmark, and soak command plus current README metrics",
+          "validation": "package scripts and README metric sections are enumerated with no hidden gate omitted"
+        },
+        {
+          "task": "Run the complete repository gate and all additional bounded test suites not already included",
+          "validation": "commands, pass counts, durations, and failures are captured"
+        },
+        {
+          "task": "Run codemap and prewalk benchmark or stress commands that are safe and hermetic",
+          "validation": "results are recorded with skipped external-fixture cases labeled"
+        },
+        {
+          "task": "Compare Ultra's current public capabilities with upstream-facing claims in README and architecture docs",
+          "validation": "every differentiator maps to implemented source/config/test evidence"
+        },
+        {
+          "task": "Update README positioning and metrics for prewalk-first orchestration, token optimization, context-agent utilization, and code mode/codemap",
+          "validation": "README contains reproducible commands, measured numbers, and no unsupported superiority claim"
+        },
+        {
+          "task": "Run README/package smoke, pnpm run check, git diff --check, and status",
+          "validation": "all repository gates pass and only intended files change"
+        }
+      ],
+      "readyAt": 1786014259453
+    },
+    "recordedAt": 1786015019277
+  },
+  {
+    "task": "continue",
+    "checklist": {
+      "items": [
+        {
+          "task": "Update config migration expectation for the intentionally retired agent runner field",
+          "validation": "tests/config-migrations.test.ts passes"
+        },
+        {
+          "task": "Restore disable-model-invocation metadata on specialized user-only skills",
+          "validation": "skill hierarchy test leaves only fabric-exec model-invocable"
+        },
+        {
+          "task": "Repair the Fusion TypeScript program for the Pi-only model path",
+          "validation": "all fenced skill programs type-check"
+        },
+        {
+          "task": "Update Fusion behavior assertion to the current failure envelope",
+          "validation": "tests/skill-program-behavior.test.ts passes"
+        },
+        {
+          "task": "Run pnpm run check from the normal shell",
+          "validation": "repository release gate exits 0"
+        },
+        {
+          "task": "Bump package version and add changelog entry",
+          "validation": "package and changelog agree on the new prerelease"
+        },
+        {
+          "task": "Commit release fixes and release metadata",
+          "validation": "main contains focused commits and is clean except root context duplicates"
+        },
+        {
+          "task": "Push main and annotated release tag, then verify npm next",
+          "validation": "origin refs updated and registry shows the new version"
+        }
+      ],
+      "readyAt": 1786012542697
+    },
+    "recordedAt": 1786014162544
+  },
+  {
     "task": "go ahead go with scout/explorer for 1..... this is good",
     "checklist": {
       "items": [
@@ -444,64 +518,5 @@
       "readyAt": 1785981802802
     },
     "recordedAt": 1785982943869
-  },
-  {
-    "task": "commit and push and publish to pnpm",
-    "checklist": {
-      "items": [
-        {
-          "task": "Release prep: bump package.json to 0.31.1-ultra.5 and add the dated CHANGELOG section under '# Changelog' describing import-scoped call edges; commit exactly those two files as 'chore(release): mark 0.31.1-ultra.5'",
-          "validation": "git show --stat HEAD lists only package.json and CHANGELOG.md; grep confirms new version in both files"
-        },
-        {
-          "task": "Tag and push per the release skill: annotated tag v0.31.1-ultra.5 with message equal to the tag name; git push origin main; git push origin refs/tags/v0.31.1-ultra.5 (never --follow-tags)",
-          "validation": "git ls-remote origin shows main at the release commit and the tag ref present; local tag is annotated (git cat-file -t shows 'tag')"
-        },
-        {
-          "task": "Verify the CI OIDC publish: poll the npm registry for the next dist-tag moving to 0.31.1-ultra.5",
-          "validation": "registry dist-tags JSON shows next: 0.31.1-ultra.5"
-        }
-      ],
-      "readyAt": 1785980982512,
-      "easy": true
-    },
-    "recordedAt": 1785981354037
-  },
-  {
-    "task": "let's explore what we can better ultra....  explore on arxiv/github repo (to clone copy it's source whatever), I guess much more better codemode or something? utilizing ast more or making that better",
-    "checklist": {
-      "items": [
-        {
-          "task": "Gap audit: read all 17 src/codemap/*.ts modules and eval.ts harness; write a gap list with file:line refs covering (a) calls.ts final-segment-only callee resolution, (b) symbols.ts regex reference edges, (c) cascade.ts fixed history/dependency weight, (d) disclosure chunking without AST-aware boundaries, (e) missing language coverage in lang.ts",
-          "validation": "Gap list exists with concrete file:line citations; each gap names the module and the specific limitation, verified by reading the cited lines"
-        },
-        {
-          "task": "Research sweep: clone candidate repos into sources/ (github/stack-graphs for scope-aware name resolution, oraios/serena for LSP-tool comparison, LocAgent/RepoGraph reference impls if public) and fetch method sections for cAST (arXiv 2506.15655), CodexGraph (2408.03910), GraphCoder CCG; delegate breadth reading to scout/explorer and take back structured technique notes, not whole files",
-          "validation": "sources/ contains the clones (ls confirms), .cgcignore still excludes sources/, and a technique-to-module mapping note pairs each external technique with the codemap module it would improve"
-        },
-        {
-          "task": "Selection: score each technique against codemap-ast-intent goals (LSP-but-AST-compressed, progressive disclosure, cascade prediction — never lexical/grep scoring) and pick 1-3 with measurable acceptance criteria tied to the eval.ts harness",
-          "validation": "Decision note lists chosen techniques, each with a named eval metric and target delta; rejected techniques get one-line reasons"
-        },
-        {
-          "task": "RED: write failing tests for the first chosen improvement in the matching tests/codemap-*.test.ts file (e.g., import-aware callee resolution disambiguating two same-named symbols across files, or AST-boundary-respecting disclosure chunks)",
-          "validation": "npx vitest run tests/codemap-<target>.test.ts shows the new tests failing for the expected reason before any src change"
-        },
-        {
-          "task": "GREEN: implement the minimum in the named src/codemap module(s); keep policy pure with effects at adapters (spawns stay in calls.ts/cochange.ts-style modules), no new dependencies without approval, bounds preserved (maxSubgraph, token budgets)",
-          "validation": "RED tests pass and the full codemap suite passes: npx vitest run tests/codemap-*.test.ts"
-        },
-        {
-          "task": "Measure: run the eval.ts harness before/after on this repo's own graph to prove retrieval or cascade quality moved in the target direction; record numbers in the decision note",
-          "validation": "Before/after metrics recorded; chosen metric meets the target delta from the selection step, or the change is reverted with the reason noted"
-        },
-        {
-          "task": "Gate: run the five check stages separately (typecheck, build, tests, knip, smoke) per the 120s tool-budget constraint, then git diff --check and git status --short --branch; leave the large pre-existing working-tree modifications untouched and uncommitted",
-          "validation": "All five stages exit 0, no whitespace errors, status shows only expected codemap/test/sources additions beyond the pre-existing modified set"
-        }
-      ],
-      "readyAt": 1785972589110
-    },
-    "recordedAt": 1785974083706
   }
 ]
