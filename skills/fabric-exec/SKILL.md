@@ -36,12 +36,15 @@ Aliases (normalized to canonical before the host validates args): `cmd`/`shell`/
 
 Never call `tools.list({ provider: "mcp" })` without a query. Prefer `mcp.$servers` for orientation and `tools.search({ query })` for routing. Listing every MCP tool schema is unbounded and floods the context window.
 
-Search before reading. Run `pi.grep`/`pi.find` first, then `pi.read({ path, offset, limit })` the matching range instead of unbounded whole-file reads:
+Search before reading. Route symbol, declaration, call, and dependency queries to the AST code map first: `tools.call({ ref: "codemap.search", args: { query, maxTokens } })` resolves definitions from the symbol index as `name (symbolType) file:line`, and `codemap.expand` discloses graph neighborhoods around `name:file` entity keys. Reserve `pi.grep`/`pi.find` for literal text that is not a code symbol — string literals, comments, and configuration:
 
 ```ts
-// Locate the symbol, then read only the window around the hit.
-const hits = await pi.grep({ pattern: "targetSymbol", path: "src", context: 2 });
-const window = await pi.read({ path: "src/engine.ts", offset: 120, limit: 80 });
+// AST-first: resolve the symbol, then read only its window.
+const hits = await tools.call({ ref: "codemap.search", args: { query: "resolveDefiners", maxTokens: 2000 } });
+const window = await pi.read({ path: "src/codemap/scope.ts", offset: 12, limit: 20 });
+
+// grep remains right for literal text inside strings, comments, or config files.
+const configHits = await pi.grep({ pattern: "historyWeight", path: "src", context: 2 });
 ```
 
 An unbounded `pi.read('/x')` returns at most 2000 lines or 50KB (whichever is hit first); truncated output ends with a `[Showing lines a-b of N. Use offset=n to continue.]` notice — continue with `offset` only when you truly need the full file. Reserve whole-file reads for small files you will use in full (configs, tests or files you are about to edit, sources under a few hundred lines). Batching several large whole-file reads into one program inflates the single tool result, and that enlarged result stays in every later turn's context.
