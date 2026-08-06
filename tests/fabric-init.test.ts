@@ -20,16 +20,36 @@ describe("planInit", () => {
     for (const f of plan.files) expect(f.action).toBe("create");
   });
 
-  it("AGENTS.md carries the researched sections", () => {
+  it("AGENTS.md carries the researched and adopted sections", () => {
     const plan = planInit(new Set(), V);
     const agents = plan.files.find((f) => f.path === "AGENTS.md")!;
-    for (const section of ["Commands", "Architecture", "Conventions", "Verification"]) {
+    for (const section of [
+      "Commands",
+      "Architecture",
+      "Conventions",
+      "Verification",
+      "Rule 0",
+      "Destructive",
+      "Code editing",
+      "Testing policy",
+      "Research",
+      "Secrets",
+      "Writing",
+    ]) {
       expect(agents.content.toLowerCase()).toContain(section.toLowerCase());
     }
     // links the trio and names the Ultra surfaces
     expect(agents.content).toContain("project.md");
     expect(agents.content).toContain("roadmap.md");
     expect(agents.content).toContain("codemap");
+  });
+
+  it("AGENTS.md is adapted generic guidance, not copied from another project", () => {
+    const plan = planInit(new Set(), V);
+    const agents = plan.files.find((f) => f.path === "AGENTS.md")!;
+    for (const foreign of ["bun", "beads", "ACFS", "Next.js", "VPS"]) {
+      expect(agents.content.toLowerCase()).not.toContain(foreign.toLowerCase());
+    }
   });
 
   it("fabric.json is valid JSON pinned to the current configVersion", () => {
