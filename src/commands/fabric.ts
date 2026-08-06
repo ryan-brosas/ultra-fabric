@@ -8,9 +8,11 @@ import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
 import { openFabricSettings } from "../ui/settings.js";
 import { planInit, applyInitPlan } from "../init/scaffold.js";
+import { interpretDetection, type DetectedContext } from "../init/detect.js";
 import { CURRENT_FABRIC_CONFIG_VERSION } from "../config-migrations.js";
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 interface FabricCommandDeps {
   state: FabricState;
@@ -770,6 +772,56 @@ const runStatus = (deps: FabricCommandDeps, context: ExtensionContext): void => 
 
 // /fabric init: non-destructive root-level context scaffold. Skips existing
 // files, reports legacy .pi context as a migration notice, never overwrites.
+const readJson = <T>(file: string): T | null => {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+  } catch {
+    return null;
+  }
+};
+
+// Gather environment probes with best-effort effects: lockfiles, manifests,
+// the MCP tool cache, installed extension names, and identity (gh then git).
+const detectProject = (cwd: string): DetectedContext | null => {
+  const lockfiles = ["pnpm-lock.yaml", "bun.lock", "bun.lockb", "yarn.lock", "package-lock.json"]
+    .filter((name) => fs.existsSync(path.join(cwd, name)));
+  const manifests = ["tsconfig.json", "Cargo.toml", "go.mod", "pyproject.toml", "pom.xml", "package.json"]
+    .filter((name) => fs.existsSync(path.join(cwd, name)));
+  const packageJson = readJson<{ packageManager?: string; scripts?: Record<string, string> }>(path.join(cwd, "package.json"));
+  const home = process.env.HOME ?? "";
+  const cache = readJson<{ servers?: Record<string, { tools?: unknown[] }> }>(path.join(home, ".pi", "agent", "mcp-cache.json"));
+  const mcpServers = cache?.servers
+    ? Object.entries(cache.servers).map(([name, meta]) => ({
+        name,
+        toolCount: Array.isArray(meta?.tools) ? meta.tools.length : 0,
+      }))
+    : [];
+  let extensions: string[] = [];
+  try {
+    extensions = fs
+      .readdirSync(path.join(home, ".pi", "agent", "extensions"))
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => f.replace(/\.json$/, ""));
+  } catch {
+    /* extensions dir unavailable */
+  }
+  let gh: string | null = null;
+  let git: string | null = null;
+  try {
+    gh = execFileSync("gh", ["api", "user", "--jq", ".login"], { cwd, encoding: "utf8", timeout: 10_000, stdio: ["pipe", "pipe", "pipe"] }).trim() || null;
+  } catch {
+    /* gh unavailable or unauthenticated */
+  }
+  if (!gh) {
+    try {
+      git = execFileSync("git", ["config", "user.name"], { cwd, encoding: "utf8", timeout: 10_000, stdio: ["pipe", "pipe", "pipe"] }).trim() || null;
+    } catch {
+      /* no git identity */
+    }
+  }
+  return interpretDetection({ lockfiles, packageJson, manifests, mcpServers, extensions, identity: { gh, git } });
+};
+
 const runInit = (context: ExtensionContext): void => {
   const cwd = context.cwd;
   const probePaths = [
@@ -777,6 +829,7 @@ const runInit = (context: ExtensionContext): void => {
     "project.md",
     "roadmap.md",
     "tech-stack.md",
+    "user.md",
     ".pi/fabric.json",
     ".pi/agents/scout.md",
     ".pi/agents/explorer.md",
@@ -785,7 +838,8 @@ const runInit = (context: ExtensionContext): void => {
     ".pi/tech-stack.md",
   ];
   const existing = new Set(probePaths.filter((p) => fs.existsSync(path.join(cwd, p))));
-  const plan = planInit(existing, CURRENT_FABRIC_CONFIG_VERSION);
+  const detected = detectProject(cwd);
+  const plan = planInit(existing, CURRENT_FABRIC_CONFIG_VERSION, detected);
   const applied = applyInitPlan(plan, {
     exists: (p) => fs.existsSync(path.join(cwd, p)),
     write: (p, content) => {
@@ -794,10 +848,22 @@ const runInit = (context: ExtensionContext): void => {
       fs.writeFileSync(abs, content);
     },
   });
+  const detectedBits = [
+    detected?.packageManager,
+    ...(detected?.languages ?? []),
+    detected?.mcpServers && detected.mcpServers.length > 0 ? detected.mcpServers.length + " MCP servers" : null,
+    detected?.identity ? "@" + detected.identity.name : null,
+  ].filter(Boolean);
+  const summary = detectedBits.length > 0 ? "detected: " + detectedBits.join(" \u00b7 ") : "detected: (nothing found)";
+  const askLine = detected?.identity
+    ? []
+    : ["user.md identity is a placeholder — run `gh auth status` or tell me your GitHub handle to fill it"];
   context.ui.notify([
     "fabric init",
     "created: " + (applied.created.length > 0 ? applied.created.join(", ") : "(none)"),
     "skipped (already present): " + (applied.skipped.length > 0 ? applied.skipped.join(", ") : "(none)"),
+    summary,
+    ...askLine,
     ...plan.migrations,
   ].join("\n"));
 };

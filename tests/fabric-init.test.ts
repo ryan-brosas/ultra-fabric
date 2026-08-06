@@ -13,6 +13,7 @@ describe("planInit", () => {
       "project.md",
       "roadmap.md",
       "tech-stack.md",
+      "user.md",
       ".pi/fabric.json",
       ".pi/agents/scout.md",
       ".pi/agents/explorer.md",
@@ -60,6 +61,42 @@ describe("planInit", () => {
     for (const s of ["Version", "Tooling", "Runtime targets", "lockfile", "Upgrade", "External services"]) {
       expect(stack.toLowerCase()).toContain(s.toLowerCase());
     }
+  });
+
+  it("fills templates from detection when present", () => {
+    const detected = {
+      packageManager: "pnpm",
+      commands: { build: "pnpm run build", test: "pnpm run test", check: "pnpm run check" },
+      languages: ["TypeScript"],
+      dependencies: [],
+      mcpServers: [{ name: "exa", toolCount: 4 }],
+      extensions: [],
+      identity: { name: "octocat", source: "gh" as const },
+    };
+    const plan = planInit(new Set(), V, detected);
+    const byPath = new Map(plan.files.map((f) => [f.path, f.content]));
+    expect(byPath.get("AGENTS.md")).toContain("pnpm run build");
+    expect(byPath.get("AGENTS.md")).toContain("pnpm run check");
+    const stack = byPath.get("tech-stack.md")!;
+    expect(stack).toContain("| TypeScript |");
+    expect(stack).toContain("| exa | 4 tools |");
+    expect(stack).toContain("pnpm only; commit the lockfile (pnpm-lock.yaml)");
+    const user = byPath.get("user.md")!;
+    expect(user).toContain("@octocat");
+    expect(user).toContain("detected via gh CLI");
+  });
+
+  it("keeps placeholders when detection is absent and user.md asks the user", () => {
+    const plan = planInit(new Set(), V);
+    const byPath = new Map(plan.files.map((f) => [f.path, f.content]));
+    expect(byPath.get("AGENTS.md")).toContain("<build command>");
+    expect(byPath.get("user.md")).toContain("GitHub username");
+  });
+
+  it("skips user.md when it already exists", () => {
+    const plan = planInit(new Set(["user.md"]), V);
+    const byPath = new Map(plan.files.map((f) => [f.path, f.action]));
+    expect(byPath.get("user.md")).toBe("skip");
   });
 
   it("AGENTS.md is adapted generic guidance, not copied from another project", () => {
