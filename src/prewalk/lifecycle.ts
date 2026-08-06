@@ -5,22 +5,26 @@ export interface FabricPrewalkArm {
   model: string;
   sessionId: string;
   armedAt: number;
-  alwaysRearm: boolean;
+  // Consolidated arming mode: "off" (explicit only), "session" (arm once),
+  // "task" (re-arm after each settled task). Former alwaysRearm/autoArm pair.
+  arm: "off" | "session" | "task";
   fallbackModels?: string[];
   task?: string;
   checklist?: FabricPrewalkChecklist;
   thinking?: FabricThinking;
   verificationMode?: "gated";
   maxPhaseRevisions?: number;
+  delegateContext?: boolean;
 }
 
 export interface FabricPrewalkRearmDefaults {
   model?: string;
-  alwaysRearm: boolean;
+  arm: "off" | "session" | "task";
   fallbackModels?: string[];
   thinking?: FabricThinking;
   verificationMode?: "gated";
   maxPhaseRevisions?: number;
+  delegateContext?: boolean;
 }
 
 interface FabricPrewalkPhaseState {
@@ -123,7 +127,7 @@ const toArmed = (
   model: status.model,
   sessionId: status.sessionId,
   armedAt,
-  alwaysRearm: status.alwaysRearm,
+  arm: status.arm,
   ...(status.fallbackModels ? { fallbackModels: [...status.fallbackModels] } : {}),
   attempt: options.attempt,
   ...(options.preserveTask && status.task ? { task: status.task } : {}),
@@ -135,6 +139,7 @@ const toArmed = (
   ...(status.maxPhaseRevisions !== undefined
     ? { maxPhaseRevisions: status.maxPhaseRevisions }
     : {}),
+  ...(status.delegateContext ? { delegateContext: true } : {}),
   ...(status.revision !== undefined ? { revision: status.revision } : {}),
   ...(status.revisionGate ? { revisionGate: status.revisionGate } : {}),
   ...(status.revisionFeedback ? { revisionFeedback: status.revisionFeedback } : {}),
@@ -151,7 +156,7 @@ const applyRearm = (
   model: rearm.model ?? armed.model,
   sessionId: armed.sessionId,
   armedAt: armed.armedAt,
-  alwaysRearm: rearm.alwaysRearm,
+  arm: rearm.arm,
   attempt: armed.attempt,
   ...(rearm.fallbackModels && rearm.fallbackModels.length > 0
     ? { fallbackModels: [...rearm.fallbackModels] }
@@ -161,6 +166,7 @@ const applyRearm = (
   ...(rearm.maxPhaseRevisions !== undefined
     ? { maxPhaseRevisions: rearm.maxPhaseRevisions }
     : {}),
+  ...(rearm.delegateContext ? { delegateContext: true } : {}),
 });
 
 const finish = (
@@ -168,7 +174,8 @@ const finish = (
   at: number,
   rearm?: FabricPrewalkRearmDefaults,
 ): FabricPrewalkStatus => {
-  if (!(rearm ? rearm.alwaysRearm : status.alwaysRearm)) return { state: "idle" };
+  const rearmOnSettle = rearm ? rearm.arm === "task" : status.arm === "task";
+  if (!rearmOnSettle) return { state: "idle" };
   const armed = toArmed(status, at, { preserveTask: false, attempt: 0 });
   return rearm ? applyRearm(armed, rearm) : armed;
 };
@@ -208,7 +215,10 @@ export const reducePrewalkLifecycle = (
       // example, the first reply only investigates). Keep that one-shot arm
       // alive so the next mutation can still hand off; only re-arming configs
       // finish here, which clears the task so it rebinds to the next message.
-      return (event.rearm ? event.rearm.alwaysRearm : status.alwaysRearm)
+      const rearmOnSettle = event.rearm
+        ? event.rearm.arm === "task"
+        : status.arm === "task";
+      return rearmOnSettle
         ? finish(status, event.at, event.rearm)
         : status;
     case "handoff_claimed":

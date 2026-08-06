@@ -19,7 +19,6 @@ import {
 } from "@earendil-works/pi-tui";
 import { FabricModelSelector } from "./fabric-model-selector.js";
 import {
-  buildClaudeModelSource,
   buildModelSource,
   INHERIT_VALUE,
   modelKey,
@@ -42,7 +41,6 @@ const SUBMENU_LAYOUT: SelectListLayoutOptions = {
 
 const BOOLEANS = ["true", "false"] as const;
 const APPROVAL_MODES = ["allow", "ask", "auto", "deny"] as const;
-const RUNNERS = ["pi", "claude"] as const;
 const TRANSPORTS = ["auto", "process", "tmux", "screen", "localterm", "herdr"] as const;
 const WIDGET_MODES = ["auto", "always", "hidden"] as const;
 const RESULT_FORMATS = ["auto", "yaml", "json", "text"] as const;
@@ -275,9 +273,9 @@ const summaryFor = (id: string, config: FabricConfig): string => {
     case "mcp":
       return config.mcp.enabled ? "enabled" : "disabled";
     case "prewalk":
-      return `${config.prewalk.model || PREWALK_MODEL_UNSET_LABEL}${config.prewalk.verificationMode === "gated" ? ` · gated/${config.prewalk.maxPhaseRevisions ?? 2}` : ""}${config.prewalk.thinking ? ` · ${thinkingLabel(config.prewalk.thinking)}` : ""}${config.prewalk.alwaysRearm ? " · repeat" : ""}`;
+      return `${config.prewalk.model || PREWALK_MODEL_UNSET_LABEL}${config.prewalk.verificationMode === "gated" ? ` · gated/${config.prewalk.maxPhaseRevisions ?? 2}` : ""}${config.prewalk.thinking ? ` · ${thinkingLabel(config.prewalk.thinking)}` : ""}${config.prewalk.arm === "task" ? " · repeat" : ""}`;
     case "agents":
-      return `${config.agents.runner}/${config.agents.transport}${config.agents.fallbackModels.length > 0 ? ` · ${config.agents.fallbackModels.length} routes` : ""}${config.agents.allowQualityDowngrade ? " · downgrade" : ""}`;
+      return `${config.agents.transport}${config.agents.fallbackModels.length > 0 ? ` · ${config.agents.fallbackModels.length} routes` : ""}${config.agents.allowQualityDowngrade ? " · downgrade" : ""}`;
     case "consult":
       return config.consult.enabled
         ? `${config.consult.maxWorkers} workers · ${Math.round(config.consult.contextPressureThreshold * 100)}%`
@@ -546,15 +544,6 @@ export class FabricSettingsComponent extends Container {
   }
 }
 
-export const populateClaudeModelSource = async (
-  source: ModelSource,
-  load: () => Promise<Parameters<typeof buildClaudeModelSource>[0]>,
-): Promise<void> => {
-  const loaded = buildClaudeModelSource(await load());
-  source.models.splice(0, source.models.length, ...loaded.models);
-  source.lastUsed = loaded.lastUsed;
-};
-
 export const buildFabricSettingsItems = (
   theme: Theme,
   config: FabricConfig,
@@ -562,7 +551,6 @@ export const buildFabricSettingsItems = (
   options: {
     keepVisibleCandidates: readonly string[];
     modelSource: ModelSource;
-    claudeModelSource?: ModelSource;
     activeModelKey?: string;
     roleNames?: readonly string[];
   },
@@ -839,13 +827,13 @@ export const buildFabricSettingsItems = (
             },
           ),
           setting(
-            "prewalk.alwaysRearm",
-            "Always re-arm",
-            config.prewalk.alwaysRearm ? "true" : "false",
+            "prewalk.arm",
+            "Arm mode",
+            config.prewalk.arm,
             {
               description:
-                "After a task settles or continues, arm prewalk again for the next user task until explicitly cancelled.",
-              values: BOOLEANS,
+                "When the prewalk arms: off (explicit /fabric prewalk only), session (once at session start), or task (re-arm after every settled task).",
+              values: ["off", "session", "task"],
             },
           ),
           setting(
@@ -899,10 +887,6 @@ export const buildFabricSettingsItems = (
             description: "Enable agent spawning via workflow.agent() and agents.run().",
             values: BOOLEANS,
           }),
-          setting("agents.runner", "Default runner", config.agents.runner, {
-            description: "Execution harness used when agents.run/create does not specify runner.",
-            values: RUNNERS,
-          }),
           setting("agents.transport", "Transport", config.agents.transport, {
             description: "Preferred transport for spawned agents.",
             values: TRANSPORTS,
@@ -933,24 +917,6 @@ export const buildFabricSettingsItems = (
               description:
                 "Require every one-shot agent or handoff to name an independent-context, separable, capability-gap, long-running, or verification justification and expected artifact.",
               values: BOOLEANS,
-            },
-          ),
-          setting(
-            "agents.claude.model",
-            "Claude model",
-            config.agents.claude.model || INHERIT_VALUE,
-            {
-              description:
-                "Claude Code model used by Claude-backed agents across both lifecycles. Models are enumerated from the installed claude runtime; Inherit uses Claude Code's default.",
-              submenu: modelPickerSubmenu(
-                theme,
-                options.claudeModelSource ?? { models: [], lastUsed: {} },
-                {
-                  headerText:
-                    "Default model for Claude-backed Fabric agents across both lifecycles. Pick Inherit to use Claude Code's runtime default.",
-                  inheritName: "Use Claude Code's runtime default model",
-                },
-              ),
             },
           ),
           setting("agents.thinking", "Default thinking", thinkingLabel(config.agents.thinking), {
@@ -1723,25 +1689,6 @@ export async function openFabricSettings(
     ...deps.capturedTools.list().map((tool) => tool.name),
   ]);
   const modelSource = buildModelSource(context.modelRegistry);
-  const configuredClaudeModel = deps.state.config.agents.claude.model;
-  const claudeModelSource: ModelSource = {
-    models: configuredClaudeModel
-      ? [{ provider: "claude", id: configuredClaudeModel.replace(/^claude\//, "") }]
-      : [],
-    lastUsed: {},
-  };
-  void populateClaudeModelSource(
-    claudeModelSource,
-    () => deps.state.agents.claudeModels(),
-  ).catch((error: unknown) => {
-    if (deps.state.config.agents.runner === "claude") {
-      context.ui.notify(
-        `Claude model discovery failed: ${error instanceof Error ? error.message : String(error)}`,
-        "warning",
-      );
-    }
-  });
-
   let roleNames: string[] = [];
   try {
     roleNames = deps.state.agents.roles.list().map((role) => role.name);
@@ -1754,7 +1701,6 @@ export async function openFabricSettings(
       const items = buildFabricSettingsItems(theme, deps.state.config, apply, {
         keepVisibleCandidates,
         modelSource,
-        claudeModelSource,
         ...(activeModelKey ? { activeModelKey } : {}),
         roleNames,
       });

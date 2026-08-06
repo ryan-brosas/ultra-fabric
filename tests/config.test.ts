@@ -146,29 +146,38 @@ describe("Fabric configuration", () => {
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
-      alwaysRearm: true,
+      arm: "task",
     });
     expect(normalizeFabricConfig({ prewalk: { model: "   " } }).prewalk).toEqual({
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
-      alwaysRearm: true,
+      arm: "task",
     });
-    expect(normalizeFabricConfig({ prewalk: { alwaysRearm: false } }).prewalk).toEqual({
+    expect(normalizeFabricConfig({ prewalk: { arm: "off" } }).prewalk).toEqual({
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
-      alwaysRearm: false,
+      arm: "off",
     });
-    // Auto-arm is opt-in and absent unless explicitly enabled, so existing
-    // configurations keep the manual /fabric prewalk arming path.
+        // Arming defaults to per-task (the legacy always-rearm default) and only
+    // stays off when the user explicitly opts out.
     expect(normalizeFabricConfig({ prewalk: { autoArm: true } }).prewalk).toMatchObject({
-      autoArm: true,
+      arm: "session",
     });
-    expect(normalizeFabricConfig({}).prewalk).not.toHaveProperty("autoArm");
-    expect(normalizeFabricConfig({ prewalk: { autoArm: false } }).prewalk).not.toHaveProperty(
-      "autoArm",
+    expect(normalizeFabricConfig({ prewalk: { arm: "task" } }).prewalk).toMatchObject({
+      arm: "task",
+    });
+    expect(normalizeFabricConfig({}).prewalk).toHaveProperty("arm", "task");
+    expect(normalizeFabricConfig({ prewalk: { arm: "off" } }).prewalk).toHaveProperty(
+      "arm",
+      "off",
     );
+    // Failure memory is opt-in and absent by default.
+    expect(normalizeFabricConfig({}).prewalk).not.toHaveProperty("failureMemory");
+    expect(normalizeFabricConfig({ prewalk: { failureMemory: true } }).prewalk).toMatchObject({
+      failureMemory: true,
+    });
     // A configured run root must be absolute so agent evidence lands somewhere predictable.
     expect(normalizeFabricConfig({ agents: { runRoot: "/tmp/fabric-runs" } }).agents.runRoot).toBe(
       "/tmp/fabric-runs",
@@ -362,26 +371,6 @@ describe("Fabric configuration", () => {
     expect(nonString.agents.model).toBeUndefined();
   });
 
-  it("normalizes the default runner and independent Claude settings", () => {
-    expect(DEFAULT_FABRIC_CONFIG.agents.runner).toBe("pi");
-    expect(DEFAULT_FABRIC_CONFIG.agents.claude).toEqual({ binary: "claude" });
-    const configured = normalizeFabricConfig({
-      agents: {
-        runner: "claude",
-        claude: { binary: "/opt/claude", model: "claude/haiku" },
-      },
-    });
-    expect(configured.agents.runner).toBe("claude");
-    expect(configured.agents.claude).toEqual({
-      binary: "/opt/claude",
-      model: "claude/haiku",
-    });
-    const invalid = normalizeFabricConfig({
-      agents: { runner: "other", claude: { binary: " ", model: " " } },
-    });
-    expect(invalid.agents.runner).toBe("pi");
-    expect(invalid.agents.claude).toEqual({ binary: "claude" });
-  });
 
   it("defaults the agent thinking level to medium and validates the value", () => {
     expect(DEFAULT_FABRIC_CONFIG.agents.thinking).toBe("medium");
@@ -671,7 +660,7 @@ describe("Fabric configuration", () => {
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
-      alwaysRearm: true,
+      arm: "task",
     });
   });
 

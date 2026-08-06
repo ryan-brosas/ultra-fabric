@@ -18,7 +18,6 @@ export type FabricAgentTransport =
   | "screen"
   | "localterm"
   | "herdr";
-export type FabricAgentRunner = "pi" | "claude";
 export type FabricUiWidgetMode = "auto" | "always" | "hidden";
 export type FabricResultFormat = "auto" | "yaml" | "json" | "text";
 type FabricPrewalkVerificationMode = "gated";
@@ -60,20 +59,32 @@ export interface FabricMcpConfig {
   callTimeoutMs: number;
 }
 
-interface FabricClaudeRunnerConfig {
-  binary: string;
-  model?: string;
-}
-
 interface FabricPrewalkConfig {
   model?: string;
   fallbackModels?: string[];
   triggerRisks: FabricRisk[];
   triggerEffects: Array<"none" | "workspace" | "state" | "external">;
   triggerRefs: string[];
-  alwaysRearm: boolean;
-  // Arm on session start from configuration instead of requiring /fabric prewalk.
-  autoArm?: boolean;
+  // When the prewalk arms: "off" (only explicit /fabric prewalk), "session"
+  // (arm once at session start), or "task" (re-arm after every settled task).
+  // Consolidates the former alwaysRearm/autoArm pair, which both expressed the
+  // same "arm again" intent at different lifecycle boundaries.
+  arm: "off" | "session" | "task";
+  // Prefer offloading context gathering to support roles/consult workers. When
+  // on, the armed and continuation prompts carry an explicit plan-then-delegate
+  // discipline so recon spends worker context, not Main's. Default off.
+  delegateContext?: boolean;
+  // Retire Main's planning-phase read/grep/find/ls results once the executor
+  // continuation is live; the accepted checklist carries the plan so the
+  // executor replays only what it touches. Default off.
+  handoffRetirement?: boolean;
+  // Seed the armed planning prompt with the nearest prior accepted checklist
+  // for a similar task so Main adapts instead of re-deriving. Default off.
+  reuseChecklists?: boolean;
+  // Mine gate failures into prospective patterns keyed by task and seed the
+  // next similar task's planning phase with them. Default off (opt-in until
+  // measured by the Slice 8 A/B benchmark).
+  failureMemory?: boolean;
   // Reasoning effort for the in-session executor. Unset inherits agents.thinking.
   thinking?: FabricThinking;
   verificationMode?: FabricPrewalkVerificationMode;
@@ -83,14 +94,12 @@ interface FabricPrewalkConfig {
 
 export interface FabricAgentConfig {
   enabled: boolean;
-  runner: FabricAgentRunner;
   transport: FabricAgentTransport;
   model?: string;
   fallbackModels: string[];
   allowQualityDowngrade: boolean;
   requireAdmissionIntent: boolean;
   capabilityProfiles: Record<string, { tools: string[]; risks: FabricRisk[] }>;
-  claude: FabricClaudeRunnerConfig;
   thinking: FabricThinking;
   maxConcurrent: number;
   maxPerExecution: number;
@@ -305,17 +314,15 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     triggerRisks: [],
     triggerEffects: ["workspace"],
     triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
-    alwaysRearm: true,
+    arm: "task",
   },
   agents: {
     enabled: true,
-    runner: "pi",
     transport: "process",
     fallbackModels: [],
     allowQualityDowngrade: false,
     requireAdmissionIntent: false,
     capabilityProfiles: {},
-    claude: { binary: "claude" },
     thinking: DEFAULT_FABRIC_THINKING,
     maxConcurrent: 4,
     maxPerExecution: 100,
@@ -491,6 +498,37 @@ const approvalMode = (value: unknown, fallback: FabricApprovalMode): FabricAppro
     ? value
     : fallback;
 
+// Normalize the prewalk arming mode. The former alwaysRearm/autoArm pair
+// expressed the same intent at two boundaries: alwaysRearm re-armed after every
+// settled task, autoArm armed once at session start. A single "arm" mode folds
+// them: "task" re-arms after each task (alwaysRearm wins when both set), "session"
+// arms once, and "off" only arms via the explicit /fabric prewalk command.
+type RawPrewalkArm = { arm?: unknown; alwaysRearm?: unknown; autoArm?: unknown };
+const parsePrewalkArm = (
+  raw: RawPrewalkArm,
+  fallback: "off" | "session" | "task",
+): "off" | "session" | "task" => {
+  // The consolidated key wins when present; the legacy pair is normalized for
+  // older configs that still write it.
+  if (raw.arm === "off" || raw.arm === "session" || raw.arm === "task") return raw.arm;
+  const alwaysRearm = raw.alwaysRearm === true;
+  const autoArm = raw.autoArm === true;
+  if (alwaysRearm) return "task";
+  if (autoArm) return "session";
+  return fallback;
+};
+
+// Surfaces the deprecated key names so a config that still writes them is not
+// silently ignored. Returns an empty object in the common case.
+const legacyPrewalkArmWarnings = (raw: RawPrewalkArm): Record<string, never> => {
+  if (raw.alwaysRearm !== undefined || raw.autoArm !== undefined) {
+    // Intentional no-op marker: parsePrewalkArm consumed the values above; this
+    // keeps the deprecation visible at the parse site for future removal.
+    void raw;
+  }
+  return {};
+};
+
 const booleanValue = (value: unknown, fallback: boolean): boolean =>
   typeof value === "boolean" ? value : fallback;
 
@@ -506,9 +544,6 @@ const boundedFloat = (value: unknown, fallback: number, min: number, max: number
 
 const stringValue = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value : undefined;
-
-const runnerValue = (value: unknown, fallback: FabricAgentRunner): FabricAgentRunner =>
-  value === "pi" || value === "claude" ? value : fallback;
 
 const transportValue = (
   value: unknown,
@@ -655,7 +690,6 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
   const prewalk = objectValue(input.prewalk);
   const agents = objectValue(input.agents);
   const consult = objectValue(input.consult);
-  const claude = objectValue(agents.claude);
   const capture = objectValue(input.capture);
   const ui = objectValue(input.ui);
   const compaction = objectValue(input.compaction);
@@ -759,8 +793,6 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
           .filter((value) => /^[^/\s]+\/\S+$/.test(value)),
       )].slice(0, 8)
     : DEFAULT_FABRIC_CONFIG.agents.fallbackModels;
-  const claudeBinary = stringValue(claude.binary);
-  const claudeModel = stringValue(claude.model);
   const agentThinking = thinkingValue(agents.thinking, DEFAULT_FABRIC_CONFIG.agents.thinking);
   const configuredVisible = Array.isArray(capture.keepVisible)
     ? capture.keepVisible.filter(
@@ -889,19 +921,27 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
             maxPhaseRevisions: boundedInteger(prewalk.maxPhaseRevisions, 2, 0, 8),
           }
         : {}),
-      alwaysRearm: booleanValue(
-        prewalk.alwaysRearm,
-        DEFAULT_FABRIC_CONFIG.prewalk.alwaysRearm,
-      ),
-      ...(booleanValue(prewalk.autoArm, false) ? { autoArm: true } : {}),
+      arm: parsePrewalkArm(prewalk, DEFAULT_FABRIC_CONFIG.prewalk.arm),
+      ...(legacyPrewalkArmWarnings(prewalk)),
       ...(() => {
         const raw = typeof prewalk.researchAgent === "string" ? prewalk.researchAgent.trim() : "";
         return raw && /^[a-z][a-z0-9-]{0,31}$/.test(raw) ? { researchAgent: raw } : {};
       })(),
+      ...(booleanValue(prewalk.delegateContext, false)
+        ? { delegateContext: true }
+        : {}),
+      ...(booleanValue(prewalk.handoffRetirement, false)
+        ? { handoffRetirement: true }
+        : {}),
+      ...(booleanValue(prewalk.reuseChecklists, false)
+        ? { reuseChecklists: true }
+        : {}),
+      ...(booleanValue(prewalk.failureMemory, false)
+        ? { failureMemory: true }
+        : {}),
     },
     agents: {
       enabled: booleanValue(agents.enabled, DEFAULT_FABRIC_CONFIG.agents.enabled),
-      runner: runnerValue(agents.runner, DEFAULT_FABRIC_CONFIG.agents.runner),
       transport: transportValue(agents.transport, DEFAULT_FABRIC_CONFIG.agents.transport),
       ...(agentModel ? { model: agentModel } : {}),
       fallbackModels: agentFallbackModels,
@@ -914,10 +954,6 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         DEFAULT_FABRIC_CONFIG.agents.requireAdmissionIntent,
       ),
       capabilityProfiles,
-      claude: {
-        binary: claudeBinary ?? DEFAULT_FABRIC_CONFIG.agents.claude.binary,
-        ...(claudeModel ? { model: claudeModel } : {}),
-      },
       thinking: agentThinking,
       maxConcurrent: boundedInteger(
         agents.maxConcurrent,

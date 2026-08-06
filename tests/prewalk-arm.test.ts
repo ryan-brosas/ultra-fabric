@@ -1,7 +1,11 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PrewalkController } from "../src/prewalk/controller.js";
-import { autoArmPrewalk } from "../src/prewalk/arm.js";
+import { armPrewalk, autoArmPrewalk } from "../src/prewalk/arm.js";
+import { CHECKLIST_MEMORY_FILE, recordChecklist } from "../src/prewalk/checklist-memory.js";
 import { normalizeFabricConfig } from "../src/config.js";
 
 const context = () => {
@@ -22,7 +26,7 @@ const extension = () => {
 
 const configFor = (overrides: Record<string, unknown>) =>
   normalizeFabricConfig({
-    prewalk: { autoArm: true, model: "anthropic/executor", ...overrides },
+    prewalk: { arm: "session", model: "anthropic/executor", ...overrides },
   });
 
 describe("autoArmPrewalk", () => {
@@ -50,10 +54,10 @@ describe("autoArmPrewalk", () => {
     );
   });
 
-  it("stays idle when auto-arm is off", () => {
+  it("stays idle when arm is off", () => {
     const controller = new PrewalkController();
     const ext = extension();
-    const config = normalizeFabricConfig({ prewalk: { model: "anthropic/executor" } });
+    const config = normalizeFabricConfig({ prewalk: { arm: "off", model: "anthropic/executor" } });
 
     expect(autoArmPrewalk(ext.value, controller, config, context().value)).toBe(false);
     expect(controller.isArmed()).toBe(false);
@@ -63,7 +67,7 @@ describe("autoArmPrewalk", () => {
   it("refuses an unset or malformed model instead of prompting", () => {
     const controller = new PrewalkController();
     const ext = extension();
-    const unset = normalizeFabricConfig({ prewalk: { autoArm: true } });
+    const unset = normalizeFabricConfig({ prewalk: { arm: "session" } });
     expect(autoArmPrewalk(ext.value, controller, unset, context().value)).toBe(false);
 
     const malformed = configFor({ model: "executor-without-provider" });
@@ -75,7 +79,7 @@ describe("autoArmPrewalk", () => {
     const controller = new PrewalkController();
     const ext = extension();
     const config = normalizeFabricConfig({
-      prewalk: { autoArm: true, model: "anthropic/executor", mode: "research" },
+      prewalk: { arm: "session", model: "anthropic/executor", mode: "research" },
       agents: { enabled: false },
     });
     expect(autoArmPrewalk(ext.value, controller, config, context().value)).toBe(true);
@@ -89,5 +93,65 @@ describe("autoArmPrewalk", () => {
     expect(autoArmPrewalk(ext.value, controller, config, context().value)).toBe(true);
     expect(autoArmPrewalk(ext.value, controller, config, context().value)).toBe(false);
     expect(ext.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("seeds the armed prompt with the nearest prior checklist when reuse is on", () => {
+    const controller = new PrewalkController();
+    const ext = extension();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "prewalk-arm-memory-"));
+    recordChecklist(
+      path.dirname(path.join(root, "runs")),
+      "Implement the token guard and run its tests",
+      { items: [{ task: "Add the token guard", validation: "Run the suite" }], readyAt: 1 },
+    );
+    const config = normalizeFabricConfig({
+      prewalk: { model: "anthropic/executor", reuseChecklists: true },
+      agents: { runRoot: path.join(root, "runs") },
+    });
+    armPrewalk(
+      ext.value,
+      controller,
+      config.prewalk,
+      context().value,
+      "anthropic/executor",
+      "Implement the token guard and run its tests",
+      config.agents.runRoot,
+    );
+    const message = ext.sendMessage.mock.calls[0]?.[0] as { content?: string };
+    expect(message.content).toContain("adapt");
+    expect(message.content).toContain("Add the token guard");
+    expect(fs.existsSync(path.join(path.dirname(path.join(root, "runs")), CHECKLIST_MEMORY_FILE))).toBe(true);
+  });
+
+    it("seeds the armed prompt with prior failures when failure memory is on", () => {
+    const controller = new PrewalkController();
+    const ext = extension();
+    const ctx = context();
+    const config = normalizeFabricConfig({
+      prewalk: { arm: "session", model: "anthropic/executor", failureMemory: true },
+    });
+    autoArmPrewalk(ext.value, controller, config, ctx.value);
+    const message = ext.sendMessage.mock.calls[0]?.[0] as { content?: string } | undefined;
+    expect(message?.content).toBeDefined();
+  });
+
+  it("does not seed failures when failure memory is off", () => {
+    const controller = new PrewalkController();
+    const ext = extension();
+    const config = normalizeFabricConfig({
+      prewalk: { arm: "session", model: "anthropic/executor" },
+    });
+    autoArmPrewalk(ext.value, controller, config, context().value);
+    const message = ext.sendMessage.mock.calls[0]?.[0] as { content?: string } | undefined;
+    expect(message?.content).toBeDefined();
+  });
+
+it("keeps the armed prompt unchanged when reuse is off", () => {
+    const controller = new PrewalkController();
+    const ext = extension();
+    const config = configFor({ reuseChecklists: false });
+    autoArmPrewalk(ext.value, controller, config, context().value);
+    const message = ext.sendMessage.mock.calls[0]?.[0] as { content?: string };
+    expect(message.content).not.toContain("adapt");
   });
 });

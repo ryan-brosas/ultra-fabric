@@ -7,7 +7,7 @@ describe("PrewalkController write scope", () => {
     ctrl.arm({
       model: "test/model",
       sessionId: "s1",
-      alwaysRearm: false,
+      arm: "off",
     });
     // Accept a checklist so authorize does not throw on the missing-checklist guard.
     const boundary = ctrl.executionBoundary("s1")!;
@@ -56,7 +56,7 @@ describe("PrewalkController write scope", () => {
     ).toThrow();
     ctrl.settleTask("s1");
     // Re-arm for the next wave so the boundary is available again.
-    ctrl.arm({ model: "test/model", sessionId: "s1", alwaysRearm: false });
+    ctrl.arm({ model: "test/model", sessionId: "s1", arm: "off" });
     const boundary2 = ctrl.executionBoundary("s1")!;
     boundary2.registerChecklist({
       items: [

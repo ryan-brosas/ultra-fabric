@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_EASY_PREWALK_CHECKLIST_ITEMS,
   MAX_PREWALK_CHECKLIST_ITEMS,
+  MIN_EASY_PREWALK_CHECKLIST_ITEMS,
   MIN_PREWALK_CHECKLIST_ITEMS,
   parsePrewalkChecklist,
 } from "../src/prewalk/checklist.js";
@@ -58,5 +60,43 @@ describe("parsePrewalkChecklist", () => {
 
   it("rejects a non-boolean trivial flag", () => {
     expect(() => parsePrewalkChecklist({ trivial: "yes" })).toThrow(/trivial/);
+  });
+
+  // Easy-path router: a bounded, mid-tier task still hands off to the executor
+  // (unlike trivial), but relaxes the planning ceremony from 5-9 items to a
+  // short 2-4 item checklist so Main skips deep research on it.
+  it("accepts a 2-4 item checklist under the easy disposition", () => {
+    const easy = parsePrewalkChecklist({ easy: true, items: items(MIN_EASY_PREWALK_CHECKLIST_ITEMS) }, 42);
+    expect(easy).toEqual({
+      items: Array.from({ length: MIN_EASY_PREWALK_CHECKLIST_ITEMS }, (_, index) => ({
+        task: `Change target ${index + 1}`,
+        validation: `Run check ${index + 1}`,
+      })),
+      easy: true,
+      readyAt: 42,
+    });
+    expect(
+      parsePrewalkChecklist({ easy: true, items: items(MAX_EASY_PREWALK_CHECKLIST_ITEMS) }).items,
+    ).toHaveLength(MAX_EASY_PREWALK_CHECKLIST_ITEMS);
+  });
+
+  it("rejects an easy checklist outside its 2-4 item bound", () => {
+    expect(() =>
+      parsePrewalkChecklist({ easy: true, items: items(MIN_EASY_PREWALK_CHECKLIST_ITEMS - 1) }),
+    ).toThrow(/between 2 and 4 items/);
+    expect(() =>
+      parsePrewalkChecklist({ easy: true, items: items(MAX_EASY_PREWALK_CHECKLIST_ITEMS + 1) }),
+    ).toThrow(/between 2 and 4 items/);
+  });
+
+  it("rejects a non-boolean easy flag", () => {
+    expect(() => parsePrewalkChecklist({ easy: "yes" })).toThrow(/easy/);
+  });
+
+  it("keeps the full 5-9 item bound without an easy flag", () => {
+    expect(() => parsePrewalkChecklist({ items: items(4) })).toThrow(/between 5 and 9 items/);
+    expect(() => parsePrewalkChecklist({ easy: false, items: items(4) })).toThrow(
+      /between 5 and 9 items/,
+    );
   });
 });

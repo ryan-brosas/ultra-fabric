@@ -161,9 +161,9 @@ const runPrewalk = async (
   // Hidden advisory framing is queued for the next prompt (rules before
   // the task when one is submitted below). nextTurn never triggers a
   // turn; custom messages never fire `input`, so observeTask ignores it.
-  armPrewalk(pi, state.prewalk, state.config.prewalk, context, model, task || undefined);
+  armPrewalk(pi, state.prewalk, state.config.prewalk, context, model, task || undefined, state.config.agents.runRoot);
   const modeLabel = "Main will switch in place at the first host-observed mutation";
-  const rearm = state.config.prewalk.alwaysRearm ? "; always re-arm enabled" : "";
+  const rearm = state.config.prewalk.arm === "task" ? "; re-arm per task" : "";
   context.ui.notify(
     task
       ? `Fabric prewalk armed for the next matching Fabric boundary; ${modeLabel} with ${model}${rearm}`
@@ -370,11 +370,11 @@ const runAgents = async (
         const rows = [
           ...oneShot.map(
             (agent) =>
-              `one-shot   ${agent.id.slice(0, 8)} ${agent.status} ${agent.runner}/${agent.transport} — ${agent.name}`,
+              `one-shot   ${agent.id.slice(0, 8)} ${agent.status} ${agent.transport} — ${agent.name}`,
           ),
           ...persistent.map(
             (agent) =>
-              `persistent ${agent.id.slice(0, 8)} ${agent.status} ${agent.runner} q:${agent.queued} — ${agent.name}`,
+              `persistent ${agent.id.slice(0, 8)} ${agent.status} q:${agent.queued} — ${agent.name}`,
           ),
         ];
         context.ui.notify(rows.length > 0 ? rows.join("\n") : "No Fabric agents", "info");
@@ -650,7 +650,7 @@ const runGlobal = async (
         context.ui.notify(
           templates.length > 0
             ? templates
-                .map((template) => `${template.id.slice(0, 8)} global ${template.runner} — ${template.name}`)
+                .map((template) => `${template.id.slice(0, 8)} global — ${template.name}`)
                 .join("\n")
             : "No global Fabric agent templates",
           "info",
@@ -729,17 +729,13 @@ const runStatus = (deps: FabricCommandDeps, context: ExtensionContext): void => 
             .providers()
             .map((provider) => provider.name)
             .join(", ")}`,
-          `runner: ${config.agents.runner} · transport: ${config.agents.transport} · model: ${
-            config.agents.runner === "claude"
-              ? config.agents.claude.model || "Claude default"
-              : config.agents.model || "inherit"
-          }`,
+          `transport: ${config.agents.transport} · model: ${config.agents.model || "inherit"}`,
           `agent limits: concurrency ${config.agents.maxConcurrent}, per execution ${config.agents.maxPerExecution}, depth ${config.agents.maxDepth}`,
           (() => {
             const prewalk = state.prewalk.status();
             return prewalk.state === "idle"
-              ? `prewalk: idle · model ${config.prewalk.model || "Ask each time"} · always re-arm ${config.prewalk.alwaysRearm ? "on" : "off"}`
-              : `prewalk: ${prewalk.state}  ${prewalk.model}${prewalk.alwaysRearm ? " · always re-arm" : ""}${prewalk.state === "blocked" ? " · retry available" : ""}`;
+              ? `prewalk: idle · model ${config.prewalk.model || "Ask each time"} · arm ${config.prewalk.arm}`
+              : `prewalk: ${prewalk.state}  ${prewalk.model}${prewalk.arm === "task" ? " · re-arm per task" : ""}${prewalk.state === "blocked" ? " · retry available" : ""}`;
           })(),
           config.fullCodeMode && config.capture.enabled
             ? `captured tools: ${capturedTools.size} · model visibility: ${config.capture.hideFromModel ? "hidden" : "visible"}`
@@ -836,6 +832,7 @@ const runInit = (context: ExtensionContext): void => {
     ".pi/project.md",
     ".pi/roadmap.md",
     ".pi/tech-stack.md",
+    ".pi/user.md",
   ];
   const existing = new Set(probePaths.filter((p) => fs.existsSync(path.join(cwd, p))));
   const detected = detectProject(cwd);
@@ -862,6 +859,7 @@ const runInit = (context: ExtensionContext): void => {
     "fabric init",
     "created: " + (applied.created.length > 0 ? applied.created.join(", ") : "(none)"),
     "skipped (already present): " + (applied.skipped.length > 0 ? applied.skipped.join(", ") : "(none)"),
+    "deferred (copy from legacy .pi to root): " + (applied.deferred.length > 0 ? applied.deferred.join(", ") : "(none)"),
     summary,
     ...askLine,
     ...plan.migrations,
@@ -925,7 +923,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
             items.push({
               value: template.name,
               label: template.name,
-              description: `global ${template.runner} template · ${template.id.slice(0, 8)}`,
+              description: `global template · ${template.id.slice(0, 8)}`,
             });
           }
         } catch {
@@ -942,7 +940,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
               items.push({
                 value: persistentAgent.name,
                 label: persistentAgent.name,
-                description: `${persistentAgent.status} ${persistentAgent.runner} persistent Agent · ${persistentAgent.id.slice(0, 8)}`,
+                description: `${persistentAgent.status} persistent Agent · ${persistentAgent.id.slice(0, 8)}`,
               });
             }
           } catch {
@@ -959,7 +957,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           items.push({
             value: persistentAgent.name,
             label: persistentAgent.name,
-            description: `${persistentAgent.status} ${persistentAgent.runner} persistent Agent · ${persistentAgent.id.slice(0, 8)}`,
+            description: `${persistentAgent.status} persistent Agent · ${persistentAgent.id.slice(0, 8)}`,
           });
         }
       } catch {
@@ -971,7 +969,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
           items.push({
             value: short,
             label: short,
-            description: `${agent.status} ${agent.runner} agent · ${agent.name}`,
+            description: `${agent.status} agent · ${agent.name}`,
           });
         }
       } catch {

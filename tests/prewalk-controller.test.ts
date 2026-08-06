@@ -57,7 +57,7 @@ describe("PrewalkController", () => {
       model: "anthropic/executor",
       sessionId: "session-1",
       task: "Inspect without changing anything",
-      alwaysRearm: true,
+      arm: "task",
     });
 
     expect(controller.settleTask("session-1")).toBe(true);
@@ -65,7 +65,7 @@ describe("PrewalkController", () => {
       state: "armed",
       model: "anthropic/executor",
       sessionId: "session-1",
-      alwaysRearm: true,
+      arm: "task",
     });
     expect(controller.status()).not.toHaveProperty("task");
 
@@ -310,6 +310,34 @@ describe("PrewalkController", () => {
     const settled = controller.settleContinuation("session-1");
     expect(settled.settled).toBe(true);
     expect(settled.returnModel).toBe("anthropic/frontier");
+  });
+
+  // Checklist memory records a settled continuation's checklist keyed by task.
+  // settleContinuation must expose both so the agent_settled hook can record.
+  it("exposes the checklist and task of a settled continuation", () => {
+    const controller = new PrewalkController();
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement the token guard",
+    });
+    controller.executionBoundary("session-1")!.registerChecklist({
+      items: Array.from({ length: 5 }, (_, index) => ({
+        task: `Step ${index + 1}`,
+        validation: `Check ${index + 1}`,
+      })),
+    });
+    controller.claim([audit("pi.edit", true)], "session-1", "handoff-2");
+    controller.completeHandoff("anthropic/frontier");
+    controller.acceptContinuation("session-1", "handoff-2");
+
+    const settled = controller.settleContinuation("session-1");
+    expect(settled.settled).toBe(true);
+    expect(settled.checklist?.items[0]).toMatchObject({
+      task: "Step 1",
+      validation: "Check 1",
+    });
+    expect(settled.task).toBe("Implement the token guard");
   });
 
   // A gated task that never records acceptance evidence still switched Main to

@@ -64,7 +64,7 @@ const armFromStatus = (
   model: status.model,
   sessionId: status.sessionId,
   armedAt: status.armedAt,
-  alwaysRearm: status.alwaysRearm,
+  arm: status.arm,
   ...(status.fallbackModels ? { fallbackModels: [...status.fallbackModels] } : {}),
   ...(status.task ? { task: status.task } : {}),
   ...(status.checklist ? { checklist: structuredClone(status.checklist) } : {}),
@@ -213,11 +213,12 @@ export class PrewalkController {
     model: string;
     sessionId: string;
     task?: string;
-    alwaysRearm?: boolean;
+    arm?: "off" | "session" | "task";
     fallbackModels?: string[];
     thinking?: FabricThinking;
     verificationMode?: "gated";
     maxPhaseRevisions?: number;
+    delegateContext?: boolean;
   }): FabricPrewalkStatus {
     const model = input.model.trim();
     if (!model.includes("/")) throw new Error("Prewalk requires a provider/model executor target");
@@ -233,7 +234,7 @@ export class PrewalkController {
         model,
         sessionId: input.sessionId,
         armedAt: Date.now(),
-        alwaysRearm: input.alwaysRearm === true,
+        arm: input.arm ?? "off",
         ...(fallbackModels.length > 0 ? { fallbackModels } : {}),
         ...(task ? { task } : {}),
         ...(input.thinking ? { thinking: input.thinking } : {}),
@@ -246,6 +247,7 @@ export class PrewalkController {
               ),
             }
           : {}),
+        ...(input.delegateContext ? { delegateContext: true } : {}),
       },
     });
   }
@@ -367,6 +369,8 @@ export class PrewalkController {
     status: FabricPrewalkStatus;
     returnModel?: string;
     returnThinking?: string;
+    checklist?: FabricPrewalkChecklist;
+    task?: string;
   } {
     const previous = this.#status;
     // A gated task that settles while still verifying never recorded acceptance
@@ -382,6 +386,16 @@ export class PrewalkController {
       previous.sessionId === sessionId
         ? previous.returnThinking
         : undefined;
+    const settledChecklist =
+      (previous.state === "continuing" || previous.state === "verifying") &&
+      previous.sessionId === sessionId
+        ? previous.checklist
+        : undefined;
+    const settledTask =
+      (previous.state === "continuing" || previous.state === "verifying") &&
+      previous.sessionId === sessionId
+        ? previous.task
+        : undefined;
     this.#writeScopes.delete(sessionId);
     const status = this.#transition({
       kind: "continuation_settled",
@@ -394,6 +408,8 @@ export class PrewalkController {
       status,
       ...(returnModel ? { returnModel } : {}),
       ...(returnThinking ? { returnThinking } : {}),
+      ...(settledChecklist ? { checklist: structuredClone(settledChecklist) } : {}),
+      ...(settledTask ? { task: settledTask } : {}),
     };
   }
 

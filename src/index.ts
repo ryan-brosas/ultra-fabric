@@ -27,6 +27,9 @@ import {
   effectiveToolCaptureConfig,
 } from "./config.js";
 import { registerCompactionHook } from "./compaction/hook.js";
+import { applyHandoffRetirement } from "./context/handoff-retirement.js";
+import { prewalkMemoryDir, recordChecklist } from "./prewalk/checklist-memory.js";
+import { prewalkFailureDir, recordFailure } from "./prewalk/failure-memory.js";
 import { applyContextQos } from "./context/qos.js";
 import { compactAtConfiguredThreshold } from "./compaction/threshold.js";
 import {
@@ -329,6 +332,43 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
         );
       }
     }
+    // Failure memory: a gate failure (abort gate, exhausted revisions, or a
+    // continuation that settled while still verifying) leaves the task blocked
+    // with its error preserved. Mine the failure mode keyed by task so the next
+    // similar task seeds its planning phase with it (PreFlect-style prospective
+    // distillation). Opt-in via prewalk.failureMemory.
+    if (state.config.prewalk.failureMemory === true) {
+      const failedStatus = state.prewalk.status();
+      if (failedStatus.state === "blocked" && failedStatus.task) {
+        const error = failedStatus.error ?? "Prewalk gate blocked the task";
+        recordFailure(
+          prewalkFailureDir(state.config.agents.runRoot),
+          failedStatus.task,
+          {
+            kind: error.includes("revision limit")
+              ? "revision-exhausted"
+              : "gate-abort",
+            gate: error,
+            feedback: error,
+          },
+        );
+      }
+    }
+    // Checklist memory: a settled continuation leaves an accepted checklist
+    // behind. Record it keyed by the task text so a later similar task seeds
+    // its planning phase with the prior plan instead of re-deriving it.
+    if (
+      settledContinuation.settled &&
+      state.config.prewalk.reuseChecklists === true
+    ) {
+      if (settledContinuation.checklist && settledContinuation.task) {
+        recordChecklist(
+          prewalkMemoryDir(state.config.agents.runRoot),
+          settledContinuation.task,
+          settledContinuation.checklist,
+        );
+      }
+    }
     const settledTask = state.prewalk.settleTask(sessionId, rearm);
     if (settledContinuation.settled || settledTask) {
       const status = state.prewalk.status();
@@ -495,8 +535,33 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
           report: { retiredResults: 0, retiredChars: 0, protectedResults: 0 },
         };
     state.noteContextQos(qos.report);
-    let changed = continuation.changed || planning.changed || qos.changed;
-    let messages = qos.messages.map((message) => {
+    // Handoff-boundary retirement: once the executor continuation is live and
+    // accepted, Main's planning-phase read/grep/find/ls results are dead weight
+    // replayed as input every turn. The checklist carries the plan, so retire
+    // them behind the continuation anchor when prewalk.handoffRetirement is on.
+    const prewalkStatus = state.initialized ? state.prewalk.status() : undefined;
+    const liveContinuation =
+      prewalkStatus &&
+      (prewalkStatus.state === "continuing" || prewalkStatus.state === "verifying") &&
+      prewalkStatus.checklist &&
+      prewalkStatus.checklist.trivial !== true
+        ? prewalkStatus.handoffId
+        : undefined;
+    const retirement =
+      liveContinuation &&
+      state.config.prewalk.handoffRetirement === true
+        ? applyHandoffRetirement(qos.messages, {
+            continuationId: liveContinuation,
+            enabled: true,
+          })
+        : {
+            messages: qos.messages,
+            changed: false,
+            report: { retiredResults: 0, retiredChars: 0, protectedResults: 0 },
+          };
+    let changed =
+      continuation.changed || planning.changed || qos.changed || retirement.changed;
+    let messages = retirement.messages.map((message) => {
       if (message.role !== "user") return message;
       if (typeof message.content === "string") {
         const content = expandSkillDirMarkersInSkillBlock(message.content);

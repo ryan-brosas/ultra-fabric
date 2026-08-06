@@ -14,7 +14,6 @@ import {
   openFabricSettings,
   parseBudgetValue,
   parseFormattedNumericValue,
-  populateClaudeModelSource,
 } from "../src/ui/settings.js";
 
 const theme = {
@@ -41,25 +40,6 @@ const buildItems = (keepVisibleCandidates: string[] = ["fabric_exec"]) =>
   });
 
 describe("FabricSettingsComponent", () => {
-  it("populates Claude models asynchronously without requiring startup discovery", async () => {
-    const source: ModelSource = {
-      models: [{ provider: "claude", id: "configured" }],
-      lastUsed: {},
-    };
-    let resolveModels!: (models: Array<{ value: string; displayName: string }>) => void;
-    const models = new Promise<Array<{ value: string; displayName: string }>>((resolve) => {
-      resolveModels = resolve;
-    });
-
-    const loading = populateClaudeModelSource(source, () => models);
-    expect(source.models.map((model) => model.id)).toEqual(["configured"]);
-
-    resolveModels([{ value: "haiku", displayName: "Haiku" }]);
-    await loading;
-    expect(source.models).toEqual([
-      { provider: "claude", id: "haiku", name: "Haiku" },
-    ]);
-  });
 
   it("offers executor memory limits through the machine capacity", () => {
     const machineCapacity = 24 * 1024 * 1024 * 1024;
@@ -312,6 +292,55 @@ describe("FabricSettingsComponent", () => {
     expect(section.render(100).join("\n")).not.toContain("134217728");
   });
 
+  it("exposes a model picker per agent role that persists agents.roleModels.<role>", () => {
+    const applied: Array<{ id: string; value: unknown }> = [];
+    const roleNames = ["scout", "explorer", "planner", "reviewer", "worker"];
+    const items = buildFabricSettingsItems(
+      theme,
+      structuredClone(DEFAULT_FABRIC_CONFIG),
+      (id, value) => applied.push({ id, value }),
+      {
+        keepVisibleCandidates: ["fabric_exec"],
+        modelSource: fakeModelSource,
+        activeModelKey: "anthropic/claude-sonnet-4-5",
+        roleNames,
+      },
+    );
+    const agents = items.find((item) => item.id === "agents")!;
+    const section = agents.submenu!("", () => {}) as any;
+    const list = section.settingsList as any;
+
+    // Every listed role has its own model entry, defaulting to Inherit.
+    for (const role of roleNames) {
+      const id = `agents.roleModels.${role}`;
+      const entry = list.items.find((item: { id: string }) => item.id === id);
+      expect(entry, `${id} entry present`).toBeDefined();
+      expect(entry.currentValue).toBe("Inherit");
+    }
+
+    // Selecting a concrete model persists the canonical provider/id string.
+    list.selectedIndex = list.items.findIndex(
+      (item: { id: string }) => item.id === "agents.roleModels.scout",
+    );
+    list.activateItem();
+    list.submenuComponent.handleInput("\x1b[B");
+    list.submenuComponent.handleInput("\r");
+    expect(applied.at(-1)).toEqual({
+      id: "agents.roleModels.scout",
+      value: "anthropic/claude-sonnet-4-5",
+    });
+    expect(list.items[list.selectedIndex].currentValue).toBe(
+      "anthropic/claude-sonnet-4-5",
+    );
+
+    // Selecting Inherit persists an empty string so normalizeFabricConfig drops the override.
+    list.activateItem();
+    list.submenuComponent.handleInput("\x1b[A");
+    list.submenuComponent.handleInput("\r");
+    expect(applied.at(-1)).toEqual({ id: "agents.roleModels.scout", value: "" });
+    expect(list.items[list.selectedIndex].currentValue).toBe("Inherit");
+  });
+
   it("persists labeled thinking levels using their canonical values", () => {
     const applied: Array<{ id: string; value: unknown }> = [];
     const items = buildFabricSettingsItems(
@@ -506,7 +535,7 @@ describe("FabricSettingsComponent", () => {
       prewalk: {
         ...DEFAULT_FABRIC_CONFIG.prewalk,
         model: "anthropic/claude-sonnet-4-5",
-        alwaysRearm: false,
+        arm: "off" as const,
       },
     };
     const items = buildFabricSettingsItems(theme, config, () => {}, {
@@ -516,7 +545,7 @@ describe("FabricSettingsComponent", () => {
     const prewalk = items.find((item) => item.id === "prewalk")!;
     const lines = prewalk.submenu!("", () => {}).render(100).join("\n");
 
-    expect(lines).toContain("Always re-arm");
+    expect(lines).toContain("Arm mode");
     expect(lines).toContain("Verification");
     expect(lines).toContain("Max revisions");
     expect(lines).toContain("Executor model ›");
@@ -694,13 +723,13 @@ describe("FabricSettingsComponent", () => {
           ) as {
             prewalk?: {
               model?: string;
-              alwaysRearm?: boolean;
+              arm?: "off" | "session" | "task";
             };
           };
           config.prewalk = {
             ...config.prewalk,
             ...(saved.prewalk?.model ? { model: saved.prewalk.model } : {}),
-            alwaysRearm: saved.prewalk?.alwaysRearm === true,
+            arm: saved.prewalk?.arm ?? "off",
           };
         }),
         agents: { claudeModels: vi.fn().mockResolvedValue([]) },

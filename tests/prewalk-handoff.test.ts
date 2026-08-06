@@ -427,7 +427,7 @@ describe("outer-boundary Prewalk", () => {
       model: "anthropic/executor",
       sessionId: "session-1",
       thinking: "xhigh",
-      alwaysRearm: true,
+      arm: "task",
     });
     const pending = claimFabricHandoff(controller, execution(), "session-1", "auto");
     await runFabricHandoffAtBoundary(
@@ -439,7 +439,7 @@ describe("outer-boundary Prewalk", () => {
     expect(controller.status()).toMatchObject({
       state: "continuation_pending",
       thinking: "xhigh",
-      alwaysRearm: true,
+      arm: "task",
     });
     expect(
       controller.acceptContinuation("session-1", pending!.audit.nestedToolCallId),
@@ -448,7 +448,7 @@ describe("outer-boundary Prewalk", () => {
     expect(controller.status()).toMatchObject({
       state: "armed",
       thinking: "xhigh",
-      alwaysRearm: true,
+      arm: "task",
     });
   });
 
@@ -458,7 +458,7 @@ describe("outer-boundary Prewalk", () => {
       model: "anthropic/executor",
       sessionId: "session-1",
       task: "Implement the guard",
-      alwaysRearm: true,
+      arm: "task",
     });
     const pending = claimFabricHandoff(controller, execution(), "session-1", "auto");
     const ctx = context();
@@ -472,7 +472,7 @@ describe("outer-boundary Prewalk", () => {
     expect(controller.status()).toMatchObject({
       state: "continuation_pending",
       model: "anthropic/executor",
-      alwaysRearm: true,
+      arm: "task",
       task: "Implement the guard",
     });
     expect(
@@ -482,7 +482,7 @@ describe("outer-boundary Prewalk", () => {
     expect(controller.status()).toMatchObject({
       state: "armed",
       model: "anthropic/executor",
-      alwaysRearm: true,
+      arm: "task",
     });
     expect(controller.status()).not.toHaveProperty("task");
     expect(ctx.setStatus).toHaveBeenLastCalledWith(
@@ -763,13 +763,13 @@ describe("hasPrewalkArmedPrompt", () => {
 });
 
 describe("withTrajectoryRearmDirective", () => {
-  const trajectoryPending = (alwaysRearm: boolean) => {
+  const trajectoryPending = (arm: "off" | "task") => {
     const controller = new PrewalkController();
     controller.arm({
       model: "anthropic/executor",
       sessionId: "session-1",
       task: "Implement",
-      alwaysRearm,
+      arm
     });
     const pending = claimFabricHandoff(controller, execution(), "session-1", "auto")!;
     return { controller, pending };
@@ -785,23 +785,23 @@ describe("withTrajectoryRearmDirective", () => {
   });
 
   it("omits the directive when the handoff failed", () => {
-    const { controller, pending } = trajectoryPending(true);
+    const { controller, pending } = trajectoryPending("task");
     controller.completeHandoff();
     expect(withTrajectoryRearmDirective("OUTPUT", pending, { completed: false }, controller, "session-1")).toBe("OUTPUT");
   });
 
   it("omits the directive when the arm was one-shot", () => {
-    const { controller, pending } = trajectoryPending(false);
+    const { controller, pending } = trajectoryPending("off");
     controller.completeHandoff();
     expect(controller.status()).toMatchObject({
       state: "continuation_pending",
-      alwaysRearm: false,
+      arm: "off",
     });
     expect(withTrajectoryRearmDirective("OUTPUT", pending, { completed: true }, controller, "session-1")).toBe("OUTPUT");
   });
 
   it("omits the directive when the arm belongs to another session", () => {
-    const { controller, pending } = trajectoryPending(true);
+    const { controller, pending } = trajectoryPending("task");
     controller.completeHandoff();
     expect(withTrajectoryRearmDirective("OUTPUT", pending, { completed: true }, controller, "session-2")).toBe("OUTPUT");
   });

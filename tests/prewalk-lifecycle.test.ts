@@ -11,7 +11,7 @@ const arm = (overrides: Partial<FabricPrewalkArm> = {}): FabricPrewalkArm => ({
   model: "anthropic/executor",
   sessionId: "session-1",
   armedAt: 10,
-  alwaysRearm: false,
+  arm: "off",
   task: "Implement the guard",
   ...overrides,
 });
@@ -149,7 +149,7 @@ describe("reducePrewalkLifecycle", () => {
   });
 
   it("re-arms a continuous controller only after continuation settlement", () => {
-    const pending = reducePrewalkLifecycle(handingOff({ alwaysRearm: true }), {
+    const pending = reducePrewalkLifecycle(handingOff({ arm: "task" }), {
       kind: "handoff_succeeded",
       at: 20,
       handoffId: "handoff-1",
@@ -170,7 +170,7 @@ describe("reducePrewalkLifecycle", () => {
       model: "anthropic/executor",
       sessionId: "session-1",
       armedAt: 30,
-      alwaysRearm: true,
+      arm: "task",
       attempt: 0,
     });
   });
@@ -352,14 +352,14 @@ describe("reducePrewalkLifecycle", () => {
   });
 
   it("clears the settled task so a re-arming prewalk rebinds the next one", () => {
-    const next = reducePrewalkLifecycle(armed({ alwaysRearm: true }), {
+    const next = reducePrewalkLifecycle(armed({ arm: "task" }), {
       kind: "task_settled",
       sessionId: "session-1",
       at: 20,
     });
     expect(next).toMatchObject({
       state: "armed",
-      alwaysRearm: true,
+      arm: "task",
       armedAt: 20,
       attempt: 0,
     });
@@ -367,13 +367,13 @@ describe("reducePrewalkLifecycle", () => {
   });
 
   it("adopts the current configuration when always-rearm re-arms", () => {
-    const next = reducePrewalkLifecycle(armed({ alwaysRearm: true }), {
+    const next = reducePrewalkLifecycle(armed({ arm: "task" }), {
       kind: "task_settled",
       sessionId: "session-1",
       at: 20,
       rearm: {
         model: "makora/executor",
-        alwaysRearm: true,
+        arm: "task",
         thinking: "max",
       },
     });
@@ -387,20 +387,20 @@ describe("reducePrewalkLifecycle", () => {
   });
 
   it("keeps an unfired arm when the current configuration turns always-rearm off", () => {
-    const pending = armed({ alwaysRearm: true });
+    const pending = armed({ arm: "task" });
     expect(
       reducePrewalkLifecycle(pending, {
         kind: "task_settled",
         sessionId: "session-1",
         at: 20,
-        rearm: { alwaysRearm: false },
+        rearm: { arm: "off" },
       }),
     ).toBe(pending);
   });
 
   it("idles a settled continuation when the current configuration turns always-rearm off", () => {
     const continuing = {
-      ...armed({ alwaysRearm: true }),
+      ...armed({ arm: "task" }),
       state: "continuing" as const,
       handoffId: "handoff-1",
     } as FabricPrewalkStatus;
@@ -409,7 +409,7 @@ describe("reducePrewalkLifecycle", () => {
         kind: "continuation_settled",
         sessionId: "session-1",
         at: 20,
-        rearm: { alwaysRearm: false },
+        rearm: { arm: "off" },
       }),
     ).toEqual({ state: "idle" });
   });
