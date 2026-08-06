@@ -56,3 +56,14 @@ describe("route", () => {
     expect(r.literals.length).toBe(0);
   });
 });
+describe("route phrase fallback", () => {
+  it("retries the symbol index when a phrase matches no literal", () => {
+    // classify() treats multi-word text as literal; the literal index is
+    // exact-substring, so a phrase naming a real symbol matches nothing there.
+    // The fallback must tokenize and resolve the symbol, marking provenance.
+    const r = route("the buildAllEdges function", indexes);
+    expect(r.category).toBe("literal");
+    expect(r.source).toBe("symbol-index");
+    expect(r.symbols.some((s) => s.name === "buildAllEdges")).toBe(true);
+  });
+});

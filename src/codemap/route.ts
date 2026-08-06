@@ -2,6 +2,7 @@ import type { SymbolIndex, SymbolNode } from "./symbols.js";
 import { searchSymbols } from "./search.js";
 import type { LiteralEntry } from "./literals.js";
 import { searchLiterals } from "./literals.js";
+import { extractQueryIdentifiers } from "./eval.js";
 
 // Query router: classify an incoming search string into symbol, declaration,
 // call, literal, or regex and dispatch to the matching index, merging results
@@ -61,7 +62,28 @@ export interface RouteIndexes {
 export const route = (query: string, indexes: RouteIndexes): RoutedResult => {
   const category = classify(query);
   if (category === "literal") {
-    return { category, source: "literal-index", symbols: [], literals: searchLiterals(indexes.literals, query) };
+    const literals = searchLiterals(indexes.literals, query);
+    // Phrase fallback: the literal index is exact-substring, so a multi-word
+    // query that names symbols (e.g. "the buildAllEdges function") matches
+    // nothing there. Tokenize and retry the symbol index so the phrase still
+    // resolves, marking the provenance so callers can tell it came from a
+    // fallback (source: "symbol-index"). If the retry finds nothing, the
+    // literal result is returned unchanged.
+    if (literals.length === 0) {
+      const symbols: SymbolNode[] = [];
+      const seen = new Set<string>();
+      for (const id of extractQueryIdentifiers(query)) {
+        for (const n of searchSymbols(indexes.index, "^" + id + "$", { limit: 10 })) {
+          const key = n.name + ":" + n.file;
+          if (!seen.has(key)) {
+            seen.add(key);
+            symbols.push(n);
+          }
+        }
+      }
+      if (symbols.length > 0) return { category: "literal", source: "symbol-index", symbols, literals: [] };
+    }
+    return { category, source: "literal-index", symbols: [], literals };
   }
   const s = query.trim();
   let symbols: SymbolNode[] = [];
