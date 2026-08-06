@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { describe, it, expect } from "vitest";
 import { codemapOperation } from "../src/codemap/tool.js";
 
@@ -11,7 +12,10 @@ const REPOS = [
 
 describe("codemap focus/dwell across codebases", () => {
   for (const { root, query, label } of REPOS) {
-    it(`${label}: focus → dwell cycle`, { timeout: 120_000 }, () => {
+    // Cross-repo bench fixtures (sources/, /tmp/codemap-bench) are cloned
+    // on demand and absent from CI; skip rather than fail when missing.
+    const available = root === process.cwd() || fs.existsSync(root);
+    it.skipIf(!available)(`${label}: focus → dwell cycle`, { timeout: 120_000 }, () => {
       const focus = codemapOperation("focus", { query, maxTokens: 2000 }, root);
       expect(focus.operation).toBe("focus");
 
