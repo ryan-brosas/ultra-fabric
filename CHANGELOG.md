@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.31.1-ultra.5 - 2026-08-06
+
+- **Import-scoped call edges.** Resolve codemap callees through the caller's import graph
+  (new `src/codemap/scope.ts`): a call links only to definitions in the caller's file or
+  its imports, with global-definer fallback where imports don't resolve. Cross-file false
+  invokes edges drop from 2457 (37.9%) to 0; the cascade dependency channel regains ranking
+  signal (TRAIN-selected historyWeight 1.0 -> 0.75).
+
 ## 0.31.1-ultra.4 - 2026-08-05
 
 - **Codemap AST provider.** Expose the code map as a Fabric provider with four operations
