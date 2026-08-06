@@ -18,7 +18,7 @@ This file records repository and runtime evidence observed during initialization
 
 - Required runtime: Node.js `>=24`; observed local Node.js `v26.5.0` during initialization.
 - Package manager: `pnpm@11.18.0`; observed local pnpm `11.18.0`.
-- Package version: `0.31.1-ultra.1`.
+- Package version: `0.31.1-ultra.9`.
 - Module format: ESM with strict TypeScript and `moduleResolution: "NodeNext"`.
 - Enabled compiler checks include `noUnusedLocals`, `noUncheckedIndexedAccess`, and `exactOptionalPropertyTypes`.
 - Shell observed for this checkout: `/usr/bin/bash`.
