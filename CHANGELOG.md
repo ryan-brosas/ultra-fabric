@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.31.1-ultra.6 - 2026-08-06
+
+- **AST-first agent guidance.** Route symbol, declaration, call, and dependency queries to the
+  codemap provider before grep in the fabric-exec skill; grep stays for string literals,
+  comments, and configuration.
+- **Wider graph roots.** The source scan indexes tests/ and scripts/ alongside src/ (skipping
+  node_modules, dist, .pi, sources, bench), so symbols defined outside src resolve from the AST
+  index instead of forcing a grep fallback.
+- **Source operation.** New `codemap.source` returns the AST range text of a `name:file` symbol
+  key, budget-capped, on both the tool and fabric-provider surfaces.
+- **Phrase fallback.** Multi-word queries that match no literal now tokenize and retry the symbol
+  index, with provenance marking the fallback result.
+
 ## 0.31.1-ultra.5 - 2026-08-06
 
 - **Import-scoped call edges.** Resolve codemap callees through the caller's import graph
