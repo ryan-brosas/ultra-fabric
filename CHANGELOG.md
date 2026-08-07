@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.31.1-ultra.15 - 2026-08-07
+
+- codemap: search now serves the grep-replacement query classes from AST-typed indexes — regex content patterns against the literal index, YAML/JSON config keys as typed literals, declaration queries with an unfiltered fallback for const-arrows and type aliases, and exact-name ties preferring the exported definition.
+- codemap: new refs operation lists every real call site with file:line and enclosing caller for a name:file symbol key, riding the bundle's cached ast-grep scan.
+- codemap: full-tree scans survive Windows argv limits — file lists are chunked into bounded batches in outline, literal, and call extraction, and /fabric init identity probes are bounded so a hanging gh api retry cannot stall the command.
+- prewalk: the progress widget strikes through done checklist items (strikethrough + dim) with plain [ ] lines for pending items.
+- docs: code-map-research.md section 14 records the codemap-first buff and measured served-fraction lift.
+
 ## 0.31.1-ultra.14 - 2026-08-07
 
 - compaction: retire oversized old successful retirable-tool results (fabric_exec, codemap, read, grep, find, ls) above a configured ceiling with typed markers, so a single huge unique result cannot inflate context until compaction; recent turns, errors, mutations, evidence, and non-text content stay exact.
