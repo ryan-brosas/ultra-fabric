@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.31.1-ultra.19 - 2026-08-08
+
+- codemap: call-site and literal extraction now cache ast-grep scans per file by mtime and re-scan only files whose mtime drifted; source-root discovery skips roots that do not exist.
+- agents: one-shot and persistent-agent startup failures carrying the gateway chat_admission_busy code are retried inside the bounded attempt budget, waiting out the documented Retry-After window instead of a fixed exponential ramp.
+- prewalk: executor selection tries the primary route then the configured fallbackModels in order, reporting per-route unavailable and authentication reasons and a typed terminal error when every route fails.
+- init: /fabric init no longer scaffolds files itself. It queues a visible repository workflow message that inspects the repository, proposes only grounded context changes, preserves existing files, and reports created, updated, skipped, and validated artifacts; trailing prose after init is rejected.
+- prewalk: the unused public clearWriteScope escape hatch is removed; scope release stays owned by settleTask.
 ## 0.31.1-ultra.18 - 2026-08-08
 
 - prewalk: the progress widget tears itself down the moment every checklist item is done instead of retaining fully struck-through rows on the dashboard; the message handler now routes the live checklist through a pure checklistWidgetView that returns null once the list is complete (or empty).
