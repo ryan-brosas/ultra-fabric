@@ -1,10 +1,12 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import { Type } from "typebox";
 import { buildCodeGraph, buildRenderNodes, type CodeGraph } from "./build.js";
 import { pageRank } from "./rank.js";
 import { buildLiteralIndex } from "./literals.js";
 import { route } from "./route.js";
-import { findConfigFiles } from "./lang.js";
+import { findConfigFiles, findSourceFiles } from "./lang.js";
 import { expand, buildDisclosureGraph, minimalSkeleton, type Direction } from "./disclose.js";
 import { predictFileCascade, predictSymbolCascade } from "./cascade.js";
 import { readSymbolSource } from "./source.js";
@@ -96,11 +98,34 @@ export interface CodeGraphBundle {
   callSites: ReturnType<typeof extractCallSites>;
 }
 
-const graphCache = new Map<string, CodeGraphBundle>();
+interface CachedBundle {
+  bundle: CodeGraphBundle;
+  fingerprint: string;
+}
+
+const graphCache = new Map<string, CachedBundle>();
+
+// Cheap staleness fingerprint: relative path + mtime for every first-party
+// source and config file. getCodeGraph compares it on every call and rebuilds
+// the bundle only when the tree drifts, so symbols and literals added mid-turn
+// (or by another process) surface on the next query instead of staying frozen
+// at first-build time.
+const fingerprintOf = (root: string): string => {
+  const files = [...findSourceFiles(root), ...findConfigFiles(root)];
+  const parts = files.map((f) => {
+    try {
+      return f + ":" + statSync(resolve(root, f)).mtimeMs;
+    } catch {
+      return f + ":missing";
+    }
+  });
+  return parts.join("|");
+};
 
 export const getCodeGraph = (root: string): CodeGraphBundle => {
+  const fingerprint = fingerprintOf(root);
   const cached = graphCache.get(root);
-  if (cached) return cached;
+  if (cached && cached.fingerprint === fingerprint) return cached.bundle;
   const graph = buildCodeGraph({ root });
   const configFiles = findConfigFiles(root);
   const literals = buildLiteralIndex([...graph.files, ...configFiles], graph.index, { cwd: root });
@@ -110,7 +135,7 @@ export const getCodeGraph = (root: string): CodeGraphBundle => {
   // per-turn ast-grep pass.
   const callSites = extractCallSites(graph.index, { cwd: root });
   const bundle: CodeGraphBundle = { graph, disclosure, literals, callSites };
-  graphCache.set(root, bundle);
+  graphCache.set(root, { bundle, fingerprint });
   return bundle;
 };
 

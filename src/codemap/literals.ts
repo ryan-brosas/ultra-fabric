@@ -1,4 +1,6 @@
 import crossSpawn from "cross-spawn";
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import type { SymbolIndex } from "./symbols.js";
 import { enclosingSymbol } from "./symbols.js";
 import { groupFilesByLang } from "./lang.js";
@@ -38,6 +40,7 @@ const runAstGrep = (
   args: readonly string[],
   cwd: string,
 ): AstGrepMatch[] => {
+  literalIndexStats.batches++;
   try {
     const res = crossSpawn.sync(binary, args as string[], {
       cwd,
@@ -63,13 +66,25 @@ const enclosing = (index: SymbolIndex | undefined, file: string, line1: number):
   return node?.name;
 };
 
-export const buildLiteralIndex = (
+// Per-file mtime cache for literal entries, mirroring cache.ts: a freshness
+// rebuild re-scans only files whose mtime drifted, and every unchanged file is
+// served from the typed AST index built earlier.
+interface LiteralFileCache {
+  mtime: number;
+  entries: LiteralEntry[];
+}
+
+const literalFileCache = new Map<string, LiteralFileCache>();
+
+// Observable ast-grep batch counter so tests can prove cache hits skip scans.
+export const literalIndexStats = { batches: 0 };
+
+const scanLiteralEntries = (
   files: readonly string[],
-  index?: SymbolIndex,
-  options: LiteralIndexOptions = {},
+  index: SymbolIndex | undefined,
+  cwd: string,
+  binary: string,
 ): LiteralEntry[] => {
-  const cwd = options.cwd ?? process.cwd();
-  const binary = options.binary ?? "ast-grep";
   const entries: LiteralEntry[] = [];
   const byLang = groupFilesByLang(files);
   for (const [lang, langFiles] of byLang) {
@@ -137,6 +152,55 @@ export const buildLiteralIndex = (
     }
   }
   return entries;
+};
+
+export const buildLiteralIndex = (
+  files: readonly string[],
+  index?: SymbolIndex,
+  options: LiteralIndexOptions = {},
+): LiteralEntry[] => {
+  const cwd = options.cwd ?? process.cwd();
+  const binary = options.binary ?? "ast-grep";
+  const kept: LiteralEntry[] = [];
+  const dirty: string[] = [];
+  for (const f of files) {
+    const abs = resolve(cwd, f);
+    let mtime: number;
+    try {
+      mtime = statSync(abs).mtimeMs;
+    } catch {
+      dirty.push(f);
+      continue;
+    }
+    const entry = literalFileCache.get(abs);
+    if (entry && entry.mtime === mtime) {
+      kept.push(...entry.entries.map((e) => (e.file === f ? e : { ...e, file: f })));
+    } else {
+      dirty.push(f);
+    }
+  }
+  if (dirty.length > 0) {
+    const fresh = scanLiteralEntries(dirty, index, cwd, binary);
+    const byFile = new Map<string, LiteralEntry[]>();
+    for (const e of fresh) {
+      const list = byFile.get(e.file);
+      if (list) list.push(e);
+      else byFile.set(e.file, [e]);
+    }
+    for (const f of dirty) {
+      const abs = resolve(cwd, f);
+      let mtime = 0;
+      try {
+        mtime = statSync(abs).mtimeMs;
+      } catch {
+        // best effort
+      }
+      const fileEntries = byFile.get(f) ?? [];
+      literalFileCache.set(abs, { mtime, entries: fileEntries });
+      kept.push(...fileEntries);
+    }
+  }
+  return kept;
 };
 
 // Search the literal index for entries whose text contains the query (case-sensitive

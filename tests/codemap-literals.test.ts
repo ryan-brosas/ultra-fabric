@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runOutline } from "../src/codemap/outline.js";
 import { buildSymbolIndex } from "../src/codemap/symbols.js";
-import { buildLiteralIndex, searchLiterals } from "../src/codemap/literals.js";
+import { buildLiteralIndex, literalIndexStats, searchLiterals } from "../src/codemap/literals.js";
 import { findConfigFiles } from "../src/codemap/lang.js";
 
 const root = process.cwd();
@@ -67,5 +67,29 @@ describe("buildLiteralIndex", () => {
     // And searching literals for the declaration name yields no string-kind hit.
     const found = searchLiterals(literals, "extractCallEdges");
     expect(found.filter((e) => e.kind === "string").length).toBe(0);
+  });
+});
+describe("literal index per-file cache", () => {
+  it("skips ast-grep for unchanged files and rescans after mtime drift", () => {
+    const dir = join("/tmp", "codemap-literals-cache-" + Date.now());
+    mkdirSync(dir, { recursive: true });
+    const target = join(dir, "fixture.ts");
+    writeFileSync(target, 'export const a = "alpha-token";\n');
+    const files = ["fixture.ts"];
+    const before = literalIndexStats.batches;
+    const first = buildLiteralIndex(files, undefined, { cwd: dir });
+    expect(first.some((e) => e.text.includes("alpha-token"))).toBe(true);
+    const afterFirst = literalIndexStats.batches;
+    expect(afterFirst).toBeGreaterThan(before);
+    // unchanged files: cache hit, zero ast-grep batches
+    buildLiteralIndex(files, undefined, { cwd: dir });
+    expect(literalIndexStats.batches).toBe(afterFirst);
+    // mtime drift: rescan and the new literal surfaces
+    writeFileSync(target, 'export const a = "alpha-token";\nexport const b = "beta-token";\n');
+    const future = Date.now() / 1000 + 5;
+    utimesSync(target, future, future);
+    const second = buildLiteralIndex(files, undefined, { cwd: dir });
+    expect(second.some((e) => e.text.includes("beta-token"))).toBe(true);
+    expect(literalIndexStats.batches).toBeGreaterThan(afterFirst);
   });
 });

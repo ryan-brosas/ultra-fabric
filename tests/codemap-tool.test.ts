@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createCodemapTool, codemapOperation, getCodeGraph } from "../src/codemap/tool.js";
 import type { CgcRunner } from "../src/codemap/cgc.js";
@@ -94,6 +97,30 @@ describe("codemap tool surface", () => {
     expect(p).toContain("explore");
     expect(p).toContain("cgc");
     expect(p).toContain("ast");
+  });
+
+  it("rebuilds the bundle when a tracked file drifts and surfaces the new literal", { timeout: 60000 }, () => {
+    const root = mkdtempSync(join(tmpdir(), "codemap-drift-"));
+    try {
+      const srcDir = join(root, "src");
+      mkdirSync(srcDir, { recursive: true });
+      const file = join(srcDir, "fixture.ts");
+      writeFileSync(file, 'export const alpha = () => "alpha-token";\n');
+      const first = getCodeGraph(root);
+      expect(codemapOperation("search", { query: "alpha-token", maxTokens: 1000 }, root).text).toContain("fixture.ts");
+
+      // Same file gains a symbol and a literal; bump mtime beyond the cached
+      // fingerprint so drift is detectable even on coarse mtime clocks.
+      writeFileSync(file, 'export const alpha = () => "alpha-token";\nexport const beta = () => "beta-token";\n');
+      const future = Date.now() / 1000 + 5;
+      utimesSync(file, future, future);
+
+      const second = getCodeGraph(root);
+      expect(second).not.toBe(first);
+      expect(codemapOperation("search", { query: "beta-token", maxTokens: 1000 }, root).text).toContain("fixture.ts");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

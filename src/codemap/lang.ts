@@ -36,7 +36,7 @@ export const SUPPORTED_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".g
 // graph (outline skips non-AST-able kinds per docs/code-map-research.md).
 export const CONFIG_EXTS = [".yaml", ".yml", ".json"];
 
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 // Discover source files under `src/`, `tests/`, and `scripts/` for any supported
@@ -61,7 +61,10 @@ export const findSourceFiles = (root: string, extensions?: readonly string[]): s
       } else if (exts.some((ext) => entry.name.endsWith(ext))) found.push(childRel);
     }
   };
-  for (const r of SOURCE_ROOTS) walk(r);
+  for (const r of SOURCE_ROOTS) {
+    if (!existsSync(join(root, r))) continue;
+    walk(r);
+  }
   return found.sort();
 };
 

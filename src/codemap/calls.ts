@@ -1,4 +1,6 @@
 import crossSpawn from "cross-spawn";
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import type { SymbolIndex } from "./symbols.js";
 import { enclosingSymbol } from "./symbols.js";
 import { computeEdgeWeight, type RankEdge } from "./rank.js";
@@ -48,24 +50,26 @@ const lastSegment = (callee: string): string => {
   return parts[parts.length - 1] ?? "";
 };
 
-export const extractCallSites = (
-  index: SymbolIndex,
-  options: CallEdgeOptions = {},
-): CallSite[] => {
-  const cwd = options.cwd ?? process.cwd();
-  const binary = options.binary ?? "ast-grep";
-  const maxDefiners = options.maxDefiners ?? 5;
-  const files = [...index.byFile.keys()];
-  if (files.length === 0) return [];
-  const scope = buildImportScope(cwd);
+// Per-file mtime cache for raw call-expression matches, mirroring cache.ts:
+// the resolution pass re-runs over the merged matches on every call (cheap),
+// but the ast-grep subprocess scan only touches files whose mtime drifted.
+interface CallScanCache {
+  mtime: number;
+  matches: AstGrepMatch[];
+}
 
-  // Run ast-grep per language group (no hardcoded --lang ts) so call edges are
-  // extracted across a polyglot tree.
+const callScanCache = new Map<string, CallScanCache>();
+
+// Observable ast-grep batch counter so tests can prove cache hits skip scans.
+export const callSiteStats = { batches: 0 };
+
+const scanCallMatches = (files: readonly string[], cwd: string, binary: string): AstGrepMatch[] => {
   const matches: AstGrepMatch[] = [];
   for (const [lang, langFiles] of groupFilesByLang(files)) {
     // Chunk like the outline path so Windows cmd.exe shims never truncate the
     // argv of large per-language file lists.
     for (const chunk of chunkPaths(langFiles)) {
+      callSiteStats.batches++;
       let stdout: string;
       try {
         const res = crossSpawn.sync(
@@ -85,6 +89,58 @@ export const extractCallSites = (
       } catch {
         // ignore unparseable output for this language group
       }
+    }
+  }
+  return matches;
+};
+
+export const extractCallSites = (
+  index: SymbolIndex,
+  options: CallEdgeOptions = {},
+): CallSite[] => {
+  const cwd = options.cwd ?? process.cwd();
+  const binary = options.binary ?? "ast-grep";
+  const maxDefiners = options.maxDefiners ?? 5;
+  const files = [...index.byFile.keys()];
+  if (files.length === 0) return [];
+  const scope = buildImportScope(cwd);
+
+  // Per-file mtime cache: re-scan only files whose mtime drifted, merge the
+  // cached matches for everything unchanged, then resolve the merged set.
+  const matches: AstGrepMatch[] = [];
+  const dirty: string[] = [];
+  for (const f of files) {
+    const abs = resolve(cwd, f);
+    let mtime: number;
+    try {
+      mtime = statSync(abs).mtimeMs;
+    } catch {
+      dirty.push(f);
+      continue;
+    }
+    const entry = callScanCache.get(abs);
+    if (entry && entry.mtime === mtime) matches.push(...entry.matches);
+    else dirty.push(f);
+  }
+  if (dirty.length > 0) {
+    const fresh = scanCallMatches(dirty, cwd, binary);
+    const byFile = new Map<string, AstGrepMatch[]>();
+    for (const m of fresh) {
+      const list = byFile.get(m.file);
+      if (list) list.push(m);
+      else byFile.set(m.file, [m]);
+    }
+    for (const f of dirty) {
+      const abs = resolve(cwd, f);
+      let mtime = 0;
+      try {
+        mtime = statSync(abs).mtimeMs;
+      } catch {
+        // best effort
+      }
+      const fileMatches = byFile.get(f) ?? [];
+      callScanCache.set(abs, { mtime, matches: fileMatches });
+      matches.push(...fileMatches);
     }
   }
 

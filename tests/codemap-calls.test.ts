@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runOutline } from "../src/codemap/outline.js";
 import { buildSymbolIndex } from "../src/codemap/symbols.js";
-import { extractCallEdges } from "../src/codemap/calls.js";
+import { callSiteStats, extractCallEdges, extractCallSites } from "../src/codemap/calls.js";
 
 const root = process.cwd();
 // cache.ts calls runOutline (defined in outline.ts) via its mtime-cached outline driver;
@@ -50,5 +50,33 @@ describe("extractCallEdges", () => {
     const edges = extractCallEdges(index, { cwd: root });
     const intoPageRank = edges.filter((e) => e.to.startsWith("pageRank:src/codemap/rank.ts"));
     expect(intoPageRank.length).toBeGreaterThan(0);
+  });
+});
+describe("call-site scan cache", () => {
+  it("serves unchanged files from cache and rescans only after mtime drift", () => {
+    const dir = join("/tmp", "codemap-calls-cache-" + Date.now());
+    mkdirSync(dir, { recursive: true });
+    const target = join(dir, "fixture.ts");
+    writeFileSync(target, "export function callee() { return 1; }\nexport function caller() { return callee(); }\n");
+    const outline = runOutline([target], { cwd: dir });
+    const idx = buildSymbolIndex(outline);
+    const before = callSiteStats.batches;
+    const first = extractCallSites(idx, { cwd: dir });
+    expect(first.length).toBeGreaterThan(0);
+    const afterFirst = callSiteStats.batches;
+    expect(afterFirst).toBeGreaterThan(before);
+    // unchanged files: cache hit, zero ast-grep batches
+    extractCallSites(idx, { cwd: dir });
+    expect(callSiteStats.batches).toBe(afterFirst);
+    // mtime drift: rescan, and the new caller's site surfaces
+    writeFileSync(target, "export function callee() { return 1; }\nexport function caller() { return callee(); }\nexport function caller2() { return callee(); }\n");
+    const future = Date.now() / 1000 + 5;
+    utimesSync(target, future, future);
+    // Mirror the bundle rebuild: the index refreshes with the file.
+    const outline2 = runOutline([target], { cwd: dir });
+    const idx2 = buildSymbolIndex(outline2);
+    const second = extractCallSites(idx2, { cwd: dir });
+    expect(second.some((s) => s.caller === "caller2")).toBe(true);
+    expect(callSiteStats.batches).toBeGreaterThan(afterFirst);
   });
 });
