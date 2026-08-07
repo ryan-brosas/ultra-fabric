@@ -1,5 +1,72 @@
 [
   {
+    "task": "yes this is all good but make it default, always",
+    "checklist": {
+      "items": [
+        {
+          "task": "Extend InitAnswers with users/success and render them in project.md's 'Users and success' section (src/init/scaffold.ts)",
+          "validation": "fabric-init.test.ts answers test asserts 'Primary users: End users' and 'Success priority: Stability' — observe RED, then GREEN"
+        },
+        {
+          "task": "Greenfield intake asks primary users and success priority via context.ui.select when available, after the existing name/purpose inputs (src/commands/fabric.ts askGreenfield)",
+          "validation": "fabric-command.test.ts greenfield test with a select mock sees both selects called and answers threaded into AGENTS.md/project.md; contexts without select still scaffold (existing tests stay green)"
+        },
+        {
+          "task": "Preview-confirm gate: show the plan summary, then ui.select 'Write all / Cancel' before any write; Cancel aborts with nothing written",
+          "validation": "new test asserts no files exist after Cancel; non-interactive contexts (no select) write as before"
+        },
+        {
+          "task": "tech-stack.md regeneration: when the file exists and ui.confirm accepts, drop it from existingPaths so planInit recreates it from fresh detection; decline or non-interactive leaves it untouched",
+          "validation": "two tests: confirm=true overwrites with detected content, confirm=false leaves original bytes"
+        },
+        {
+          "task": "Append next-step guidance to the init notify output (prewalk / describe what to build)",
+          "validation": "test asserts notify message contains '/fabric prewalk'"
+        },
+        {
+          "task": "Default deep pass: runInit gains the state dep; on brownfield (languages detected) with scoutBridge(state.agents) available, run one explorer (maxTokens 65_536, timeoutMs 180_000) and replace the architecture placeholders in files created this run (AGENTS.md, project.md); absent agents surface notes 'deep analysis skipped' in output",
+          "validation": "test with a fake spawn/wait surface sees the placeholder replaced by the brief and the run reported; test without agents sees skip note; created-this-run guard keeps pre-existing files untouched"
+        },
+        {
+          "task": "Run the repository gate stage by stage",
+          "validation": "tsc --noEmit, fresh build, full vitest suite, knip, package smoke all exit 0; git diff --check clean"
+        }
+      ],
+      "readyAt": 1786134224535,
+      "doneIndexes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "recordedAt": 1786135216700
+  },
+  {
+    "task": "commit, push, and publish",
+    "checklist": {
+      "items": [
+        {
+          "task": "Split the remaining working-tree changes into clean commits: feat(prewalk) research enrichment (handoff.ts enrichment hunk, arXiv test hunks, .pi/fabric.json), fix(prewalk) DONE-marker strikethrough (continuation.ts, index.ts, remaining handoff/test hunks, progress tests), chore for the checklist state file",
+          "validation": "git log --oneline shows the split commits; git status clean of src/tests changes; each commit's diff contains only its concern"
+        },
+        {
+          "task": "Release per .pi/skills/release/SKILL.md: bump package.json to 0.31.1-ultra.16, add CHANGELOG.md section, update README.md install pins, commit chore(release), annotated tag v0.31.1-ultra.16",
+          "validation": "git show --stat HEAD lists exactly package.json CHANGELOG.md README.md; git tag -l points at the release commit"
+        },
+        {
+          "task": "Push main and the release tag by explicit ref (never --follow-tags), then verify the npm publish workflow result",
+          "validation": "git push origin main and git push origin refs/tags/v0.31.1-ultra.16 succeed; registry dist-tags show next -> 0.31.1-ultra.16 once CI publishes"
+        }
+      ],
+      "readyAt": 1786131056040,
+      "easy": true
+    },
+    "recordedAt": 1786131560645
+  },
+  {
     "task": "I still see clutter on on our pi... also prewalk checklist isn't crossing out done task.... I thought we fuycking implemented that",
     "checklist": {
       "items": [
@@ -431,64 +498,5 @@
       "easy": true
     },
     "recordedAt": 1786097434238
-  },
-  {
-    "task": "can we improve codemode or well the original fabric center gravity of tool, also I don't see any agent utilization, nothing is being spawn.... again motherfucker look on cgc graph for better view of the situation, look for inspo as well, look on arxiv then get a code from a github repo, clone it put it on inspo and embed it... also remove cgc ignore since it's blocking the whole stuff so... remove cgcingore on all possible folder we put",
-    "checklist": {
-      "items": [
-        {
-          "task": "Recon the zero-utilization path: read src/consult/policy.ts (admission shape :20), src/consult/reducer.ts:99, src/agents/one-shot-manager.ts (admission field :122, spawn :484), src/agents/manager.ts:28, and consult config defaults at src/config.ts:296; enumerate every gate that blocks a spawn.",
-          "validation": "A written list of each gate with file:line and its default value, explicitly naming which default(s) produce 'zero workers admitted' and where autoScout opt-in is enforced."
-        },
-        {
-          "task": "Remove .cgcignore from the checkout (delete the file entirely per operator order), then trigger a forced full reindex of the ultra-fabric graph so sources/ and bench/ are covered.",
-          "validation": "codemap search on the project graph returns symbols from sources/ and bench/; index completes without error. Record the new file count so regression is visible."
-        },
-        {
-          "task": "Research on arXiv: pull CodeAct (arXiv:2402.01030, 'Executable Code Actions Elicit Better LLM Agents') plus one adjacent code-as-action/tool-orchestration paper; extract 2-3 concrete mechanisms that strengthen fabric_exec as the tool center of gravity (e.g., code-action loop, self-debug retry, environment feedback compaction).",
-          "validation": "Findings note mapping each mechanism to a specific Ultra Fabric module (fabric_exec surface, consult admission, agent manager) with a one-line adoption verdict per mechanism."
-        },
-        {
-          "task": "Clone the CodeAct reference repo (xingyaoww/code-act) into the operator inspo library outside this checkout, then index/embed it into the cgc 'inspo' graph.",
-          "validation": "codemap mode=cgc search for its agent-loop symbols returns hits from the cloned repo path; clone lives outside the ultra-fabric checkout."
-        },
-        {
-          "task": "Design the utilization fix informed by recon + inspo: adjust consult admission defaults/heuristics so a justified scout/explorer delegation is actually admitted (raise default admitted-worker cap from zero to a bounded value, or admit when justification+independence are present), keeping fan-out bounded by budgets and autoScout still opt-in. Write RED tests first in tests/consult-reducer.test.ts and tests/consult-worker.test.ts.",
-          "validation": "New tests observed failing (RED) that assert: justified consult.run admits >=1 worker under default config, unbounded fan-out still rejected, autoScout never spawns on prompt send."
-        },
-        {
-          "task": "Implement the minimum GREEN change in src/consult/policy.ts / src/consult/reducer.ts (and src/config.ts default if needed), keeping policy pure and effects in the agent manager adapters; add a utilization counter to outcomes/telemetry so future 'nothing spawns' claims are checkable from src/outcomes/store.ts.",
-          "validation": "RED tests now pass; discriminated failure states (not_admitted vs budget-exhausted vs rejected) remain distinct; no changes leak Ultra policy into upstream-shaped files."
-        },
-        {
-          "task": "Run the repository gate as separate stages (typecheck, build, tests, knip, package smoke), then git diff --check and git status --short --branch.",
-          "validation": "All five stages green, no whitespace errors, working tree contains only the intended changes (.cgcignore deletion, consult admission slice, tests)."
-        }
-      ],
-      "readyAt": 1786093536440
-    },
-    "recordedAt": 1786094991180
-  },
-  {
-    "task": "commit, push, and publish",
-    "checklist": {
-      "items": [
-        {
-          "task": "Commit the dirty tree in three logical slices: feat(compaction) global threshold, feat(prewalk) checklist progress, fix(compaction)+chore(deps) Pi 0.84.1 compat; runtime checklist ledger rides with the release commit or its own chore.",
-          "validation": "git log shows three clean conventional commits; git status clean except release files."
-        },
-        {
-          "task": "Mark 0.31.1-ultra.12 per the release skill: bump package.json, CHANGELOG section, both README pins; commit exactly those three files as chore(release): mark 0.31.1-ultra.12.",
-          "validation": "git show --stat HEAD lists only package.json, CHANGELOG.md, README.md."
-        },
-        {
-          "task": "Tag v0.31.1-ultra.12 annotated, push main then the tag by explicit ref; verify the Publish npm prerelease workflow succeeds and the registry next dist-tag moves.",
-          "validation": "gh run conclusion success; registry dist-tags show next = 0.31.1-ultra.12 with trustedPublisher github."
-        }
-      ],
-      "readyAt": 1786092144674,
-      "easy": true
-    },
-    "recordedAt": 1786092911804
   }
 ]
