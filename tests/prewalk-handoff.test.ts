@@ -8,6 +8,7 @@ import type { FabricExecutionResult } from "../src/execution-service.js";
 import { PrewalkController } from "../src/prewalk/controller.js";
 import {
   PREWALK_ARMED_MESSAGE_TYPE,
+  checklistContinuationPrompt,
   claimFabricHandoff,
   hasPrewalkArmedPrompt,
   prewalkArmedMessageType,
@@ -644,6 +645,17 @@ describe("prewalkArmedPrompt", () => {
     expect(text).toContain("validation");
     expect(text).toContain("stop. Do not make any mutation");
     expect(text).toContain("executor model");
+  });
+
+  it("instructs full-pass research budget spend and arxiv + sources clone enrichment", () => {
+    const text = prewalkArmedPrompt("anthropic/executor");
+    expect(text).toContain("Spend the research budget in full passes");
+    expect(text).toContain("Do not drip small queries");
+    expect(text).toContain("arXiv");
+    expect(text).toContain("sources/");
+    const continuation = checklistContinuationPrompt({ items: [], readyAt: 1 });
+    expect(continuation).not.toContain("arXiv");
+    expect(continuation).not.toContain("drip");
   });
 
 });

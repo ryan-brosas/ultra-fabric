@@ -6,7 +6,7 @@
     "handoffRetirement": true,
     "reuseChecklists": true,
     "verificationMode": "gated",
-    "maxPhaseRevisions": 5,
+    "maxPhaseRevisions": 7,
     "model": "omniroute/opencode-go/deepseek-v4-flash",
     "arm": "session",
     "triggerRefs": [
