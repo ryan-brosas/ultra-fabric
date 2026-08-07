@@ -54,6 +54,66 @@ const registerWithRunner = (runner: ExtensionRunner) => {
   return registry;
 };
 
+describe("PiToolsProvider truncation guard", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fabric-trunc-"));
+  const bigPath = path.join(tmp, "big.txt");
+  fs.writeFileSync(
+    bigPath,
+    Array.from({ length: 4000 }, (_, i) => `line ${i} payload 0123456789`).join("\n"),
+  );
+
+  it("rejects pi.write after a truncated pi.read of the same path in the same run", async () => {
+    const registry = registerWithRunner(makeRunner());
+    const readResult = await registry.invoke("pi.read", { path: bigPath }, baseContext);
+    expect(String(readResult)).toContain("Showing lines");
+
+    // Today this overwrite succeeds and destroys the file tail; the guard
+    // must reject it with the steer-to-pi.edit guidance.
+    await expect(
+      registry.invoke(
+        "pi.write",
+        { path: bigPath, content: "partial rewrite\n" },
+        baseContext,
+      ),
+    ).rejects.toThrow(/truncated view/i);
+  });
+
+  it("rejects pi.write whose content itself carries the truncation marker line", async () => {
+    const registry = registerWithRunner(makeRunner());
+    const content =
+      "line one\n[Showing lines 1-2 of 3 (50.0KB limit). Use offset=2 to continue.]\n";
+    await expect(
+      registry.invoke("pi.write", { path: path.join(tmp, "new.txt"), content }, baseContext),
+    ).rejects.toThrow(/truncated view/i);
+  });
+
+  it("keeps pi.edit surgical on a truncated path and allows a normal read-then-write", async () => {
+    const registry = registerWithRunner(makeRunner());
+    await registry.invoke("pi.read", { path: bigPath }, baseContext);
+    const edit = await registry.invoke(
+      "pi.edit",
+      { path: bigPath, oldText: "line 0 payload", newText: "line 0 edited" },
+      baseContext,
+    );
+    expect(edit).toBeTruthy();
+
+    const smallPath = path.join(tmp, "small.txt");
+    fs.writeFileSync(smallPath, "hello\n");
+    const read = await registry.invoke("pi.read", { path: smallPath }, baseContext);
+    expect(String(read)).toBe("hello\n");
+    await registry.invoke("pi.write", { path: smallPath, content: "world\n" }, baseContext);
+    expect(fs.readFileSync(smallPath, "utf8")).toBe("world\n");
+  });
+
+  it("scopes the truncated-read guard per run", async () => {
+    const registry = registerWithRunner(makeRunner());
+    await registry.invoke("pi.read", { path: bigPath }, baseContext);
+    const otherRun = { ...baseContext, parentToolCallId: "other-run" };
+    await registry.invoke("pi.write", { path: bigPath, content: "fresh\n" }, otherRun);
+    expect(fs.readFileSync(bigPath, "utf8")).toBe("fresh\n");
+  });
+});
+
 describe("PiToolsProvider lifecycle", () => {
   it("fires the full tool-execution lifecycle for a pi core tool", async () => {
     const events: string[] = [];

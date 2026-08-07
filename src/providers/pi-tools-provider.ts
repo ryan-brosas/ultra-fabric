@@ -92,6 +92,19 @@ const expandReplaceAllEdit = (
 const readTools = new Set<PiCoreToolName>(["read", "grep", "find", "ls"]);
 const writeTools = new Set<PiCoreToolName>(["edit", "write"]);
 
+// pi-core read results truncate at 50KB with a trailing render marker line.
+// Writing that marker back to the file destroys the tail (the classic
+// read-modify-write corruption), so fabric_exec rejects the overwrite and
+// steers the model to pi.edit or paged offset reads.
+const READ_TRUNCATION_MARKER =
+  /^\[(?:Showing lines \d+-\d+ of \d+(?: \([^)]+\))?|\d+ more lines in file)\. Use offset=\d+ to continue\.\]$/;
+
+const TRUNCATED_READ_WRITE_GUIDANCE =
+  "pi.read returned a truncated view of this file (core 50KB display limit); pi.write would destroy the file tail. Use pi.edit for surgical changes, or page the full file with pi.read offset reads before writing complete content.";
+
+const isTruncatedReadResult = (text: string): boolean =>
+  text.split("\n").some((line) => READ_TRUNCATION_MARKER.test(line.trim()));
+
 // The content array every pi core tool returns: text and/or image blocks.
 type ToolContent = AgentToolResult<unknown>["content"];
 
@@ -173,6 +186,10 @@ export class PiToolsProvider implements FabricProvider {
   readonly description = "Pi's built-in coding tools";
   readonly #tools: Record<PiCoreToolName, ToolDefinition<any, any, any>>;
   readonly #catalog: CapturedToolCatalog | undefined;
+  // Resolved paths whose pi.read results were truncated by the core 50KB
+  // display limit, keyed per run. A later pi.write to the same path would
+  // overwrite the file with the truncated view, so it is rejected.
+  readonly #truncatedReads = new Map<string, Set<string>>();
   readonly #capturedTools: CapturedToolsProvider | undefined;
   readonly #cwd: string;
   #pathLeases: PathLeaseStore | undefined;
@@ -264,6 +281,40 @@ export class PiToolsProvider implements FabricProvider {
       : record;
   }
 
+  #runKey(context: FabricInvocationContext): string {
+    return String(context.run?.runId ?? context.parentToolCallId ?? "global");
+  }
+
+  #recordTruncatedRead(
+    args: Record<string, unknown>,
+    context: FabricInvocationContext,
+  ): void {
+    if (typeof args.path !== "string") return;
+    const resolved = path.resolve(context.cwd, args.path);
+    const key = this.#runKey(context);
+    let paths = this.#truncatedReads.get(key);
+    if (!paths) {
+      paths = new Set();
+      this.#truncatedReads.set(key, paths);
+    }
+    paths.add(resolved);
+  }
+
+  #assertWriteNotTruncated(
+    args: Record<string, unknown>,
+    context: FabricInvocationContext,
+  ): void {
+    const target = args.path;
+    if (typeof target !== "string") return;
+    const resolved = path.resolve(context.cwd, target);
+    if (this.#truncatedReads.get(this.#runKey(context))?.has(resolved)) {
+      throw new Error(TRUNCATED_READ_WRITE_GUIDANCE);
+    }
+    if (typeof args.content === "string" && isTruncatedReadResult(args.content)) {
+      throw new Error(TRUNCATED_READ_WRITE_GUIDANCE);
+    }
+  }
+
   async invoke(
     actionName: string,
     args: Record<string, unknown>,
@@ -280,6 +331,7 @@ export class PiToolsProvider implements FabricProvider {
         target,
       );
     }
+    if (name === "write") this.#assertWriteNotTruncated(args, context);
     // A captured extension override (e.g. an extension that registered a "read"
     // tool) already replays the full event lifecycle itself via
     // CapturedToolsProvider, so delegate to it unchanged.
@@ -288,7 +340,7 @@ export class PiToolsProvider implements FabricProvider {
       this.#attachReadMedia(name, result, context);
       this.#attachReadNote(name, result, context);
       this.#attachPreview(name, result, args, context);
-      return this.#normalizeResult(name, result, args);
+      return this.#normalizeResult(name, result, args, context);
     }
     const tool = this.#tools[name];
     const runner = this.#catalog?.runner;
@@ -308,7 +360,7 @@ export class PiToolsProvider implements FabricProvider {
       this.#attachReadMedia(name, result, context);
       this.#attachReadNote(name, result, context);
       this.#attachPreview(name, result, args, context);
-      return this.#normalizeResult(name, result, args);
+      return this.#normalizeResult(name, result, args, context);
     }
     return this.#invokeWithEvents(name, tool, args, context, runner);
   }
@@ -425,7 +477,7 @@ export class PiToolsProvider implements FabricProvider {
       throw new Error(text || (thrown instanceof Error ? thrown.message : `Pi tool ${name} failed`));
     }
     this.#attachPreview(name, result, args, context);
-    return this.#normalizeResult(name, result, args);
+    return this.#normalizeResult(name, result, args, context);
   }
 
   // Schema-enforce and early-startup calls may have no ExtensionRunner, so the
@@ -435,10 +487,13 @@ export class PiToolsProvider implements FabricProvider {
     name: PiCoreToolName,
     result: { content: ToolContent; details?: unknown; isError?: boolean },
     args: Record<string, unknown>,
+    context: FabricInvocationContext,
   ): unknown {
     const normalized = normalizeResult(name, result);
     if (name !== "read" || typeof normalized !== "string") return normalized;
-    return expandSkillDirMarkersForRead(normalized, args, this.#cwd);
+    const expanded = expandSkillDirMarkersForRead(normalized, args, this.#cwd);
+    if (isTruncatedReadResult(expanded)) this.#recordTruncatedRead(args, context);
+    return expanded;
   }
 
   #attachPartialPreview(

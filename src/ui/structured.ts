@@ -31,6 +31,42 @@ interface HoistedSection {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+// Pathological output guard: a returned array of ten thousand short scalars
+// (e.g. Object.keys on a big host object) used to render every item, blowing
+// the model-visible budget. Elide oversized homogeneous scalar arrays down to
+// head/tail samples plus one elision line; structured arrays are untouched.
+const ELIDE_ARRAY_THRESHOLD = 100;
+const ELIDE_SAMPLE_COUNT = 5;
+const ELIDE_SCALAR_MAX_CHARS = 80;
+
+const isElidableScalar = (item: unknown): boolean =>
+  item === null ||
+  typeof item === "boolean" ||
+  typeof item === "number" ||
+  (typeof item === "string" && item.length <= ELIDE_SCALAR_MAX_CHARS);
+
+const scalarArrayElision = (value: unknown[]): unknown[] | undefined => {
+  if (value.length <= ELIDE_ARRAY_THRESHOLD) return undefined;
+  if (!value.every(isElidableScalar)) return undefined;
+  const head = value.slice(0, ELIDE_SAMPLE_COUNT);
+  const tail = value.slice(-ELIDE_SAMPLE_COUNT);
+  const elided = value.length - head.length - tail.length;
+  return [...head, `<${elided} scalar items elided>`, ...tail];
+};
+
+const elideScalarArrays = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    const items = scalarArrayElision(value) ?? value;
+    return items.map(elideScalarArrays);
+  }
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) out[key] = elideScalarArrays(item);
+    return out;
+  }
+  return value;
+};
+
 // YAML literal block scalars must indent their content, so every multi-line
 // string serialized inside a structure is displayed with extra leading
 // whitespace on each line. Agents transcribe that corrupted indentation into
@@ -51,7 +87,8 @@ const hoistMultilineStrings = (
   if (Array.isArray(value)) {
     if (seen.has(value)) return "[circular reference]";
     seen.add(value);
-    const skeleton = value.map((item, index) =>
+    const items = scalarArrayElision(value) ?? value;
+    const skeleton = items.map((item, index) =>
       hoistMultilineStrings(item, `${path}[${index}]`, sections, seen),
     );
     seen.delete(value);
@@ -153,7 +190,7 @@ export const formatFabricValue = (
   }
   try {
     return {
-      text: JSON.stringify(value, null, format === "json" ? 2 : 0),
+      text: JSON.stringify(elideScalarArrays(value), null, format === "json" ? 2 : 0),
       ...(format === "json" ? { language: "json" as const } : {}),
     };
   } catch {

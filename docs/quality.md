@@ -112,6 +112,16 @@ Special filenames include `Dockerfile`, `Containerfile`, `CMakeLists.txt`, `Make
 
 Ambiguous extensions cannot be solved universally. For example, `.m` can mean Objective-C or MATLAB. Use a trusted override when the built-in choice is wrong for a project.
 
+
+## Read-truncation write guard
+
+pi-core read results truncate at a 50KB display limit and append a render marker
+line (`[Showing lines A-B of N ... Use offset=M to continue.]`). fabric_exec
+rejects a `pi.write` full overwrite when the content itself carries that marker
+line, or when the target path was previously read truncated in the same run,
+because writing the truncated view back destroys the file tail. The error steers
+to `pi.edit` for surgical changes or to paged `pi.read` offset reads.
+
 ## Tool choices
 
 Fabric does not install or endorse one universal toolchain. Common project-native choices include:

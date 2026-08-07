@@ -86,3 +86,32 @@ describe("multi-line string fidelity", () => {
     );
   });
 });
+
+describe("pathological scalar-array elision", () => {
+  it("elides oversized arrays of short scalars in YAML and JSON modes", () => {
+    const keys = Array.from({ length: 10_000 }, (_, i) => `key-${i}`);
+    const value = { keys };
+
+    const yaml = formatFabricValue(value, "yaml", 100_000);
+    expect(yaml.text.length).toBeLessThan(2_000);
+    expect(yaml.text).toContain("elided");
+
+    const json = formatFabricValue(value, "json", 100_000);
+    expect(json.text.length).toBeLessThan(2_000);
+    expect(json.text).toContain("elided");
+  });
+
+  it("leaves small arrays and structured arrays untouched", () => {
+    const small = formatFabricValue({ a: [1, 2, 3], b: ["x", "y"] }, "yaml");
+    expect(small.text).not.toContain("elided");
+
+    // Arrays of objects are not elidable scalars; the sample must not break
+    // the hoisted-section path for multiline content inside them.
+    const nested = formatFabricValue(
+      { rows: [{ file: "a.ts\nb" }, { file: "c.ts\nd" }] },
+      "auto",
+    );
+    expect(nested.text).toContain("rows[0].file");
+    expect(nested.text).not.toContain("elided");
+  });
+});
