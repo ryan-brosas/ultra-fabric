@@ -68,6 +68,22 @@ describe("prewalkChecklistReminder with progress", () => {
     expect(out).toContain("Step 5");
     expect(out).toContain("0 of 5 done");
   });
+
+  it("numbers open items by original position when earlier items are done", () => {
+    const out = prewalkChecklistReminder(checklist([0, 2]));
+    // Step 2 (open, original index 1) must keep its original 1-based number 2,
+    // not be renumbered to 1: [DONE:n] indexes refer to the original checklist order.
+    expect(out).toContain("- 2. Step 2");
+    expect(out).not.toContain("- 1. Step 2");
+    expect(out).toContain("- 4. Step 4");
+    expect(out).toContain("- 5. Step 5");
+  });
+
+  it("instructs the executor to emit [DONE:n] markers as items complete", () => {
+    const out = prewalkChecklistReminder(checklist([0]));
+    expect(out).toMatch(/\[DONE:\d+\]/);
+    expect(out).toMatch(/emit/i);
+  });
 });
 
 describe("PrewalkController.markChecklistDone", () => {

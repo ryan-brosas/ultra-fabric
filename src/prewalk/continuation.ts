@@ -70,12 +70,18 @@ export const prewalkChecklistReminder = (
   checklist: FabricPrewalkChecklist,
 ): string => {
   const done = new Set(checklist.doneIndexes ?? []);
-  const open = checklist.items.filter((_, index) => !done.has(index));
+  const open = checklist.items.map((item, index) => ({ item, index })).filter(({ index }) => !done.has(index));
   return [
     `Prewalk checklist still active (${done.size} of ${checklist.items.length} done). Keep working the remaining items; do not end the turn until every open item and validation is complete.`,
+    // Number by the original 1-based checklist position: [DONE:n] indexes refer
+    // to the original order, so a renumbered list would make the executor mark
+    // the wrong item complete and the progress widget would never strike through.
     ...open.map(
-      (item, openIndex) => `- ${openIndex + 1}. ${item.task}\n  Validation: ${item.validation}`,
+      ({ item, index }) => `- ${index + 1}. ${item.task}\n  Validation: ${item.validation}`,
     ),
+    // Explicit emission contract: the host parses [DONE:n] from the executor's
+    // turn text to advance the checklist and strike through done items.
+    "As you complete each open item above, emit its [DONE:n] marker in the same turn, where n is the item's number above (the original checklist position); for example [DONE:2] for item 2.",
     "Before claiming completion: sweep every other call site for any pattern, signature, or check you changed; keep the diff minimal and confirm no out-of-scope behavior changed; run the full test module the change lives in, not just the test you expect to flip.",
   ].join("\n");
 };

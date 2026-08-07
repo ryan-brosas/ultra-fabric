@@ -50,6 +50,7 @@ export const checklistContinuationPrompt = (
   ...checklist.items.map(
     (item, index) => `${index + 1}. ${item.task}\n   Validation: ${item.validation}`,
   ),
+  "As you complete each checklist item above, emit its [DONE:n] marker in the same turn, where n is the item's number above; for example [DONE:2] for item 2. The host advances the checklist and strikes the item through from these markers.",
   "Before claiming completion: sweep every other call site for any pattern, signature, or check you changed and apply the same change; keep the diff minimal and confirm no out-of-scope behavior changed; run the full test module the change lives in, not just the test you expect to flip.",
   "Finish the implementation, run every listed validation plus the relevant final verification, and only then report completion.",
   ...(opts?.delegateContext ? [PREWALK_DELEGATE_DISCIPLINE] : []),

@@ -118,6 +118,9 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
   const codePreviewSettings = await loadCodePreviewSettings();
   const decorateShell: FabricToolShellDecorator = withCodePreviewShell;
   let compatibilityWarningShown = false;
+  // Tracks whether the prewalk progress widget is currently shown so
+  // retirement tears it down exactly once instead of nudging the UI every turn.
+  let prewalkProgressWidgetShown = false;
   configureHighlighting(
     codePreviewSettings.shikiTheme,
     codePreviewSettings.syntaxHighlighting,
@@ -631,22 +634,37 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
     // items complete; the widget and status keep the plan's progress visible
     // between turns (prime-agent plan-mode style, ASCII only).
     if (state.initialized) {
-      const lastAssistantText = lastAssistantTurnText(messages);
-      if (lastAssistantText) {
-        const checklist = state.prewalk.status();
-        if (checklist.state !== "idle" && checklist.checklist) {
+      const checklist = state.prewalk.status();
+      if (checklist.state === "idle" || !checklist.checklist) {
+        // Retired or never-armed prewalk: tear the progress widget down so a
+        // settled checklist does not leave stale rows on the dashboard.
+        if (prewalkProgressWidgetShown) {
+          context.ui.setWidget("fabric-prewalk-progress", undefined);
+          context.ui.setStatus("fabric-prewalk-progress", undefined);
+          prewalkProgressWidgetShown = false;
+        }
+      } else {
+        const lastAssistantText = lastAssistantTurnText(messages);
+        if (lastAssistantText) {
           const indexes = extractDoneMarkers(lastAssistantText, checklist.checklist.items.length);
           if (indexes.length > 0) state.prewalk.markChecklistDone(sessionId, indexes);
-          const progress = checklistProgress(checklist.checklist);
-          if (progress.total > 0) {
-            context.ui.setStatus(
-              "fabric-prewalk-progress",
-              `checklist ${progress.done}/${progress.total}`,
-            );
-            context.ui.setWidget(
-              "fabric-prewalk-progress",
-              checklistWidgetLines(checklist.checklist),
-            );
+          // Re-read after marking: the first snapshot predates this turn's
+          // mutations, so without a fresh read a freshly completed item would
+          // still render pending and never strike through.
+          const live = state.prewalk.status();
+          if (live.state !== "idle" && live.checklist) {
+            const progress = checklistProgress(live.checklist);
+            if (progress.total > 0) {
+              context.ui.setStatus(
+                "fabric-prewalk-progress",
+                `checklist ${progress.done}/${progress.total}`,
+              );
+              context.ui.setWidget(
+                "fabric-prewalk-progress",
+                checklistWidgetLines(live.checklist),
+              );
+              prewalkProgressWidgetShown = true;
+            }
           }
         }
       }

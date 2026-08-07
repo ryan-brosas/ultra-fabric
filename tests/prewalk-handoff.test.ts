@@ -705,6 +705,8 @@ describe("prewalk checklist handoff", () => {
     expect(content).not.toContain(
       "Continue the existing task in this same session under the executor model.",
     );
+    expect(content).toMatch(/\[DONE:\d+\]/);
+    expect(content).toContain("emit its [DONE:n] marker");
   });
 
   it("keeps a gated revision's feedback over the checklist task for a trajectory arm", () => {
