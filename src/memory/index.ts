@@ -794,16 +794,6 @@ export interface ScoredEntry extends IndexedEntry {
   score: number;
 }
 
-export interface ShardBundle {
-  shards: Shard[];
-  refs: SessionRef[];
-}
-
-export const loadShards = (refs: SessionRef[], options: MemoryIndexOptions): ShardBundle => ({
-  shards: refs.map((ref) => loadShard(ref, options)),
-  refs,
-});
-
 export const bm25Score = (
   shards: Shard[],
   terms: string[],

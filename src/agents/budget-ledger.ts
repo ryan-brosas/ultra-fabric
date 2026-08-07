@@ -39,13 +39,6 @@ export interface BudgetLedgerSummary {
   tokens: number;
 }
 
-export interface BudgetLedgerDetail {
-  cost: number;
-  tokens: number;
-  byPersistentAgent: Record<string, { cost: number; tokens: number }>;
-  entries: BudgetLedgerEntry[];
-}
-
 export interface BudgetLedgerState {
   budget: number;
   file: string;
@@ -143,55 +136,6 @@ export function appendBudgetLedger(file: string, entry: BudgetLedgerEntry): void
 /**
  * Parse a ledger entry, accepting legacy flat rows ({id,depth,cost,tokens,ts})
  * while validating the optional attribution fields added for token telemetry.
- */
-const parseBudgetLedgerEntry = (value: unknown): BudgetLedgerEntry | undefined => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const candidate = value as Record<string, unknown>;
-  if (
-    typeof candidate.id !== "string" ||
-    typeof candidate.cost !== "number" ||
-    typeof candidate.tokens !== "number" ||
-    typeof candidate.ts !== "number"
-  ) {
-    return undefined;
-  }
-  return candidate as unknown as BudgetLedgerEntry;
-};
 
-/**
- * Sum the append-only ledger with full per-attribution breakdown. Reuses the
- * tolerant line-parsing semantics of readBudgetLedger while exposing
- * persistentAgent/token-kind rollups for orchestrator decisions.
+
  */
-export function readBudgetLedgerDetailed(file: string): BudgetLedgerDetail {
-  const detail: BudgetLedgerDetail = {
-    cost: 0,
-    tokens: 0,
-    byPersistentAgent: {},
-    entries: [],
-  };
-  let raw: string;
-  try {
-    raw = fs.readFileSync(file, "utf8");
-  } catch {
-    return detail;
-  }
-  for (const line of raw.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    try {
-      const entry = parseBudgetLedgerEntry(JSON.parse(line));
-      if (!entry) continue;
-      detail.cost += Number(entry.cost) || 0;
-      detail.tokens += Number(entry.tokens) || 0;
-      detail.entries.push(entry);
-      if (entry.persistentAgentId) {
-        const persistentAgentRollup = (detail.byPersistentAgent[entry.persistentAgentId] ??= { cost: 0, tokens: 0 });
-        persistentAgentRollup.cost += entry.cost;
-        persistentAgentRollup.tokens += entry.tokens;
-      }
-    } catch {
-      // Ignore malformed cost lines; the ledger is best-effort.
-    }
-  }
-  return detail;
-}

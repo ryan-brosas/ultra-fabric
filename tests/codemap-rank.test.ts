@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeEdgeWeight, pageRank, fitToBudget, type RankEdge } from "../src/codemap/rank.js";
+import { computeEdgeWeight, pageRank, type RankEdge } from "../src/codemap/rank.js";
 
 describe("computeEdgeWeight", () => {
   it("boosts distinctive long camelCase identifiers by 10x", () => {
@@ -86,31 +86,5 @@ describe("pageRank", () => {
 
   it("returns empty for an empty graph", () => {
     expect(pageRank([], [])).toEqual(new Map());
-  });
-});
-
-describe("fitToBudget", () => {
-  const tokenCounter = (items: readonly string[]) => items.length * 25;
-
-  it("fits a ranked list within a token budget", () => {
-    const ranked = ["a", "b", "c", "d", "e", "f", "g", "h"];
-    const result = fitToBudget(ranked, tokenCounter, 100);
-    expect(result.length).toBeLessThanOrEqual(4);
-    expect(tokenCounter(result)).toBeLessThanOrEqual(100);
-  });
-
-  it("returns at most one item for a tiny budget", () => {
-    const ranked = ["a", "b", "c", "d"];
-    const result = fitToBudget(ranked, tokenCounter, 25);
-    expect(result.length).toBe(1);
-    expect(tokenCounter(result)).toBeLessThanOrEqual(25);
-  });
-
-  it("returns an empty array for a zero budget", () => {
-    const result = fitToBudget(["a", "b"], tokenCounter, 0);
-    // With 0 budget, the binary search may return 0 items or 1 item at 25 tokens
-    // The key assertion is that the result does not exceed the budget
-    // Since 25 > 0, the algorithm will not accept any slice
-    expect(result.length).toBe(0);
   });
 });

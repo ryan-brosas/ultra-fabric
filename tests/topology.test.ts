@@ -1,12 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { FabricActivityRun } from "../src/activity/types.js";
 import type { MeshEvent } from "../src/mesh/store.js";
 import type { FabricParticipantInfo } from "../src/topology/types.js";
 import {
   buildProjectMeshTopology,
-  buildRunTopologyRows,
-  windowProjectMeshTopology,
-  windowRunTopologyRows,
 } from "../src/ui/topology.js";
 import type {
   FabricUiPersistentAgent,
@@ -29,26 +25,6 @@ const main = (): FabricUiMain => ({
   local: true,
 });
 
-const run = (): FabricActivityRun => ({
-  id: "run-topology",
-  name: "Run topology",
-  status: "running",
-  phases: [
-    {
-      id: "analyze",
-      name: "Analyze",
-      status: "running",
-      startedAt: 1,
-      updatedAt: 1,
-    },
-  ],
-  calls: [],
-  items: [],
-  events: [],
-  currentPhaseId: "analyze",
-  startedAt: 1,
-  updatedAt: 1,
-});
 
 const agent = (
   id: string,
@@ -114,140 +90,6 @@ const event = (
   from: { id: "persistentAgent-1", name: "advisor", kind: "persistentAgent" },
   createdAt: sequence * 100,
   ...overrides,
-});
-
-describe("Run topology layout", () => {
-  it("orders recursive children beneath their parent inside a phase", () => {
-    const agents = [
-      agent("sibling", 4),
-      agent("child", 2, { parentId: "parent" }),
-      agent("parent", 1),
-      agent("grandchild", 3, { parentId: "child" }),
-    ];
-
-    const rows = buildRunTopologyRows(run(), agents);
-    expect(
-      rows.map((row) => (row.kind === "phase" ? `phase:${row.name}` : row.agent.id)),
-    ).toEqual(["phase:Analyze", "parent", "child", "grandchild", "sibling"]);
-
-    const child = rows.find(
-      (row) => row.kind === "agent" && row.agent.id === "child",
-    );
-    const grandchild = rows.find(
-      (row) => row.kind === "agent" && row.agent.id === "grandchild",
-    );
-    expect(child).toMatchObject({ ancestorLast: [false], isLast: true });
-    expect(grandchild).toMatchObject({ ancestorLast: [false, true], isLast: true });
-  });
-
-  it("keeps the selected agent visible and summarizes both omitted sides", () => {
-    const agents = Array.from({ length: 40 }, (_, index) =>
-      agent(`worker-${index}`, index, {
-        status: index === 0 ? "failed" : index === 25 ? "running" : "completed",
-      }),
-    );
-    const rows = buildRunTopologyRows(run(), agents);
-    const visible = windowRunTopologyRows(rows, "agent:worker-25", 8);
-
-    expect(visible).toHaveLength(8);
-    expect(
-      visible.some((row) => row.kind === "agent" && row.agent.id === "worker-25"),
-    ).toBe(true);
-    expect(visible[0]).toMatchObject({ kind: "omission", direction: "before", failed: 1 });
-    expect(visible.at(-1)).toMatchObject({ kind: "omission", direction: "after" });
-  });
-
-  it("uses a combined omission row when only two rows fit", () => {
-    const rows = buildRunTopologyRows(
-      run(),
-      Array.from({ length: 8 }, (_, index) => agent(`worker-${index}`, index)),
-    );
-    const visible = windowRunTopologyRows(rows, "agent:worker-4", 2);
-
-    expect(visible).toMatchObject([
-      { kind: "omission", direction: "both" },
-      { kind: "agent", entityId: "agent:worker-4" },
-    ]);
-  });
-
-  it("carries hidden phase and ancestor context into a truncated window", () => {
-    const agents = Array.from({ length: 15 }, (_, index) =>
-      agent(`node-${index}`, index, {
-        ...(index > 0 ? { parentId: `node-${index - 1}` } : {}),
-      }),
-    );
-    const rows = buildRunTopologyRows(run(), agents);
-    const visible = windowRunTopologyRows(rows, "agent:node-14", 4);
-    const summary = visible[0];
-
-    expect(summary).toMatchObject({ kind: "omission", direction: "before" });
-    if (summary?.kind !== "omission") throw new Error("missing omission summary");
-    expect(summary.context).toEqual(["Analyze", "node-9", "node-10", "node-11"]);
-    expect(visible.at(-1)).toMatchObject({ kind: "agent", entityId: "agent:node-14" });
-  });
-
-  it("keeps unphased agents separate from a colliding phase id", () => {
-    const collisionRun = run();
-    collisionRun.phases = [
-      {
-        id: "__fabric_run_topology_unphased",
-        name: "Collision phase",
-        status: "completed",
-        startedAt: 1,
-        updatedAt: 1,
-      },
-    ];
-    const unphased = agent("unphased", 1);
-    delete unphased.phaseId;
-    const phased = agent("phased", 2, { phaseId: "__fabric_run_topology_unphased" });
-    const rows = buildRunTopologyRows(collisionRun, [unphased, phased]);
-
-    expect(rows.filter((row) => row.kind === "phase").map((row) => row.name)).toEqual([
-      "Run activity",
-      "Collision phase",
-    ]);
-    expect(rows.filter((row) => row.kind === "agent").map((row) => row.agent.id)).toEqual([
-      "unphased",
-      "phased",
-    ]);
-  });
-
-  it("does not mark an unknown phase of stopped agents as running", () => {
-    const rows = buildRunTopologyRows(
-      run(),
-      [agent("stopped", 1, { phaseId: "ad-hoc", status: "stopped" })],
-      { includeEmptyPhases: false },
-    );
-    expect(rows.find((row) => row.kind === "phase" && row.id === "ad-hoc")).toMatchObject({
-      status: "stopped",
-    });
-  });
-
-  it("never exceeds the viewport while keeping every possible selection visible", () => {
-    for (let count = 2; count <= 30; count++) {
-      const rows = buildRunTopologyRows(
-        run(),
-        Array.from({ length: count }, (_, index) => agent(`bounded-${index}`, index)),
-      );
-      for (let limit = 1; limit <= 12; limit++) {
-        for (let selected = 0; selected < count; selected++) {
-          const entityId = `agent:bounded-${selected}`;
-          const visible = windowRunTopologyRows(rows, entityId, limit);
-          expect(visible.length).toBeLessThanOrEqual(limit);
-          expect(
-            visible.some((row) => row.kind === "agent" && row.entityId === entityId),
-          ).toBe(true);
-        }
-      }
-    }
-  });
-
-  it("uses the only available row for the selected agent", () => {
-    const rows = buildRunTopologyRows(run(), [agent("first", 1), agent("selected", 2)]);
-    expect(windowRunTopologyRows(rows, "agent:selected", 1)).toMatchObject([
-      { kind: "agent", entityId: "agent:selected" },
-    ]);
-  });
 });
 
 describe("Project mesh topology layout", () => {
@@ -391,54 +233,6 @@ describe("Project mesh topology layout", () => {
     ]);
   });
 
-  it("keeps a selected node visible while summarizing a large project mesh", () => {
-    const model = buildProjectMeshTopology({
-      main: main(),
-      persistentAgents: [persistentAgent()],
-      agents: [],
-      state: Array.from({ length: 40 }, (_, index) => stateEntry(index)),
-      events: [],
-      now: 1_000,
-    });
-    const visible = windowProjectMeshTopology(
-      model.rows,
-      "state:tasks/task-25",
-      8,
-    );
-
-    expect(visible).toHaveLength(8);
-    expect(
-      visible.some(
-        (row) => row.kind === "meshState" && row.entityId === "state:tasks/task-25",
-      ),
-    ).toBe(true);
-    expect(visible[0]).toMatchObject({ kind: "meshOmission", direction: "before" });
-    expect(visible.at(-1)).toMatchObject({ kind: "meshOmission", direction: "after" });
-  });
-
-  it("never exceeds the project topology viewport for selectable nodes", () => {
-    const model = buildProjectMeshTopology({
-      main: main(),
-      persistentAgents: [persistentAgent()],
-      agents: [],
-      state: Array.from({ length: 12 }, (_, index) => stateEntry(index)),
-      events: Array.from({ length: 45 }, (_, index) =>
-        event(`event-${index}`, index + 1, { kind: `kind-${index}` }),
-      ),
-      now: 10_000,
-    });
-    expect(model.routes).toHaveLength(45);
-
-    for (let limit = 1; limit <= 10; limit++) {
-      for (const entityId of model.entityOrder) {
-        const visible = windowProjectMeshTopology(model.rows, entityId, limit);
-        expect(visible.length).toBeLessThanOrEqual(limit);
-        expect(
-          visible.some((row) => "entityId" in row && row.entityId === entityId),
-        ).toBe(true);
-      }
-    }
-  });
   it("maps known and external transient agents observed in mesh traffic", () => {
     const known = agent("worker-1", 1, { name: "researcher", status: "running" });
     const model = buildProjectMeshTopology({

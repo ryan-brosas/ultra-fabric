@@ -437,9 +437,6 @@ const projectOutstandingWithMetadata = (events: CompactionEvent[]): ProjectedSec
   return { lines, omitted: sampledUnresolved.omitted + sampledResolved.omitted };
 };
 
-export const projectOutstanding = (events: CompactionEvent[]): string[] =>
-  projectOutstandingWithMetadata(events).lines;
-
 interface EarlierTurnAddress {
   entryId: string;
   contextLine: string;

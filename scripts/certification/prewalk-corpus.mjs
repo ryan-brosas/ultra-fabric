@@ -466,7 +466,7 @@ export const solve = (input) => {
   task({
     id: "budget-ledger-rollup",
     domain: "reliability",
-    sourcePaths: ["src/agents/budget-ledger.ts", "tests/budget-ledger.test.ts"],
+    sourcePaths: ["tests/support/budget-ledger-detail.ts", "tests/budget-ledger.test.ts"],
     requirements: `solve(lines) tolerantly parses JSONL-like strings or object rows. Count only rows with string id and finite numeric cost, tokens, and ts. Sum cost/tokens and attribute each valid row to runner or unknown. Malformed rows are ignored. Return { cost, tokens, byRunner }.`,
     cases: [
       { name: "tolerant attribution", args: [[{ id: "a", cost: 1.5, tokens: 10, ts: 1, runner: "pi" }, "not json", "{\"id\":\"b\",\"cost\":0.5,\"tokens\":4,\"ts\":2}", { id: "bad", cost: "x", tokens: 2, ts: 3 }]], expected: { cost: 2, tokens: 14, byRunner: { pi: { cost: 1.5, tokens: 10 }, unknown: { cost: 0.5, tokens: 4 } } } },

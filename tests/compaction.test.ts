@@ -22,7 +22,7 @@ import {
   compactWithOpenAI,
   supportsOpenAINativeCompaction,
 } from "../src/compaction/openai-native.js";
-import { project, projectOutstanding } from "../src/compaction/projections.js";
+import { project, projectWithMetadata } from "../src/compaction/projections.js";
 import {
   buildSessionContext,
   estimateTokens,
@@ -1068,7 +1068,7 @@ describe("compaction error state machine", () => {
       user("thanks"),
     );
     const events = normalizeEntries(session.slice(0, 5));
-    const lines = projectOutstanding(events);
+    const lines = projectWithMetadata(events).sections.outstanding;
     expect(lines.some((l) => l.includes("read src/x.ts") && !l.includes("[RESOLVED]"))).toBe(true);
   });
 
@@ -1087,7 +1087,7 @@ describe("compaction error state machine", () => {
       user("done"),
     );
     const events = normalizeEntries(session.slice(0, 5));
-    const lines = projectOutstanding(events);
+    const lines = projectWithMetadata(events).sections.outstanding;
     expect(lines.some((l) => l.includes("bash: make test") && l.includes("[RESOLVED]"))).toBe(true);
   });
 
@@ -1103,7 +1103,7 @@ describe("compaction error state machine", () => {
       user("next"),
     );
     const events = normalizeEntries(session.slice(0, 3));
-    const lines = projectOutstanding(events);
+    const lines = projectWithMetadata(events).sections.outstanding;
     expect(lines.some((l) => l.includes("edit src/y.ts") && !l.includes("[RESOLVED]"))).toBe(true);
   });
 });

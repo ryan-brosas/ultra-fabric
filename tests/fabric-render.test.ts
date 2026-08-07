@@ -21,7 +21,6 @@ import {
   inheritEnclosingBackground,
   modelReadHint,
   nestedCallBody,
-  nestedCallCode,
   nestedCallTitle,
   nestedEditDiff,
   renderBoundedLines,
@@ -34,6 +33,24 @@ import {
   restoreLegacyBashCommands,
   singleCallProgressLine,
 } from "../src/ui/fabric-render.js";
+
+import { languageFromPath } from "../src/ui/highlight.js";
+import type { FabricRenderAudit } from "../src/ui/fabric-render.js";
+
+// Local test helper (previously exported from src/ui/fabric-render.ts):
+const nestedCallCode = (audit: FabricRenderAudit): { code: string; lang: string } | null => {
+  const args = audit.args ?? {};
+  const path = typeof args.path === "string" ? args.path : undefined;
+  const lang = languageFromPath(path);
+  if (!lang) return null;
+  if (audit.tool === "read") {
+    return typeof audit.result === "string" ? { code: audit.result, lang } : null;
+  }
+  if (audit.tool === "write") {
+    return typeof args.content === "string" ? { code: args.content, lang } : null;
+  }
+  return null;
+};
 
 const theme = {
   fg: (color: string, text: string) => `\x1b[${color}]${text}\x1b[0m`,

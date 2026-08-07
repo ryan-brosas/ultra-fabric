@@ -107,8 +107,6 @@ const gammaLn = (x: number): number => {
   return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(acc);
 };
 
-const chooseOrder = (t: number): number => Math.min(90, Math.ceil(2.2 * t) + 16);
-
 // Chebyshev coefficient c_k(t) of e^{-tL} under M = L - I.
 const heatCoeff = (k: number, t: number): number => {
   const base = Math.exp(-t) * besselI(k, t);
@@ -141,40 +139,5 @@ export const heatField = (tk: Float64Array[], t: number, n: number): Float64Arra
     const vec = tk[k]!;
     for (let i = 0; i < n; i++) v[i]! += c * vec[i]!;
   }
-  return v;
-};
-
-// One-shot convenience: field at time t with internally chosen order.
-export const heatAt = (csr: Csr, s: Float64Array, t: number): Float64Array => {
-  const K = chooseOrder(t);
-  return heatField(chebyshevVectors(csr, s, K), t, csr.n);
-};
-
-// Reference implementation for tests: e^{-tL} via scaling-and-squaring Taylor.
-export const taylorReference = (csr: Csr, s: Float64Array, t: number): Float64Array => {
-  const m = Math.max(0, Math.ceil(Math.log2(t / 0.5)));
-  const tau = t / 2 ** m;
-  const lpApply = (x: Float64Array): Float64Array => {
-    const neg = applyNegP(csr, x);
-    const out = new Float64Array(csr.n);
-    for (let i = 0; i < csr.n; i++) out[i] = x[i]! + neg[i]!;
-    return out;
-  };
-  const expTauApply = (x: Float64Array): Float64Array => {
-    const y = Float64Array.from(x);
-    let term: Float64Array = Float64Array.from(x);
-    let factor = 1;
-    for (let k = 0; k < 80; k++) {
-      const next = lpApply(term);
-      for (let i = 0; i < csr.n; i++) next[i]! *= -tau;
-      term = next;
-      factor /= k + 1;
-      if (k > 2 && Math.abs(factor) * 8 < 1e-18) break;
-      for (let i = 0; i < csr.n; i++) y[i]! += factor * term[i]!;
-    }
-    return y;
-  };
-  let v: Float64Array = Float64Array.from(s);
-  for (let i = 0; i < 2 ** m; i++) v = expTauApply(v);
   return v;
 };

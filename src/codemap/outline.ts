@@ -1,5 +1,4 @@
 import crossSpawn from "cross-spawn";
-import { readFileSync } from "node:fs";
 
 export interface OutlineRange {
   line: number;       // 1-indexed
@@ -120,27 +119,4 @@ export const runOutline = (
   } catch {
     return [];
   }
-};
-
-export const findInterface = (
-  files: readonly OutlineFile[],
-  interfaceName: string,
-): OutlineItem | undefined => {
-  for (const file of files) {
-    const item = file.items.find(
-      (i) => i.symbolType === "interface" && i.name === interfaceName,
-    );
-    if (item) return item;
-  }
-  return undefined;
-};
-
-export const readMemberOptionality = (
-  filePath: string,
-  member: OutlineMember,
-): boolean => {
-  const content = readFileSync(filePath, "utf8");
-  const lines = content.split("\n");
-  const line = lines[member.range.line - 1] ?? "";
-  return line.includes("?:");
 };

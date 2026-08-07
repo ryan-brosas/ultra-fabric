@@ -3,10 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  snapshotHandoffSession,
-  writeHandoffSession,
-} from "../src/agents/handoff.js";
+import { writeHandoffSession } from "../src/agents/handoff.js";
+import { snapshotHandoffSession } from "./support/handoff-seed.js";
 import type { AgentToolResultMessage } from "../src/agents/types.js";
 
 const roots: string[] = [];

@@ -2,7 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { AgentTranscriptReader, projectAgentTranscript } from "../src/ui/transcript.js";
+import { AgentTranscriptReader } from "../src/ui/transcript.js";
+import { TranscriptAccumulator } from "../src/ui/transcript-parser.js";
+
+// Local test helper (previously exported from src/ui/transcript.ts):
+const projectAgentTranscript = (events: Array<Record<string, unknown>>, olderAvailable = false) => {
+  const accumulator = new TranscriptAccumulator();
+  accumulator.append(events);
+  return accumulator.snapshot(olderAvailable);
+};
 import type { FabricUiAgent } from "../src/ui/types.js";
 
 const temporaryDirectories: string[] = [];

@@ -6,7 +6,9 @@ import type { FabricMemoryConfig } from "../src/config.js";
 import { encodeCwdDir } from "../src/memory/discovery.js";
 import { loadShard } from "../src/memory/index.js";
 import { normalizeSession } from "../src/memory/normalize.js";
-import { searchShards } from "../src/memory/search.js";
+import { searchMemoryIndex } from "../src/memory/search.js";
+const searchShards = (shards: Parameters<typeof searchMemoryIndex>[0], query: Parameters<typeof searchMemoryIndex>[2]) =>
+  searchMemoryIndex(shards, [], query);
 import { MemoryProvider } from "../src/providers/memory-provider.js";
 import type { FabricInvocationContext } from "../src/protocol.js";
 import {

@@ -1,8 +1,26 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
-import { normalizeEntries } from "../src/compaction/normalize.js";
+import { normalizeEntries, type CompactionEvent } from "../src/compaction/normalize.js";
 import { project } from "../src/compaction/projections.js";
-import { generateProbes, checkProbes, qaReport } from "../src/compaction/qa.js";
+import { generateProbes, checkProbes, type QaReport } from "../src/compaction/qa.js";
+
+// Local test helper (previously exported from src/compaction/qa.ts):
+const score = (probes: unknown[], failures: unknown[]): number =>
+  probes.length === 0 ? 1 : (probes.length - failures.length) / probes.length;
+const qaReport = (events: CompactionEvent[], cutIndex: number, summaryText: string): QaReport => {
+  const probes = generateProbes(events, cutIndex);
+  const { failed } = checkProbes(summaryText, probes);
+  const content = probes.filter((probe) => probe.class === "content");
+  const address = probes.filter((probe) => probe.class === "address");
+  const contentFailures = failed.filter(({ probe }) => probe.class === "content");
+  const addressFailures = failed.filter(({ probe }) => probe.class === "address");
+  return {
+    score: score(probes, failed),
+    contentScore: score(content, contentFailures),
+    addressScore: score(address, addressFailures),
+    failures: failed,
+  };
+};
 import { renderSummary } from "../src/compaction/render.js";
 
 let entryId = 0;

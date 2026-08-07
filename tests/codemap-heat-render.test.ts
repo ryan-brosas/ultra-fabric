@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  buildHeatCsr, heatAt, taylorReference, besselI,
-} from "../src/codemap/heat.js";
+import { buildHeatCsr } from "../src/codemap/heat.js";
+import { heatAt, taylorReference, besselI } from "./codemap-fovea-bridge.js";
 import { renderHeatField, type RenderNode } from "../src/codemap/render-heat.js";
 import type { RankEdge } from "../src/codemap/rank.js";
 

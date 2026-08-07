@@ -12,10 +12,20 @@ import {
   writeSessionFile,
   type FixtureEntry,
 } from "./fixtures/memory.js";
-import { normalizeSession, extractFullText, expandSessionEntry } from "../src/memory/normalize.js";
+import { normalizeSession, extractFullText } from "../src/memory/normalize.js";
 import { encodeCwdDir, resolveScope, enumerateAllSessions } from "../src/memory/discovery.js";
-import { bm25Score, loadShard, loadShards, recentEntries } from "../src/memory/index.js";
-import { searchShards, formatSearchResult } from "../src/memory/search.js";
+import { bm25Score, loadShard, recentEntries } from "../src/memory/index.js";
+import { searchMemoryIndex, formatSearchResult } from "../src/memory/search.js";
+
+// Local test helpers (previously exported wrappers from src/memory):
+const expandSessionEntry = (file: string, index: number) =>
+  normalizeSession(file, Number.MAX_SAFE_INTEGER).entries.find((e) => e.index === index)?.text ?? null;
+const loadShards = (refs: Parameters<typeof loadShard>[0][], options: Parameters<typeof loadShard>[1]) => ({
+  shards: refs.map((ref) => loadShard(ref, options)),
+  refs,
+});
+const searchShards = (shards: Parameters<typeof searchMemoryIndex>[0], query: Parameters<typeof searchMemoryIndex>[2]) =>
+  searchMemoryIndex(shards, [], query);
 import { MemoryProvider } from "../src/providers/memory-provider.js";
 import type { FabricInvocationContext } from "../src/protocol.js";
 import type { FabricMemoryConfig } from "../src/config.js";

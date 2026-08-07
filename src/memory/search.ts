@@ -469,8 +469,6 @@ export const searchMemoryIndex = async (
   );
 };
 
-export const searchShards = (shards: Shard[], query: SearchQuery): Promise<SearchResult> =>
-  searchMemoryIndex(shards, [], query);
 
 const groupIntoResults = (
   shards: Shard[],

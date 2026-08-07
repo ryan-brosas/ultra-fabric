@@ -5,15 +5,13 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
 import type { FabricLifecyclePublishRequest } from "../src/lifecycle/types.js";
-import { snapshotHandoffSession } from "../src/agents/handoff.js";
+import { snapshotHandoffSession } from "./support/handoff-seed.js";
 import {
   effectiveAgentTimeoutMs,
   AgentManager,
 } from "../src/agents/manager.js";
-import {
-  clearOwnedBudgetEnv,
-  readBudgetLedgerDetailed,
-} from "../src/agents/budget-ledger.js";
+import { clearOwnedBudgetEnv } from "../src/agents/budget-ledger.js";
+import { readBudgetLedgerDetailed } from "./support/budget-ledger-detail.js";
 import type { AgentRunRecord, AgentRunResult } from "../src/agents/types.js";
 
 const managers: AgentManager[] = [];

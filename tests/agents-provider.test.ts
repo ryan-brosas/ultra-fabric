@@ -21,7 +21,7 @@ import type {
 } from "../src/topology/types.js";
 import type { FabricInvocationContext } from "../src/protocol.js";
 import { AgentsProvider } from "../src/providers/agents-provider.js";
-import { snapshotHandoffSession } from "../src/agents/handoff.js";
+import { snapshotHandoffSession } from "./support/handoff-seed.js";
 import { AgentManager } from "../src/agents/manager.js";
 
 const roots: string[] = [];

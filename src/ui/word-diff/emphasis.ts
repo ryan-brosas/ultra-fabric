@@ -6,7 +6,7 @@ import { collectChangedTokenGaps, type ChangedTokenGap } from "./token-alignment
 import type { ConfidentWordChangeRanges, WordChangeConfidence, WordChangeRanges } from "./types.js";
 import { wordEmphasisTokens, type WordEmphasisToken } from "./tokens.js";
 
-export type { ConfidentWordChangeRanges, WordChangeConfidence, WordChangeRanges } from "./types.js";
+
 
 export function shouldEmphasizeChangedPair(
   ranges: ConfidentWordChangeRanges,
@@ -16,14 +16,6 @@ export function shouldEmphasizeChangedPair(
   if (lineConfidence === "low") return false;
   if (ranges.confidence === "low" && lineConfidence !== "high") return false;
   return true;
-}
-
-export function changedRanges(
-  before: string,
-  after: string,
-  wordEmphasis: DiffWordEmphasis,
-): WordChangeRanges {
-  return stripWordChangeConfidence(changedRangesWithConfidence(before, after, wordEmphasis));
 }
 
 export function changedRangesWithConfidence(
@@ -70,9 +62,6 @@ export function changedRangesForTokensWithConfidence(
   return { ...filtered, confidence: hasWordChangeRanges(filtered) ? confidence : "low" };
 }
 
-function stripWordChangeConfidence(ranges: ConfidentWordChangeRanges): WordChangeRanges {
-  return { removed: ranges.removed, added: ranges.added };
-}
 
 function hasWordChangeRanges(ranges: WordChangeRanges): boolean {
   return ranges.removed.length > 0 || ranges.added.length > 0;

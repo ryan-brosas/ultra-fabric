@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentRunResult } from "../src/agents/types.js";
 import { AgentManager } from "../src/agents/manager.js";
 import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
-import { initBudgetLedger, readBudgetLedgerDetailed } from "../src/agents/budget-ledger.js";
+import { initBudgetLedger } from "../src/agents/budget-ledger.js";
+import { readBudgetLedgerDetailed } from "./support/budget-ledger-detail.js";
 
 // End-to-end coverage for the REAL worker (dist/worker.js) driven through
 // AgentManager + #monitor, with a stub `pi` binary (tests/fixtures/fake-pi.mjs)

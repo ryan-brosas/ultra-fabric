@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { normalizeSession, expandSessionEntries } from "../src/memory/normalize.js";
 import { loadDigest, loadShard } from "../src/memory/index.js";
-import { searchShards } from "../src/memory/search.js";
+import { searchMemoryIndex } from "../src/memory/search.js";
+const searchShards = (shards: Parameters<typeof searchMemoryIndex>[0], query: Parameters<typeof searchMemoryIndex>[2]) =>
+  searchMemoryIndex(shards, [], query);
 import { MemoryProvider } from "../src/providers/memory-provider.js";
 import { encodeCwdDir } from "../src/memory/discovery.js";
 import type { FabricInvocationContext } from "../src/protocol.js";

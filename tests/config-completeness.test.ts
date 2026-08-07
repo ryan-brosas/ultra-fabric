@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
-import { runOutline, findInterface, readMemberOptionality } from "../src/codemap/outline.js";
+import { readFileSync } from "node:fs";
+import { runOutline, type OutlineFile, type OutlineItem, type OutlineMember } from "../src/codemap/outline.js";
+
+// Inlined test helpers (previously exported from src/codemap/outline.ts):
+const findInterface = (files: readonly OutlineFile[], interfaceName: string): OutlineItem | undefined => {
+  for (const file of files) {
+    const item = file.items.find(
+      (i) => i.symbolType === "interface" && i.name === interfaceName,
+    );
+    if (item) return item;
+  }
+  return undefined;
+};
+const readMemberOptionality = (filePath: string, member: OutlineMember): boolean => {
+  const content = readFileSync(filePath, "utf8");
+  const lines = content.split("\n");
+  const line = lines[member.range.line - 1] ?? "";
+  return line.includes("?:");
+};
 
 const checkCompleteness = (
   interfaceName: string,

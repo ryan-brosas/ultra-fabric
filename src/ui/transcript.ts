@@ -1,4 +1,3 @@
-import { TranscriptAccumulator } from "./transcript-parser.js";
 import { AgentTranscriptReader } from "./transcript-reader.js";
 import { recordOf } from "./transcript-sanitization.js";
 
@@ -42,15 +41,6 @@ export interface FabricNestedToolPreview {
   text?: string;
   tools: FabricTranscriptEntry[];
 }
-
-export const projectAgentTranscript = (
-  events: Array<Record<string, unknown>>,
-  olderAvailable = false,
-): FabricAgentTranscript => {
-  const accumulator = new TranscriptAccumulator();
-  accumulator.append(events);
-  return accumulator.snapshot(olderAvailable);
-};
 
 export const isFabricNestedToolPreview = (value: unknown): value is FabricNestedToolPreview => {
   const record = recordOf(value);

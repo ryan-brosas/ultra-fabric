@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { writeFileSync, mkdirSync, rmSync, utimesSync } from "node:fs";
 import { join } from "node:path";
-import { runOutlineCached, clearOutlineCache } from "../src/codemap/cache.js";
+import { runOutlineCached } from "../src/codemap/cache.js";
 
 const dir = join("/tmp", "codemap-cache-fixture");
 
@@ -12,7 +12,6 @@ describe("runOutlineCached", () => {
     writeFileSync(join(dir, "a.ts"), "export function alpha() {}\n");
     writeFileSync(join(dir, "b.ts"), "export function beta() {}\n");
     writeFileSync(join(dir, "c.ts"), "export function gamma() {}\n");
-    clearOutlineCache();
 
     const files = ["a.ts", "b.ts", "c.ts"];
 

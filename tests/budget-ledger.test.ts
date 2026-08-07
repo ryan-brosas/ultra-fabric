@@ -8,8 +8,8 @@ import {
   clearOwnedBudgetEnv,
   initBudgetLedger,
   readBudgetLedger,
-  readBudgetLedgerDetailed,
 } from "../src/agents/budget-ledger.js";
+import { readBudgetLedgerDetailed } from "./support/budget-ledger-detail.js";
 
 const temporaryFiles: string[] = [];
 

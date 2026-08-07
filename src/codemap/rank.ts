@@ -112,32 +112,3 @@ export const pageRank = (
   }
   return rank;
 };
-
-export const fitToBudget = <T>(
-  ranked: readonly T[],
-  tokenCount: (items: readonly T[]) => number,
-  maxTokens: number,
-): T[] => {
-  const numTags = ranked.length;
-  if (numTags === 0) return [];
-  let lower = 0;
-  let upper = numTags;
-  let best: T[] = [];
-  let bestTokens = 0;
-  let middle = Math.min(Math.floor(maxTokens / 25), numTags);
-  while (lower <= upper) {
-    const slice = ranked.slice(0, middle);
-    const numTokens = tokenCount(slice);
-    const pctErr = maxTokens > 0 ? Math.abs(numTokens - maxTokens) / maxTokens : 0;
-    const okErr = 0.15;
-    if ((numTokens <= maxTokens && numTokens > bestTokens) || pctErr < okErr) {
-      best = slice;
-      bestTokens = numTokens;
-      if (pctErr < okErr) break;
-    }
-    if (numTokens < maxTokens) lower = middle + 1;
-    else upper = middle - 1;
-    middle = Math.floor((lower + upper) / 2);
-  }
-  return best;
-};

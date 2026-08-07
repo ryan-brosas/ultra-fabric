@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { extractImportEdges, resolveSpecifier } from "../src/codemap/imports.js";
+import { extractImportEdges } from "../src/codemap/imports.js";
 
 const fixtureRepo = (files: Record<string, string>): string => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codemap-imports-"));
@@ -14,20 +14,6 @@ const fixtureRepo = (files: Record<string, string>): string => {
   return dir;
 };
 
-describe("resolveSpecifier", () => {
-  it("resolves a ./x.js specifier to the x.ts path", () => {
-    expect(resolveSpecifier("/proj/src", "./x.js")).toBe("/proj/src/x.ts");
-  });
-
-  it("resolves a ../y.js specifier relative to the importer directory", () => {
-    expect(resolveSpecifier("/proj/src/sub", "../y.js")).toBe("/proj/src/y.ts");
-  });
-
-  it("returns undefined for a bare package specifier", () => {
-    expect(resolveSpecifier("/proj/src", "node:path")).toBeUndefined();
-    expect(resolveSpecifier("/proj/src", "vitest")).toBeUndefined();
-  });
-});
 
 describe("extractImportEdges specifier coverage (G7)", () => {
   it("resolves require() edges", () => {

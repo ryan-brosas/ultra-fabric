@@ -11,7 +11,7 @@ import {
   runScoutBrief,
   SCOUT_BUDGET_CATEGORY,
 } from "../src/prewalk/scout-brief.js";
-import { readBudgetLedgerDetailed } from "../src/agents/budget-ledger.js";
+import { readBudgetLedgerDetailed } from "./support/budget-ledger-detail.js";
 
 const context = () => {
   const setStatus = vi.fn();

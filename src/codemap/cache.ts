@@ -15,10 +15,6 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-export const clearOutlineCache = (): void => {
-  cache.clear();
-};
-
 export interface OutlineCacheResult {
   files: OutlineFile[];
   misses: string[]; // files that were re-parsed (cache misses) this call

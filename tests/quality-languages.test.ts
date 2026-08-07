@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  BUILTIN_QUALITY_LANGUAGE_IDS,
-  detectQualityLanguage,
-} from "../src/quality/languages.js";
+import { detectQualityLanguage } from "../src/quality/languages.js";
 
 const cases = [
   ["src/component.astro", "astro"],
@@ -61,7 +58,6 @@ const cases = [
 describe("quality language detection", () => {
   it.each(cases)("detects %s as %s", (file, language) => {
     expect(detectQualityLanguage(file)).toBe(language);
-    expect(BUILTIN_QUALITY_LANGUAGE_IDS).toContain(language);
   });
 
   it("uses a shebang for extensionless scripts", () => {

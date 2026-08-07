@@ -6,7 +6,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { PrewalkController } from "../src/prewalk/controller.js";
 import { armPrewalk, autoArmPrewalk, scoutOnTaskObserved } from "../src/prewalk/arm.js";
 import { SCOUT_BUDGET_CATEGORY } from "../src/prewalk/scout-brief.js";
-import { readBudgetLedgerDetailed } from "../src/agents/budget-ledger.js";
+import { readBudgetLedgerDetailed } from "./support/budget-ledger-detail.js";
 import { CHECKLIST_MEMORY_FILE, recordChecklist } from "../src/prewalk/checklist-memory.js";
 import { normalizeFabricConfig } from "../src/config.js";
 

@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
-import {
-  changedRanges,
-  changedRangesWithConfidence,
-} from "../src/ui/word-diff/emphasis.js";
+import { changedRangesWithConfidence } from "../src/ui/word-diff/emphasis.js";
+import type { WordChangeRanges, DiffWordEmphasis } from "../src/ui/word-diff/types.js";
+
+// Local test helper (previously exported from src/ui/word-diff/emphasis.ts):
+const changedRanges = (before: string, after: string, wordEmphasis: DiffWordEmphasis): WordChangeRanges => {
+  const ranges = changedRangesWithConfidence(before, after, wordEmphasis);
+  return { removed: ranges.removed, added: ranges.added };
+};
 import { indexedChangedLine } from "../src/ui/word-diff/changed-line.js";
 import { matchChangedLines } from "../src/ui/word-diff/line-matching.js";
 

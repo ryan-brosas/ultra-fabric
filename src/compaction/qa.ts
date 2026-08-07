@@ -112,9 +112,6 @@ const unresolvedErrors = (events: CompactionEvent[]): (Extract<CompactionEvent, 
   return unresolved;
 };
 
-const score = (probes: Probe[], failures: ProbeFailure[]): number =>
-  probes.length === 0 ? 1 : (probes.length - failures.length) / probes.length;
-
 // Generate reconstruction questions from ground-truth events only. cutIndex is
 // the exclusive array boundary (and therefore matches the 1-based index of the
 // final included normalized event). No projection or rendered section is read.
@@ -279,19 +276,4 @@ export const checkProbes = (summaryText: string, probes: Probe[]): ProbeCheck =>
     }
   }
   return { passed, failed };
-};
-
-export const qaReport = (events: CompactionEvent[], cutIndex: number, summaryText: string): QaReport => {
-  const probes = generateProbes(events, cutIndex);
-  const { failed } = checkProbes(summaryText, probes);
-  const content = probes.filter((probe) => probe.class === "content");
-  const address = probes.filter((probe) => probe.class === "address");
-  const contentFailures = failed.filter(({ probe }) => probe.class === "content");
-  const addressFailures = failed.filter(({ probe }) => probe.class === "address");
-  return {
-    score: score(probes, failed),
-    contentScore: score(content, contentFailures),
-    addressScore: score(address, addressFailures),
-    failures: failed,
-  };
 };

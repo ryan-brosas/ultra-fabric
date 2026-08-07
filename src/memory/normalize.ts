@@ -684,15 +684,6 @@ export const readSessionHeader = (sessionFile: string): SessionHeaderInfo | null
   }
 };
 
-/** Re-read a single session line and return its full, untruncated text. */
-export const expandSessionEntry = (
-  sessionFile: string,
-  index: number,
-  options: NormalizeSessionOptions = {},
-): string | null => {
-  const { entries } = normalizeSession(sessionFile, Number.MAX_SAFE_INTEGER, options);
-  return entries.find((entry) => entry.index === index)?.text ?? null;
-};
 
 export interface ExpandSessionSelection {
   indices?: number[];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAdjacency, oneHop, dfs } from "../src/codemap/search.js";
+import { buildAdjacency, dfs } from "../src/codemap/search.js";
 import type { RankEdge } from "../src/codemap/rank.js";
 
 const nodes = ["A", "B", "C", "D"];
@@ -11,10 +11,6 @@ const edges: RankEdge[] = [
 const adj = buildAdjacency(nodes, edges);
 
 describe("search", () => {
-  it("oneHop returns direct neighbors", () => {
-    expect(oneHop(adj, "A")).toEqual(["B"]);
-    expect(oneHop(adj, "D")).toEqual([]);
-  });
 
   it("dfs at depth 0 returns only the query", () => {
     expect(dfs(adj, "A", 0)).toEqual(["A"]);
@@ -33,7 +29,7 @@ describe("search", () => {
       { from: "B", to: "C", weight: 1, kind: "invokes" },
     ];
     const onlyInvokes = buildAdjacency(["A", "B", "C"], mixed, { edgeKinds: ["invokes"] });
-    expect(oneHop(onlyInvokes, "A")).toEqual([]);
-    expect(oneHop(onlyInvokes, "B")).toEqual(["C"]);
+    expect(onlyInvokes.get("A") ?? []).toEqual([]);
+    expect(onlyInvokes.get("B") ?? []).toEqual(["C"]);
   });
 });

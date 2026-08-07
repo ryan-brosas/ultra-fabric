@@ -17,11 +17,6 @@ export const buildAdjacency = (
   return adj;
 };
 
-export const oneHop = (
-  adj: Map<string, string[]>,
-  query: string,
-): string[] => adj.get(query) ?? [];
-
 export const dfs = (
   adj: Map<string, string[]>,
   query: string,

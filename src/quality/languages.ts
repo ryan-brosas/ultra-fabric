@@ -53,15 +53,6 @@ const shebangLanguages: ReadonlyArray<readonly [RegExp, string]> = [
   [/\blua\b/i, "lua"],
 ];
 
-export const BUILTIN_QUALITY_LANGUAGE_IDS = Object.freeze([
-  ...new Set([
-    ...extensionLanguages.values(),
-    ...filenameLanguages.values(),
-    ...shebangLanguages.map(([, language]) => language),
-    "binary",
-    "unknown",
-  ]),
-].sort());
 
 const normalizedPathParts = (filePath: string): { basename: string; extension: string } => {
   const normalized = filePath.replaceAll("\\", "/");
