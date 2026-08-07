@@ -31,6 +31,7 @@ const setup = (
     mesh?: Partial<typeof DEFAULT_FABRIC_CONFIG.mesh>;
     now?: () => number;
     outcomeSink?: { record(input: import("../src/outcomes/store.js").FabricOutcomeInput): Promise<unknown> };
+    retryDependencies?: { sleep?: (delayMs: number) => Promise<void>; random?: () => number };
   } = {},
 ) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-persistentAgent-test-"));
@@ -53,6 +54,11 @@ const setup = (
     persistentAgentDeliveryMaxAttempts: deliveryMaxAttempts,
     ...runtime.mesh,
   };
+  const retryDependencies = {
+    sleep: async () => undefined,
+    random: () => 0,
+    ...(runtime.retryDependencies ?? {}),
+  };
   const deliveries: string[] = [];
   const persistentAgents = new PersistentAgentRuntime(
     "test",
@@ -67,10 +73,7 @@ const setup = (
       persistentAgentRoot: path.join(root, "persistentAgents"),
       persistent,
       ...(canManagePersistentAgent ? { canManagePersistentAgent } : {}),
-      retryDependencies: {
-        sleep: async () => undefined,
-        random: () => 0,
-      },
+      retryDependencies,
       ...(runtime.now ? { now: runtime.now } : {}),
       ...(runtime.outcomeSink ? { outcomeSink: runtime.outcomeSink } : {}),
     },
@@ -686,6 +689,51 @@ describe("PersistentAgentRuntime", () => {
 
     expect(reply).toMatchObject({ text: "fake worker complete", runAttempts: 2 });
     expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("honors the gateway Retry-After guidance for an admission-busy startup run", async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const state = setup(false, undefined, undefined, 1, {
+      mesh: {
+        persistentAgentRunMaxAttempts: 2,
+        persistentAgentRunBaseDelayMs: 0,
+        persistentAgentRunMaxDelayMs: 5000,
+        persistentAgentRunJitterMs: 0,
+      } as Partial<typeof DEFAULT_FABRIC_CONFIG.mesh>,
+      retryDependencies: { sleep },
+    });
+    const persistentAgent = await state.persistentAgents.create({ name: "worker", instructions: "Process work." });
+    const originalRun = state.agents.run.bind(state.agents);
+    const busyFailure: AgentRunResult = {
+      id: "startup-busy",
+      kind: "agent",
+      lifecycle: "one-shot",
+      role: "worker",
+      name: "worker",
+      task: "startup",
+      status: "failed",
+      transport: "process",
+      cwd: process.cwd(),
+      startedAt: 1,
+      updatedAt: 1,
+      finishedAt: 1,
+      turns: 0,
+      toolCalls: 0,
+      text: "",
+      error:
+        '503: {"error":{"code":"chat_admission_busy","message":"Chat admission capacity is temporarily unavailable. Retry shortly."}}',
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+    };
+    const run = vi
+      .spyOn(state.agents, "run")
+      .mockResolvedValueOnce(busyFailure)
+      .mockImplementation(originalRun);
+
+    const reply = await state.persistentAgents.ask(persistentAgent.id, "retry busy startup");
+
+    expect(reply).toMatchObject({ text: "fake worker complete", runAttempts: 2 });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(2000);
   });
 
   it("does not retry an persistentAgent failure after observable model work", async () => {

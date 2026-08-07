@@ -53,6 +53,7 @@ import { isFabricThinking, type FabricThinking } from "../../thinking.js";
 import { resolvePersistentAgentDeliveryPolicy } from "./delivery-policy.js";
 import { evaluatePersistentAgentValidWhile, validatePersistentAgentValidWhile } from "./predicate.js";
 import {
+  admissionBusyRetryAfterSeconds,
   retryWithBackoff,
   type RetryBackoffDependencies,
 } from "../../retry.js";
@@ -1417,6 +1418,14 @@ export class PersistentAgentRuntime {
                   !abortController.signal.aborted &&
                   !this.#closing &&
                   this.#canManageCached(persistentAgent.id),
+                // A busy-gateway startup failure waits out the upstream's
+                // documented recovery window (the gateway's Retry-After) instead
+                // of the fixed exponential ramp; bounds still apply via
+                // maxDelayMs and persistentAgentRunMaxAttempts.
+                retryAfterSeconds: (error) =>
+                  error instanceof RetryablePersistentAgentRunError
+                    ? admissionBusyRetryAfterSeconds(error.result.error)
+                    : undefined,
               },
               this.#retryDependencies,
             );

@@ -63,6 +63,10 @@ import {
   AGENT_STARTUP_RETRY_BASE_DELAY_MS,
   AGENT_STATUS_POLL_INTERVAL_MS,
 } from "./constants.js";
+import {
+  ADMISSION_BUSY_RETRY_AFTER_SECONDS,
+  isAdmissionBusyError,
+} from "../retry.js";
 const NESTED_SNAPSHOT_POLL_MS = 500;
 const TRANSPORT_EXIT_GRACE_MS = 1_000;
 const MAX_NAME_LENGTH = 60;
@@ -154,11 +158,23 @@ const terminalStatuses = new Set([
 const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-const retryablePiStartupError = (error: string | undefined): boolean =>
+export const retryablePiStartupError = (error: string | undefined): boolean =>
   typeof error === "string" &&
-  /\b(?:no|missing)\s+(?:api key|credentials?)\b|\b(?:api key|credentials?)\s+(?:was\s+)?not found\b/i.test(
+  (/\b(?:no|missing)\s+(?:api key|credentials?)\b|\b(?:api key|credentials?)\s+(?:was\s+)?not found\b/i.test(
     error,
-  );
+  ) ||
+    isAdmissionBusyError(error));
+
+// Admission-busy startup failures wait out the gateway's documented recovery
+// window (Retry-After guidance) instead of the auth-class exponential ramp;
+// both stay strictly bounded by AGENT_STARTUP_MAX_ATTEMPTS.
+export const startupRetryDelayMs = (
+  error: string | undefined,
+  attempt: number,
+): number =>
+  isAdmissionBusyError(error)
+    ? ADMISSION_BUSY_RETRY_AFTER_SECONDS * 1000
+    : AGENT_STARTUP_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
 
 const safeName = (value: string): string =>
   value
@@ -998,8 +1014,7 @@ export class OneShotAgentManager {
     ) {
       return false;
     }
-    const retryDelayMs =
-      AGENT_STARTUP_RETRY_BASE_DELAY_MS * 2 ** (managed.startupAttempts - 1);
+    const retryDelayMs = startupRetryDelayMs(record.error, managed.startupAttempts);
     if (Date.now() + retryDelayMs >= deadline) return false;
     await this.#waitForTransportExit(managed);
     await delay(retryDelayMs);
