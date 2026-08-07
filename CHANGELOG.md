@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.31.1-ultra.17 - 2026-08-08
+
+- init: /fabric init is now an interactive jump start. Greenfield checkouts get a short intake (project name, purpose, primary users, success priority) whose answers replace the AGENTS.md overview and project.md Purpose / Users-and-success placeholders.
+- init: every interactive run previews the plan behind a Write all / Cancel select before anything is written; Cancel aborts with nothing on disk. Non-interactive contexts keep the previous write-through behavior.
+- init: an existing tech-stack.md can be regenerated from fresh detection behind an explicit confirm, via a new overwrite plan action in the scaffold planner.
+- init: brownfield runs launch one bounded explorer (65k tokens, 180s) by default and write its brief into the architecture placeholders of files created in the same run; pre-existing files are never patched, and missing agent surfaces degrade to a skip note.
+- init: .pi/fabric.json now materializes the full DEFAULT_FABRIC_CONFIG pinned to the current configVersion instead of the two-key stub.
+- init: the stale present-tense legacy-migration notices after a completed .pi-to-root copy are gone; unreadable legacy siblings are reported as deferred, and the output closes with next-step guidance.
 ## 0.31.1-ultra.16 - 2026-08-08
 
 - prewalk: the executor now receives an explicit [DONE:n] emission contract in the continuation and reminder prompts, numbered by original checklist position, so completed items strike through in the progress widget in the same turn they finish; the widget re-reads live status after marking and tears down exactly once when the prewalk settles instead of leaving stale rows on the dashboard.
