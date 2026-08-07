@@ -162,6 +162,7 @@ describe("compaction config", () => {
       enabled: true,
       turnWindow: 2,
       minResultChars: 4_000,
+      maxResultChars: 24_000,
     });
   });
 
@@ -187,6 +188,7 @@ describe("compaction config", () => {
       enabled: false,
       turnWindow: 1,
       minResultChars: 1_000_000,
+      maxResultChars: 24_000,
     });
   });
 

@@ -36,19 +36,40 @@ Native OpenAI compaction is a provider request and may incur token charges. Its 
 
 Before every model request, Context QoS deterministically retires the body of an old successful `read`, `grep`, `find`, or `ls` result only when a newer result has the same typed tool name and canonical arguments. It never removes a message, so tool-call/result pairing remains intact. The most-recent user turns, errors, mutation results, non-text content, and typed Fabric traces/gates/evidence remain exact. Retirement markers carry the newer call id and original character count; the host accumulates pass, retired-result, retired-character, and protected-result counters.
 
+An oversized ceiling bounds the measured surge driver: an old successful result from a retirable tool (`read`, `grep`, `find`, `ls`, `fabric_exec`, or `codemap`) whose body exceeds `maxResultChars` is retired with a typed marker even when no newer equivalent result exists. A single huge unique result therefore cannot inflate context until compaction. The recent-turn window, errors, mutation results (for example `edit`/`write`/`bash`), evidence-bearing results, and non-text content stay byte-exact, and the pass is idempotent because markers are themselves protected.
+
 ```json
 {
   "compaction": {
     "contextQos": {
       "enabled": true,
       "turnWindow": 2,
-      "minResultChars": 4000
+      "minResultChars": 4000,
+      "maxResultChars": 24000
     }
   }
 }
 ```
 
+Keep delegated and exploration results small at the source: return structured evidence locators and bounded findings from `scout`/`explorer` roles and `consult.run` workers, prefer AST/graph navigation over whole-file reads, and read only the window you need. The QoS pass is the enforcement backstop, not a license to emit oversized tool output.
+
 This pass is independent of the compaction engine. Set `enabled` to `false` for byte-for-byte legacy request context.
+
+### Message-count ceiling
+
+Providers also cap the request history by message count; for example one hosted endpoint rejects requests with `413 chat_history_too_large` when the chat history exceeds 800 messages. Token-pressure compaction cannot predict that rejection because occupancy stays low in long message-dense sessions, and the hosted endpoint's error text (`chat_history_too_large`, `payload_too_large`, `message_limit`) is not yet matched by Pi 0.84.1's overflow classifier, so the automatic compact-and-retry does not recover it.
+
+Fabric therefore compacts proactively at a settled boundary when the active context reaches `compaction.messageThreshold` messages, before dispatch. The count is the compaction-aware active path (`sessionManager.buildContextEntries()`), counting every `message` entry, which mirrors what the provider sees in the request array. The default of `700` leaves safety room below an 800-message cap for injected prewalk continuation, checklist reminders, and skills.
+
+```json
+{
+  "compaction": {
+    "messageThreshold": 700
+  }
+}
+```
+
+The value is bounded to `200`–`1_000_000` and is independent of the occupancy thresholds: either condition compacts. If a session is already rejected, run `/compact` once to reduce the history, then retry the turn; the message ceiling prevents a repeat once Fabric is active.
 
 `/fabric settings` also exposes a **Threshold** for the active model. Thresholds
 are context-window occupancy ratios and are stored by canonical

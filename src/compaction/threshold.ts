@@ -19,8 +19,20 @@ export const compactAtConfiguredThreshold = async (
 ): Promise<boolean> => {
   const threshold = configuredCompactionThreshold(config, context.model) ?? config.compaction.threshold;
   const usage = context.getContextUsage();
-  if (usage?.percent === null || usage === undefined) return false;
-  if (usage.percent / 100 < threshold) return false;
+  // Proactive message-count guard: providers cap request history by message
+  // count (for example 800 messages). Compacting before dispatch keeps a long
+  // session from being rejected with a 413 chat_history_too_large error, which
+  // token-pressure compaction alone cannot predict or recover from.
+  const activeEntries = context.sessionManager?.buildContextEntries?.() ?? [];
+  // Providers cap the whole request message array (user, assistant, and tool
+  // results), so count every active message entry, not just user turns.
+  const activeMessages = activeEntries.filter((entry) => entry.type === "message").length;
+  const messageLimit = Math.max(1, Math.floor(config.compaction.messageThreshold));
+  const messageTriggered = activeMessages >= messageLimit;
+  if (!messageTriggered) {
+    if (usage?.percent === null || usage === undefined) return false;
+    if (usage.percent / 100 < threshold) return false;
+  }
 
   return new Promise<boolean>((resolve) => {
     context.compact({

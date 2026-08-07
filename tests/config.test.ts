@@ -615,6 +615,67 @@ describe("Fabric configuration", () => {
     expect(config.agents.transport).toBe("localterm");
   });
 
+  it("parses and bounds the compaction message ceiling", () => {
+    const root = temporaryDirectory();
+    const cwd = path.join(root, "project");
+    const agentDir = path.join(root, "agent");
+    const projectConfig = path.join(cwd, ".pi", "fabric.json");
+    fs.mkdirSync(path.dirname(projectConfig), { recursive: true });
+    fs.mkdirSync(agentDir, { recursive: true });
+
+    fs.writeFileSync(
+      projectConfig,
+      JSON.stringify({ compaction: { messageThreshold: 900 } }),
+    );
+    let config = loadFabricConfig({ cwd, agentDir, projectTrusted: true });
+    expect(config.compaction.messageThreshold).toBe(900);
+
+    fs.writeFileSync(
+      projectConfig,
+      JSON.stringify({ compaction: { messageThreshold: 10 } }),
+    );
+    config = loadFabricConfig({ cwd, agentDir, projectTrusted: true });
+    expect(config.compaction.messageThreshold).toBe(200);
+
+    fs.writeFileSync(projectConfig, JSON.stringify({ compaction: {} }));
+    config = loadFabricConfig({ cwd, agentDir, projectTrusted: true });
+    expect(config.compaction.messageThreshold).toBe(
+      DEFAULT_FABRIC_CONFIG.compaction.messageThreshold,
+    );
+  });
+
+  it("parses and bounds the context QoS oversized ceiling", () => {
+    const root = temporaryDirectory();
+    const cwd = path.join(root, "project");
+    const agentDir = path.join(root, "agent");
+    const projectConfig = path.join(cwd, ".pi", "fabric.json");
+    fs.mkdirSync(path.dirname(projectConfig), { recursive: true });
+    fs.mkdirSync(agentDir, { recursive: true });
+
+    fs.writeFileSync(
+      projectConfig,
+      JSON.stringify({ compaction: { contextQos: { maxResultChars: 50_000 } } }),
+    );
+    let config = loadFabricConfig({ cwd, agentDir, projectTrusted: true });
+    expect(config.compaction.contextQos.maxResultChars).toBe(50_000);
+    expect(config.compaction.contextQos.minResultChars).toBe(
+      DEFAULT_FABRIC_CONFIG.compaction.contextQos.minResultChars,
+    );
+
+    fs.writeFileSync(
+      projectConfig,
+      JSON.stringify({ compaction: { contextQos: { maxResultChars: 1 } } }),
+    );
+    config = loadFabricConfig({ cwd, agentDir, projectTrusted: true });
+    expect(config.compaction.contextQos.maxResultChars).toBe(256);
+
+    fs.writeFileSync(projectConfig, JSON.stringify({ compaction: { contextQos: {} } }));
+    config = loadFabricConfig({ cwd, agentDir, projectTrusted: true });
+    expect(config.compaction.contextQos.maxResultChars).toBe(
+      DEFAULT_FABRIC_CONFIG.compaction.contextQos.maxResultChars,
+    );
+  });
+
   it("updates the compaction engine environment across config re-initialization", () => {
     const root = temporaryDirectory();
     const cwd = path.join(root, "project");

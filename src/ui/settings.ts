@@ -46,6 +46,7 @@ const WIDGET_MODES = ["auto", "always", "hidden"] as const;
 const RESULT_FORMATS = ["auto", "yaml", "json", "text"] as const;
 const EXECUTOR_RUNTIMES = ["quickjs", "node-process"] as const;
 const COMPACTION_ENGINES = ["fabric", "pi"] as const;
+const COMPACTION_MESSAGE_THRESHOLDS = [400, 500, 600, 700, 750, 800, 900, 1_000, 2_000, 5_000, 10_000].map(String);
 const COMPACTION_THRESHOLD_SETTING_ID = "compaction.threshold";
 const COMPACTION_DEFAULT_THRESHOLD_LABEL = "Pi default";
 const COMPACTION_THRESHOLDS = [
@@ -1305,6 +1306,16 @@ export const buildFabricSettingsItems = (
             values: COMPACTION_ENGINES,
           }),
           setting(
+            "compaction.messageThreshold",
+            "Message ceiling",
+            String(config.compaction.messageThreshold),
+            {
+              description:
+                "Compacts before dispatch when the active context reaches this many messages, so a long session cannot be rejected by a provider 800-message cap.",
+              values: COMPACTION_MESSAGE_THRESHOLDS,
+            },
+          ),
+          setting(
             "compaction.contextQos.enabled",
             "Context QoS",
             config.compaction.contextQos.enabled ? "true" : "false",
@@ -1329,6 +1340,16 @@ export const buildFabricSettingsItems = (
             String(config.compaction.contextQos.minResultChars),
             {
               description: "Minimum text-result size eligible for deterministic retirement.",
+              values: CONTEXT_QOS_RESULT_CHARS,
+            },
+          ),
+          setting(
+            "compaction.contextQos.maxResultChars",
+            "Oversized ceiling",
+            String(config.compaction.contextQos.maxResultChars),
+            {
+              description:
+                "Old successful results above this many chars are retired with a typed marker so a single huge unique result cannot inflate context.",
               values: CONTEXT_QOS_RESULT_CHARS,
             },
           ),

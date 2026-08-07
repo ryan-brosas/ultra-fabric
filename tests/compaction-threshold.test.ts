@@ -4,9 +4,19 @@ import { registerCompactionHook } from "../src/compaction/hook.js";
 import { compactAtConfiguredThreshold, modelCompactionKey } from "../src/compaction/threshold.js";
 import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
 
-const contextWithUsage = (percent: number | null): ExtensionContext => ({
+const contextWithUsage = (
+  percent: number | null,
+  messageCount = 0,
+): ExtensionContext => ({
   model: { provider: "anthropic", id: "sonnet" },
   getContextUsage: () => ({ tokens: percent === null ? null : percent * 1_000, contextWindow: 100_000, percent }),
+  sessionManager: {
+    buildContextEntries: () =>
+      Array.from({ length: messageCount }, () => ({
+        type: "message",
+        message: { role: "user", content: "x" },
+      })),
+  },
   compact: vi.fn((options) => options?.onComplete?.({} as never)),
   hasUI: true,
   ui: { notify: vi.fn() },
@@ -68,6 +78,19 @@ describe("model-linked compaction thresholds", () => {
     config.compaction.threshold = 0.95;
     await expect(compactAtConfiguredThreshold(context, config)).resolves.toBe(false);
     expect(context.compact).not.toHaveBeenCalled();
+  });
+
+  it("compacts before a provider message-count cap even at low token occupancy", async () => {
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.compaction.messageThreshold = 700;
+
+    const below = contextWithUsage(10, 699);
+    await expect(compactAtConfiguredThreshold(below, config)).resolves.toBe(false);
+    expect(below.compact).not.toHaveBeenCalled();
+
+    const reached = contextWithUsage(10, 700);
+    await expect(compactAtConfiguredThreshold(reached, config)).resolves.toBe(true);
+    expect(reached.compact).toHaveBeenCalledOnce();
   });
 
   it("compacts at the global default threshold for a model with no entry", async () => {

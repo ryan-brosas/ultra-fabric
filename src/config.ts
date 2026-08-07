@@ -215,12 +215,22 @@ interface FabricUiConfig {
 interface FabricContextQosConfig {
   enabled: boolean;
   turnWindow: number;
+  // Supersession floor: only results at least this large are retired when a
+  // newer equivalent result exists.
   minResultChars: number;
+  // Oversized ceiling: an old successful result from a retirable tool whose
+  // body exceeds this many characters is retired with a typed marker, so a
+  // single huge unique result cannot inflate context until compaction.
+  maxResultChars: number;
 }
 
 interface FabricCompactionConfig {
   engine: FabricCompactionEngine;
   targetContextRatio: number;
+  // Proactive message-count ceiling for the active context. Providers cap
+  // request history by message count (for example 800 messages); this compacts
+  // before dispatch so a long session cannot be rejected by the provider.
+  messageThreshold: number;
   // Global auto-compaction threshold (fraction of the context window) applied
   // to any model without a per-model entry in thresholds. Per-model entries
   // win. A model with neither now compacts automatically instead of silently
@@ -415,12 +425,14 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
   compaction: {
     engine: "fabric",
     targetContextRatio: 0.65,
+    messageThreshold: 700,
     threshold: 0.85,
     thresholds: {},
     contextQos: {
       enabled: true,
       turnWindow: 2,
       minResultChars: 4_000,
+      maxResultChars: 24_000,
     },
   },
   outcomes: {
@@ -1161,6 +1173,12 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         0.25,
         0.85,
       ),
+      messageThreshold: boundedInteger(
+        compaction.messageThreshold,
+        DEFAULT_FABRIC_CONFIG.compaction.messageThreshold,
+        200,
+        1_000_000,
+      ),
       threshold: boundedFloat(
         compaction.threshold,
         DEFAULT_FABRIC_CONFIG.compaction.threshold,
@@ -1182,6 +1200,12 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         minResultChars: boundedInteger(
           contextQos.minResultChars,
           DEFAULT_FABRIC_CONFIG.compaction.contextQos.minResultChars,
+          256,
+          1_000_000,
+        ),
+        maxResultChars: boundedInteger(
+          contextQos.maxResultChars,
+          DEFAULT_FABRIC_CONFIG.compaction.contextQos.maxResultChars,
           256,
           1_000_000,
         ),

@@ -14,6 +14,12 @@ interface MessageShape {
 }
 
 const RETIRABLE = new Set(["read", "grep", "find", "ls"]);
+// Oversized retirement covers the measured context drivers (delegated
+// fabric_exec output, graph exploration) plus the retirable readers. Mutation
+// results, errors, non-text content, and evidence-bearing results stay exact.
+const OVERSIZED_RETIRABLE = new Set([
+  "read", "grep", "find", "ls", "fabric_exec", "codemap",
+]);
 export const MARKER_KIND = "pi-fabric.context-qos";
 
 const canonical = (value: unknown): unknown => {
@@ -93,7 +99,7 @@ const resultIdentity = (
 
 export const applyContextQos = <Message extends MessageShape>(
   messages: Message[],
-  options: { turnWindow: number; minResultChars: number },
+  options: { turnWindow: number; minResultChars: number; maxResultChars?: number },
 ): { messages: Message[]; changed: boolean; report: ContextQosReport } => {
   const calls = identities(messages);
   const boundary = protectedBoundary(messages, options.turnWindow);
@@ -143,6 +149,43 @@ export const applyContextQos = <Message extends MessageShape>(
     };
     retiredResults++;
     retiredChars += candidate.body.length;
+  }
+
+  // Oversized retirement: a single huge unique result (the measured surge
+  // driver: delegated fabric_exec output, graph exploration) inflates context
+  // until compaction because no newer equivalent result ever supersedes it.
+  // Retire old successful bodies above the ceiling with a typed marker; the
+  // recent window, errors, mutations, evidence, and non-text content stay exact.
+  const ceiling =
+    options.maxResultChars === undefined ? Infinity : Math.max(1, Math.floor(options.maxResultChars));
+  if (ceiling !== Infinity) {
+    for (let index = 0; index < output.length; index++) {
+      const message = output[index]!;
+      const result = resultIdentity(message, calls);
+      const body = textBody(message.content);
+      if (!result || body === undefined || body.length <= ceiling) continue;
+      if (index >= boundary || message.isError === true || evidenceBearing(message.details)) {
+        protectedResults++;
+        continue;
+      }
+      if (!OVERSIZED_RETIRABLE.has(result.name)) continue;
+      const original = messages[index]!;
+      output[index] = {
+        ...original,
+        content: [{
+          type: "text",
+          text: `[context-qos retired oversized ${result.name} result; original ${body.length} chars]`,
+        }],
+        details: {
+          kind: MARKER_KIND,
+          version: 1,
+          reason: "oversized_result",
+          originalChars: body.length,
+        },
+      };
+      retiredResults++;
+      retiredChars += body.length;
+    }
   }
 
   return {
