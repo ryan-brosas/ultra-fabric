@@ -17,9 +17,9 @@ export const compactAtConfiguredThreshold = async (
   context: ExtensionContext,
   config: FabricConfig,
 ): Promise<boolean> => {
-  const threshold = configuredCompactionThreshold(config, context.model);
+  const threshold = configuredCompactionThreshold(config, context.model) ?? config.compaction.threshold;
   const usage = context.getContextUsage();
-  if (threshold === undefined || usage?.percent === null || usage === undefined) return false;
+  if (usage?.percent === null || usage === undefined) return false;
   if (usage.percent / 100 < threshold) return false;
 
   return new Promise<boolean>((resolve) => {

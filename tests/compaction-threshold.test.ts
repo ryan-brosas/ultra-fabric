@@ -65,7 +65,24 @@ describe("model-linked compaction thresholds", () => {
     expect(context.compact).not.toHaveBeenCalled();
 
     config.compaction.thresholds = {};
+    config.compaction.threshold = 0.95;
     await expect(compactAtConfiguredThreshold(context, config)).resolves.toBe(false);
     expect(context.compact).not.toHaveBeenCalled();
+  });
+
+  it("compacts at the global default threshold for a model with no entry", async () => {
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.compaction.thresholds = {};
+    config.compaction.threshold = 0.85;
+    await expect(compactAtConfiguredThreshold(contextWithUsage(84), config)).resolves.toBe(false);
+    await expect(compactAtConfiguredThreshold(contextWithUsage(85), config)).resolves.toBe(true);
+  });
+
+  it("lets a per-model entry win over the global default", async () => {
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.compaction.thresholds["anthropic/sonnet"] = 0.8;
+    config.compaction.threshold = 0.9;
+    await expect(compactAtConfiguredThreshold(contextWithUsage(82), config)).resolves.toBe(true);
+    await expect(compactAtConfiguredThreshold(contextWithUsage(88), config)).resolves.toBe(true);
   });
 });

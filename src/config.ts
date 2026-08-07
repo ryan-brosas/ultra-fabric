@@ -221,6 +221,11 @@ interface FabricContextQosConfig {
 interface FabricCompactionConfig {
   engine: FabricCompactionEngine;
   targetContextRatio: number;
+  // Global auto-compaction threshold (fraction of the context window) applied
+  // to any model without a per-model entry in thresholds. Per-model entries
+  // win. A model with neither now compacts automatically instead of silently
+  // never compacting.
+  threshold: number;
   thresholds: Record<string, number>;
   contextQos: FabricContextQosConfig;
 }
@@ -410,6 +415,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
   compaction: {
     engine: "fabric",
     targetContextRatio: 0.65,
+    threshold: 0.85,
     thresholds: {},
     contextQos: {
       enabled: true,
@@ -1154,6 +1160,12 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         DEFAULT_FABRIC_CONFIG.compaction.targetContextRatio,
         0.25,
         0.85,
+      ),
+      threshold: boundedFloat(
+        compaction.threshold,
+        DEFAULT_FABRIC_CONFIG.compaction.threshold,
+        0.5,
+        0.95,
       ),
       thresholds: compactionThresholds,
       contextQos: {

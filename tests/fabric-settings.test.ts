@@ -167,8 +167,8 @@ describe("FabricSettingsComponent", () => {
   it("exposes the compaction engine", () => {
     const items = buildItems();
     const compaction = items.find((item) => item.id === "compaction");
-    expect(compaction?.currentValue).toBe("fabric · QoS on");
-    const lines = compaction!.submenu!("", () => {}).render(80).join("\n");
+    expect(compaction?.currentValue).toBe("fabric · 85% · QoS on");
+    const lines = compaction!.submenu!("", () => {}).render(200).join("\n");
     expect(lines).toContain("Threshold");
     expect(lines).toContain("Pi default");
     expect(lines).toContain("anthropic/claude-sonnet-4-5");

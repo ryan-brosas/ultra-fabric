@@ -286,7 +286,7 @@ const summaryFor = (id: string, config: FabricConfig): string => {
     case "ui":
       return config.ui.widget;
     case "compaction":
-      return `${config.compaction.engine} · QoS ${config.compaction.contextQos.enabled ? "on" : "off"}`;
+      return `${config.compaction.engine} · ${Math.round(config.compaction.threshold * 100)}% · QoS ${config.compaction.contextQos.enabled ? "on" : "off"}`;
     case "outcomes":
       return config.outcomes.enabled
         ? `learning · min ${config.outcomes.minRecommendationSamples}`
