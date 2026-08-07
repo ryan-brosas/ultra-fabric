@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -37,3 +37,26 @@ jobs:
           node -e "const { version } = require('./package.json'); const expected = 'v' + version; if (process.env.GITHUB_REF_NAME !== expected) throw new Error('Expected tag ' + expected + ', received ' + process.env.GITHUB_REF_NAME)"
       - name: Publish prerelease
         run: npm publish --access public --tag next
+      - name: Build release notes
+        run: >-
+          node scripts/release-notes.mjs
+          --version "${GITHUB_REF_NAME#v}"
+          --out "$RUNNER_TEMP/release"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          TAG="$GITHUB_REF_NAME";
+          TITLE_FILE="$RUNNER_TEMP/release/release-title.txt";
+          BODY_FILE="$RUNNER_TEMP/release/release-body.md";
+          PREV_FILE="$RUNNER_TEMP/release/release-prev.txt";
+          PREV="$(cat "$PREV_FILE")";
+          if [ -n "$PREV" ]; then
+            gh api "repos/${{ github.repository }}/compare/$PREV...$TAG" \
+              --jq '.commits[].commit.message | split("\n")[0]' | sed 's/^/- /' \
+              | { printf '\n## Commits\n\n'; cat; } >> "$BODY_FILE";
+          fi;
+          gh release create "$TAG" --repo "${{ github.repository }}" \
+            --title "$(cat "$TITLE_FILE")" --notes-file "$BODY_FILE" \
+            || gh release edit "$TAG" --repo "${{ github.repository }}" \
+              --title "$(cat "$TITLE_FILE")" --notes-file "$BODY_FILE"

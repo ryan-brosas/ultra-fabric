@@ -27,6 +27,20 @@ Publishing is driven entirely by pushing a `v*` tag. GitHub Actions publishes ov
    git push origin refs/tags/v<version>
    ```
 
+## Automated GitHub Release
+
+The publish workflow also creates a detailed GitHub Release from the matching
+`CHANGELOG.md` section. `scripts/release-notes.mjs` extracts the section for
+the tagged version (no network, no model calls), writes `release-title.txt`
+(`ultra-fabric <version>`), `release-body.md` (changelog section, install
+command, compare link to the previous version, release and npm links), and
+`release-prev.txt` (previous release tag). The workflow appends a compact
+commit list via the GitHub API when a previous tag exists, then creates the
+release with `gh release create`; a rerun over an existing release edits it
+in place, so release creation is idempotent. This requires the
+`contents: write` permission on the workflow. The release body is derived
+from the changelog, so keep changelog bullets factual and detailed.
+
 ## Do not use --follow-tags
 
 It silently does the wrong thing in this repo. It skips lightweight tags, so the release never triggers, and it pushes every local annotated tag not yet on the remote — which sends the inherited upstream fork tags (`v0.1.0` through `v0.30.3`) to origin as clutter. Those old tags predate `.github/workflows/release.yml`, so they trigger no workflow runs, but they do not belong on the fork. Push the release tag by explicit ref instead.

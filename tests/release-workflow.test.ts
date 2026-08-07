@@ -29,7 +29,9 @@ describe("npm release workflow", () => {
     const commands = steps.flatMap((step) => step.run ?? []);
 
     expect(workflow.on?.push?.tags).toEqual(["v*"]);
-    expect(workflow.permissions).toEqual({ contents: "read", "id-token": "write" });
+    // contents: write is required for creating the detailed GitHub Release
+    // from the changelog section; npm publishing stays tokenless via OIDC.
+    expect(workflow.permissions).toEqual({ contents: "write", "id-token": "write" });
     expect(publish?.["timeout-minutes"]).toBe(20);
     expect(steps.map((step) => step.uses).filter(Boolean)).toEqual([
       "actions/checkout@v6",
@@ -42,6 +44,12 @@ describe("npm release workflow", () => {
     expect(commands.some((command) => command.includes("GITHUB_REF_NAME") && command.includes("package.json")))
       .toBe(true);
     expect(commands).toContain("npm publish --access public --tag next");
+    const notes = steps.find((step) => step.name === "Build release notes");
+    expect(notes?.run).toContain("scripts/release-notes.mjs");
+    const release = steps.find((step) => step.name === "Create GitHub Release");
+    expect(release?.run).toContain("gh release create");
+    // Reruns edit the existing release in place instead of failing.
+    expect(release?.run).toContain("gh release edit");
     expect(source).not.toMatch(/NODE_AUTH_TOKEN|secrets\./);
   });
 });
