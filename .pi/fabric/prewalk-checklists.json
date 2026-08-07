@@ -1,5 +1,90 @@
 [
   {
+    "task": "also can we look on ultra-fabric to make it work to the latest version of pi... it is kind of breaking the tui or something so can we adjust it to the latest version",
+    "checklist": {
+      "items": [
+        {
+          "task": "Adapt to Pi 0.84.1: fix the ProviderHeaders null-value break in src/compaction/openai-native.ts (filter null header values), plus any further typecheck fallout from the 0.83->0.84.1 devDep bump already applied to package.json/lockfile.",
+          "validation": "pnpm exec tsc --noEmit exits 0 against @earendil-works/*@0.84.1."
+        },
+        {
+          "task": "Run the full staged gate (build, vitest, knip, smoke:package) to surface runtime/TUI behavior drift beyond types; fix any failures minimally in upstream-shaped style.",
+          "validation": "All stages exit 0; any TUI-related test failures fixed and named in the summary."
+        },
+        {
+          "task": "Probe TUI surface compatibility directly: run the render-heavy suites (fabric-ui, ui-transcript, core-tool-render, fovea render) and the packed-extension smoke against the 0.84.1 host API.",
+          "validation": "Render suites green; smoke passes; summary states what 0.84 changed and what was adjusted."
+        }
+      ],
+      "readyAt": 1786091633655,
+      "easy": true
+    },
+    "recordedAt": 1786091928973
+  },
+  {
+    "task": "restarted are we loading the updated one?",
+    "checklist": {
+      "items": [
+        {
+          "task": "RED tests for a global compaction threshold: config normalization accepts compaction.threshold (bounded 0.5-0.95, default 0.85), and configuredCompactionThreshold in src/compaction/threshold.ts falls back to it for any model without a per-model thresholds entry, with the per-model entry still winning. Extend the existing threshold/config test files.",
+          "validation": "New tests fail against current code (thresholds miss returns undefined today), demonstrating the auto-compact hole for claude-bridge/claude-fable-5."
+        },
+        {
+          "task": "Implement the knob: add threshold to FabricCompactionConfig with default 0.85 in DEFAULT_FABRIC_CONFIG and normalizeFabricConfig (boundedFloat 0.5-0.95); make compactAtConfiguredThreshold use per-model ?? global; surface the value in the /fabric settings compaction section summary.",
+          "validation": "RED tests GREEN; settings section renders the default threshold; a model absent from thresholds now compacts at 0.85 in the unit test."
+        },
+        {
+          "task": "RED tests for checklist progress: a pure parser in src/prewalk (extract [DONE:n] markers from assistant text, 1-based indexes bounded by item count, idempotent) and PrewalkController.markChecklistDone(sessionId, indexes) that records completed item indexes on the live checklist state without mutating items.",
+          "validation": "Parser tests cover [DONE:1], multiple markers, out-of-range, duplicates; controller test shows completion survives status() reads and resets on cancel/new checklist."
+        },
+        {
+          "task": "Wire progress into the loop: observe assistant turns at the existing settle/continuation observation point in src/index.ts (same place continuation settlement reads the branch), feed markers to the controller, and render ui.setStatus 'checklist n/m' plus a setWidget list with completed items struck (adopting prime-agent plan-mode's widget semantics, ASCII only).",
+          "validation": "Integration-style test at the controller boundary: after marking items 1 and 3 of 5, status text contains 3/5-style progress and the widget lines mark them done."
+        },
+        {
+          "task": "Token-optimize the continuation reminder: prewalkChecklistReminder (src/prewalk/continuation.ts) omits completed items, rendering only open ones plus a one-line 'n of m done' header, so long workflows stop re-sending finished steps every turn.",
+          "validation": "RED test: with items 1-2 of 5 done, the reminder contains items 3-5 only and the done-count header; with none done, output matches current shape."
+        },
+        {
+          "task": "Run the staged repository gate: typecheck, build, full vitest, knip, smoke:package, then git diff --check and git status.",
+          "validation": "All five stages exit 0; only intended files dirty."
+        },
+        {
+          "task": "Live proof: with the new build, confirm compactAtConfiguredThreshold picks the 0.85 default for claude-bridge/claude-fable-5 via a unit-level probe, and exercise a checklist with [DONE:n] markers showing the widget/status progress path end to end in tests.",
+          "validation": "Probe shows a defined threshold for an unlisted model; the progress test suite passes; summary reports where compaction will now trigger (0.85 of context window) for the operator's Main model."
+        }
+      ],
+      "readyAt": 1786090593710
+    },
+    "recordedAt": 1786091445176
+  },
+  {
+    "task": "can you test... we restarted already",
+    "checklist": {
+      "items": [
+        {
+          "task": "Mark 0.31.1-ultra.11: bump package.json, add the CHANGELOG section, update both README install pins, commit exactly those three files as chore(release): mark 0.31.1-ultra.11.",
+          "validation": "git show --stat HEAD lists only package.json, CHANGELOG.md, README.md."
+        },
+        {
+          "task": "Run the staged gate (typecheck, build, vitest, knip, smoke:package) before tagging.",
+          "validation": "All five stages exit 0."
+        },
+        {
+          "task": "Create annotated tag v0.31.1-ultra.11 and push: git push origin main, then git push origin refs/tags/v0.31.1-ultra.11 (never --follow-tags).",
+          "validation": "Both pushes succeed; GitHub Actions publish triggers on the tag."
+        },
+        {
+          "task": "Verify the npm publish: dist-tags show next = 0.31.1-ultra.11 via the registry query from the release skill.",
+          "validation": "curl registry dist-tags returns 0.31.1-ultra.11 under next."
+        }
+      ],
+      "readyAt": 1786089021345,
+      "easy": true
+    },
+    "recordedAt": 1786089478876
+  },
+  {
     "task": "liar... I still don't see any src sources on it",
     "checklist": {
       "items": [
@@ -430,120 +515,5 @@
       "readyAt": 1786020025979
     },
     "recordedAt": 1786020152432
-  },
-  {
-    "task": "go ahead commit and do the deepswe test with our prewalk stuff...",
-    "checklist": {
-      "items": [
-        {
-          "task": "Add an explicit DeepSWE fabric-prewalk configuration without changing baseline or existing fabric-local semantics",
-          "validation": "runner accepts fabric-prewalk and matrix dry-run emits a distinct resumable job"
-        },
-        {
-          "task": "Write isolated fabric.json for the prewalk cell with autoScout, failureMemory, checklist reuse, retirement, and cheap scout/explorer role models",
-          "validation": "generated config is valid, opt-in, and contains no credentials"
-        },
-        {
-          "task": "Ensure the Pier adapter copies fabric.json into PI_CODING_AGENT_DIR for Fabric cells only",
-          "validation": "adapter unit test observes the file inside the isolated upload and baseline remains config-free"
-        },
-        {
-          "task": "Add harness regression tests for config parsing, clean-worktree rules, and dry-run command construction",
-          "validation": "Python and shell harness tests pass"
-        },
-        {
-          "task": "Run a free one-task paired dry-run and inspect the exact baseline versus prewalk commands",
-          "validation": "two deterministic jobs are printed and paid-cell count remains bounded"
-        },
-        {
-          "task": "Run one paid paired canary task (baseline vs fabric-prewalk, one attempt each) through Pier",
-          "validation": "both jobs finish or a concrete environment/provider blocker is captured without rerunning unchanged"
-        },
-        {
-          "task": "Analyze matched results and record reward, tokens, cost, wall time, tool/read pathology, and prewalk evidence",
-          "validation": "comparison JSON is written and claims distinguish measured result from harness limitations"
-        },
-        {
-          "task": "Update README/bench docs only if the paid result is valid, then run repository gates",
-          "validation": "pnpm run check, Python bench tests, git diff --check, and status pass"
-        }
-      ],
-      "readyAt": 1786015358228
-    },
-    "recordedAt": 1786018384463
-  },
-  {
-    "task": "can we do a full deepswe test all the test that we have, then update our metrics on readme, we can differentiate this from original like we are steering this more on prewalk, token optimization, and well agent utilization for context handlign and such.... and well codemode better I guess?",
-    "checklist": {
-      "items": [
-        {
-          "task": "Inventory every committed test, check, smoke, benchmark, and soak command plus current README metrics",
-          "validation": "package scripts and README metric sections are enumerated with no hidden gate omitted"
-        },
-        {
-          "task": "Run the complete repository gate and all additional bounded test suites not already included",
-          "validation": "commands, pass counts, durations, and failures are captured"
-        },
-        {
-          "task": "Run codemap and prewalk benchmark or stress commands that are safe and hermetic",
-          "validation": "results are recorded with skipped external-fixture cases labeled"
-        },
-        {
-          "task": "Compare Ultra's current public capabilities with upstream-facing claims in README and architecture docs",
-          "validation": "every differentiator maps to implemented source/config/test evidence"
-        },
-        {
-          "task": "Update README positioning and metrics for prewalk-first orchestration, token optimization, context-agent utilization, and code mode/codemap",
-          "validation": "README contains reproducible commands, measured numbers, and no unsupported superiority claim"
-        },
-        {
-          "task": "Run README/package smoke, pnpm run check, git diff --check, and status",
-          "validation": "all repository gates pass and only intended files change"
-        }
-      ],
-      "readyAt": 1786014259453
-    },
-    "recordedAt": 1786015019277
-  },
-  {
-    "task": "continue",
-    "checklist": {
-      "items": [
-        {
-          "task": "Update config migration expectation for the intentionally retired agent runner field",
-          "validation": "tests/config-migrations.test.ts passes"
-        },
-        {
-          "task": "Restore disable-model-invocation metadata on specialized user-only skills",
-          "validation": "skill hierarchy test leaves only fabric-exec model-invocable"
-        },
-        {
-          "task": "Repair the Fusion TypeScript program for the Pi-only model path",
-          "validation": "all fenced skill programs type-check"
-        },
-        {
-          "task": "Update Fusion behavior assertion to the current failure envelope",
-          "validation": "tests/skill-program-behavior.test.ts passes"
-        },
-        {
-          "task": "Run pnpm run check from the normal shell",
-          "validation": "repository release gate exits 0"
-        },
-        {
-          "task": "Bump package version and add changelog entry",
-          "validation": "package and changelog agree on the new prerelease"
-        },
-        {
-          "task": "Commit release fixes and release metadata",
-          "validation": "main contains focused commits and is clean except root context duplicates"
-        },
-        {
-          "task": "Push main and annotated release tag, then verify npm next",
-          "validation": "origin refs updated and registry shows the new version"
-        }
-      ],
-      "readyAt": 1786012542697
-    },
-    "recordedAt": 1786014162544
   }
 ]
