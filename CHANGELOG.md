@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.31.1-ultra.18 - 2026-08-08
+
+- prewalk: the progress widget tears itself down the moment every checklist item is done instead of retaining fully struck-through rows on the dashboard; the message handler now routes the live checklist through a pure checklistWidgetView that returns null once the list is complete (or empty).
 ## 0.31.1-ultra.17 - 2026-08-08
 
 - init: /fabric init is now an interactive jump start. Greenfield checkouts get a short intake (project name, purpose, primary users, success priority) whose answers replace the AGENTS.md overview and project.md Purpose / Users-and-success placeholders.
