@@ -121,12 +121,19 @@ const withRemoteCompactionFeature = (
 const requestHeaders = (
   model: ActiveModel,
   apiKey: string,
-  configured: Record<string, string> | undefined,
+  // Pi 0.84 ProviderHeaders allows null values (a null unsets a default
+  // header); drop them here since fetch headers must be strings.
+  configured: Record<string, string | null> | undefined,
   sessionId: string,
 ): Record<string, string> => {
+  const configuredClean = Object.fromEntries(
+    Object.entries(configured ?? {}).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
   const headers: Record<string, string> = {
     authorization: `Bearer ${apiKey}`,
-    ...withRemoteCompactionFeature(configured ?? {}),
+    ...withRemoteCompactionFeature(configuredClean),
     accept: "text/event-stream",
     "content-type": "application/json",
     "x-codex-installation-id": CODEX_INSTALLATION_ID,
