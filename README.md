@@ -207,14 +207,14 @@ Requires Node.js 24+ and Pi 0.80.6+. Fabric checks the host version at startup a
 Pin an exact experimental version so it does not move:
 
 ```bash
-pi install npm:ultra-fabric@0.31.1-ultra.12
+pi install npm:ultra-fabric@0.31.1-ultra.13
 ```
 
 If `pi-fabric` is installed, replace it rather than loading both:
 
 ```bash
 pi remove npm:pi-fabric
-pi install npm:ultra-fabric@0.31.1-ultra.12
+pi install npm:ultra-fabric@0.31.1-ultra.13
 ```
 
 Restart Pi after changing extension packages.

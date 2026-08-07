@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.31.1-ultra.13 - 2026-08-07
+
+- exec: add a bounded per-session `carry` namespace so JSON-safe guest state survives across sequential `fabric_exec` calls in both QuickJS and node-process runtimes.
+- exec: reject full `pi.write` overwrites after a truncated `pi.read`, and elide pathological oversized scalar arrays before they consume model context.
+- prewalk: make delegation guidance match the configured worker ceiling and claim accepted checklists as handoff boundaries, fixing headless sessions that stopped at the plan without running the executor.
+- project: reset invalid pre-fix DeepSWE evidence and include benchmark/source material in the project code graph.
+
 ## 0.31.1-ultra.12 - 2026-08-07
 
 - compaction: auto-compact every model via a global `compaction.threshold` (default 0.85); per-model entries still win. Models without an entry previously never auto-compacted.
