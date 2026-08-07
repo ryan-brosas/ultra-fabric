@@ -28,7 +28,8 @@ export type AgentRunStatus =
   | "completed"
   | "failed"
   | "stopped"
-  | "timed_out";
+  | "timed_out"
+  | "budget_exhausted";
 
 export type AgentToolResultMessage = Extract<
   SessionMessageEntry["message"],
@@ -160,7 +161,7 @@ export interface AgentRunRecord {
 }
 
 export interface AgentRunResult extends AgentRunRecord {
-  status: "completed" | "failed" | "stopped" | "timed_out";
+  status: "completed" | "failed" | "stopped" | "timed_out" | "budget_exhausted";
 }
 
 export interface AgentHandleInfo {

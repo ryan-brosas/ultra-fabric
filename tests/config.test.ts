@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_FABRIC_CONFIG,
   MAX_EXECUTOR_MEMORY_LIMIT_BYTES,
+  MIN_AGENT_TIMEOUT_MS,
   QUICKJS_MAX_MEMORY_LIMIT_BYTES,
   effectiveToolCaptureConfig,
   loadFabricConfig,
@@ -148,7 +149,6 @@ describe("Fabric configuration", () => {
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       arm: "task",
       delegateContext: true,
-      autoScout: true,
     });
     expect(normalizeFabricConfig({ prewalk: { model: "   " } }).prewalk).toEqual({
       triggerRisks: [],
@@ -156,7 +156,6 @@ describe("Fabric configuration", () => {
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       arm: "task",
       delegateContext: true,
-      autoScout: true,
     });
     expect(normalizeFabricConfig({ prewalk: { arm: "off" } }).prewalk).toEqual({
       triggerRisks: [],
@@ -164,7 +163,6 @@ describe("Fabric configuration", () => {
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       arm: "off",
       delegateContext: true,
-      autoScout: true,
     });
         // Arming defaults to per-task (the legacy always-rearm default) and only
     // stays off when the user explicitly opts out.
@@ -187,6 +185,27 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ prewalk: { autoScout: true } }).prewalk).toMatchObject({
       autoScout: true,
     });
+    // Scout budget knobs are overrides like failureMemory: absent by default
+    // (the effective 180s / 65536 defaults live in scout-brief.ts), accepted as
+    // numbers, clamped to the agent timeout bounds, and rejected when invalid.
+    expect(DEFAULT_FABRIC_CONFIG.prewalk).not.toHaveProperty("scoutTimeoutMs");
+    expect(DEFAULT_FABRIC_CONFIG.prewalk).not.toHaveProperty("scoutMaxTokens");
+    expect(normalizeFabricConfig({}).prewalk).not.toHaveProperty("scoutTimeoutMs");
+    expect(normalizeFabricConfig({ prewalk: { scoutTimeoutMs: 90_000 } }).prewalk).toMatchObject({
+      scoutTimeoutMs: 90_000,
+    });
+    expect(
+      normalizeFabricConfig({ prewalk: { scoutMaxTokens: 8_192 } }).prewalk,
+    ).toMatchObject({ scoutMaxTokens: 8_192 });
+    expect(
+      normalizeFabricConfig({ prewalk: { scoutTimeoutMs: 10 } }).prewalk,
+    ).toMatchObject({ scoutTimeoutMs: MIN_AGENT_TIMEOUT_MS });
+    expect(
+      normalizeFabricConfig({ prewalk: { scoutMaxTokens: -5 } }).prewalk,
+    ).toMatchObject({ scoutMaxTokens: 1 });
+    expect(normalizeFabricConfig({ prewalk: { scoutTimeoutMs: "nope" } }).prewalk).not.toHaveProperty(
+      "scoutTimeoutMs",
+    );
     // The CGC read-only bridge is opt-in and separate from the project graph.
     expect(DEFAULT_FABRIC_CONFIG.codemap).toMatchObject({ enabled: false, timeoutMs: 30_000 });
     expect(normalizeFabricConfig({}).codemap.enabled).toBe(false);
@@ -208,11 +227,13 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ codemap: { cgc: { context: "   " } } }).codemap).not.toHaveProperty(
       "context",
     );
-    // Agent-utilization levers default on (opencode-style task-first delegation);
-    // an explicit false still disables each one. Learning and retirement levers
-    // stay opt-in until the Slice 8 benchmark gate.
-    expect(DEFAULT_FABRIC_CONFIG.prewalk).toMatchObject({ autoScout: true, delegateContext: true });
-    expect(normalizeFabricConfig({}).prewalk).toMatchObject({ autoScout: true, delegateContext: true });
+    // delegateContext defaults on (opencode-style task-first delegation) but
+    // autoScout is explicit opt-in: sending a prompt never spawns a scout, and
+    // an explicit false still disables it. Learning and retirement levers stay
+    // opt-in until the Slice 8 benchmark gate.
+    expect(DEFAULT_FABRIC_CONFIG.prewalk).toMatchObject({ autoScout: false, delegateContext: true });
+    expect(normalizeFabricConfig({}).prewalk).toMatchObject({ delegateContext: true });
+    expect(normalizeFabricConfig({}).prewalk).not.toHaveProperty("autoScout");
     expect(normalizeFabricConfig({ prewalk: { autoScout: false } }).prewalk).not.toHaveProperty(
       "autoScout",
     );
@@ -703,7 +724,6 @@ describe("Fabric configuration", () => {
       triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
       arm: "task",
       delegateContext: true,
-      autoScout: true,
     });
   });
 

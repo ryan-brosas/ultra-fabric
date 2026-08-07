@@ -718,6 +718,37 @@ describe("AgentManager", () => {
     });
   });
 
+  it("preserves observed progress when a hung agent times out", { timeout: 20_000 }, async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-manager-"));
+    roots.push(root);
+    // Per-call timeoutMs never lowers the configured floor, so the short
+    // deadline must come from the manager config itself.
+    const manager = new AgentManager(
+      process.cwd(),
+      { ...DEFAULT_FABRIC_CONFIG.agents, timeoutMs: 2_000 },
+      {
+        workerPath: path.resolve("tests/fixtures/fake-worker.mjs"),
+        runRoot: root,
+      },
+    );
+    managers.push(manager);
+
+    const result = await manager.run({
+      task: "HANG_WITH_PROGRESS",
+      transport: "process",
+    });
+
+    // The deadline fires, but the run's real spend and partial findings from
+    // the last non-terminal record must survive into the terminal result —
+    // a timed-out scout that burned 730 tokens must not report zero.
+    expect(result.status).toBe("timed_out");
+    expect(result.error).toMatch(/timed out/i);
+    expect(result.usage).toMatchObject({ input: 700, output: 30 });
+    expect(result.turns).toBe(2);
+    expect(result.toolCalls).toBe(3);
+    expect(result.text).toBe("src/prewalk/arm.ts — partial exploration");
+  });
+
   it("forwards the configured default thinking when a call omits one", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-manager-"));
     roots.push(root);
@@ -952,7 +983,7 @@ describe("AgentManager", () => {
       maxTokens: 5,
     } as Parameters<AgentManager["run"]>[0] & { maxTokens: number });
 
-    expect(result.status).toBe("timed_out");
+    expect(result.status).toBe("budget_exhausted");
     expect(result.error ?? "").toMatch(/token limit/i);
     expect(result.error ?? "").toMatch(/7 tokens/);
   });
@@ -977,7 +1008,7 @@ describe("AgentManager", () => {
       transport: "process",
       timeoutMs: 5_000,
     });
-    expect(result.status).toBe("timed_out");
+    expect(result.status).toBe("budget_exhausted");
     expect(result.error ?? "").toMatch(/token limit/i);
     expect(result.error ?? "").toMatch(/7 tokens/);
   });

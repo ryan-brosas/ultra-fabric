@@ -44,6 +44,16 @@ const pyxel = {
   description: "Run a Pyxel sketch.",
   inputSchema: { type: "object", properties: {} },
 };
+const browserNavigate = {
+  name: "exa.omniroute_browser_navigate",
+  description: "Navigate a browser to a URL and return the rendered page content. Supports interactive browsing with click, type, and screenshot actions.",
+  inputSchema: { type: "object", properties: { url: { type: "string" }, action: { type: "string" } } },
+};
+const computerUse = {
+  name: "exa.omniroute_computer_use",
+  description: "Control a computer-use session: take screenshots, click elements, type text, and extract visible content. Computer-use browser rendering for ChatGPT.",
+  inputSchema: { type: "object", properties: { url: { type: "string" }, action: { type: "string" } } },
+};
 
 describe("classifyToolCapability", () => {
   it("maps a query+search tool to web-search", () => {
@@ -67,6 +77,20 @@ describe("classifyToolCapability", () => {
     expect(classifyToolCapability(pyxel)).toBe("none");
   });
 
+  it("maps a browser navigation tool to computer-use", () => {
+    expect(classifyToolCapability(browserNavigate)).toBe("computer-use");
+  });
+  it("maps a computer-use tool to computer-use", () => {
+    expect(classifyToolCapability(computerUse)).toBe("computer-use");
+  });
+  it("does not misroute fetch-only tools with url+action to computer-use", () => {
+    const fetchLike = {
+      name: "exa.omniroute_web_fetch",
+      description: "Fetches content from a URL.",
+      inputSchema: { type: "object", properties: { url: { type: "string" }, format: { type: "string" } } },
+    };
+    expect(classifyToolCapability(fetchLike)).toBe("web-fetch");
+  });
   it("does not misroute local registry or index searches to web-search", () => {
     const registryBundles = {
       name: "codegraphcontext.search_registry_bundles",

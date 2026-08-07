@@ -143,7 +143,13 @@ interface ManagedAgent {
   usageEmitted: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
 }
 
-const terminalStatuses = new Set(["completed", "failed", "stopped", "timed_out"]);
+const terminalStatuses = new Set([
+  "completed",
+  "failed",
+  "stopped",
+  "timed_out",
+  "budget_exhausted",
+]);
 
 const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -285,6 +291,7 @@ const failedRecord = (
   >,
   status: "failed" | "stopped" | "timed_out",
   error: string,
+  source?: AgentRunRecord,
 ): AgentRunResult => {
   const now = Date.now();
   return {
@@ -303,11 +310,20 @@ const failedRecord = (
     startedAt: now,
     updatedAt: now,
     finishedAt: now,
-    turns: 0,
-    toolCalls: 0,
-    text: "",
+    // Preserve progress observed before the failure so dashboards and ledgers
+    // reflect the real spend (a timed-out scout that ran tool calls must not
+    // report zero tokens), and keep any partial text a crashed/timed-out agent
+    // produced before the terminal record was written.
+    turns: source?.turns ?? 0,
+    toolCalls: source?.toolCalls ?? 0,
+    text: source?.text ?? "",
+    ...(source?.model ? { model: source.model } : {}),
+    ...(source?.usage
+      ? { usage: { ...source.usage } }
+      : { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } }),
+    ...(source?.startedAt ? { startedAt: source.startedAt } : {}),
+    ...(source?.updatedAt ? { updatedAt: source.updatedAt } : {}),
     error,
-    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
     ...(managed.model ? { model: managed.model } : {}),
     ...(managed.route ? { route: structuredClone(managed.route) } : {}),
     ...(managed.profile ? { profile: managed.profile } : {}),
@@ -822,7 +838,7 @@ export class OneShotAgentManager {
     const record =
       terminal && terminalStatuses.has(terminal.status)
         ? (this.#withTransportMetadata(terminal, managed) as AgentRunResult)
-        : failedRecord(managed, "stopped", "Agent stopped");
+        : failedRecord(managed, "stopped", "Agent stopped", managed.latestRecord);
     if (!terminal || !terminalStatuses.has(terminal.status)) writeRecord(managed.statusFile, record);
     this.#settle(managed, record);
     return record;
@@ -1059,6 +1075,7 @@ export class OneShotAgentManager {
           managed,
           "timed_out",
           `Agent timed out after ${timeoutMs}ms`,
+          managed.latestRecord,
         );
         writeRecord(managed.statusFile, timedOut);
         this.#settle(managed, timedOut);
@@ -1080,6 +1097,7 @@ export class OneShotAgentManager {
               logSummary
                 ? `Agent transport exited without a result; last run log: ${logSummary}`
                 : "Agent transport exited without a result",
+              managed.latestRecord,
             );
             writeRecord(managed.statusFile, failed);
             this.#settle(managed, failed);

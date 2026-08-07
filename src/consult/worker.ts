@@ -96,7 +96,7 @@ export const createConsultWorkerRequest = (
 
 export const consultWorkerFailureStatus = (error: unknown): ConsultWorkerInput["status"] => {
   const message = error instanceof Error ? error.message : String(error);
-  if (/token budget|budget exhausted/i.test(message)) return "budget_exhausted";
+  if (/token budget|budget exhausted|token limit/i.test(message)) return "budget_exhausted";
   if (/timed?[_ -]?out|deadline/i.test(message)) return "timed_out";
   if (/abort|cancel|stopp?ed/i.test(message)) return "stopped";
   return "failed";

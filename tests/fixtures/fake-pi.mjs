@@ -122,6 +122,13 @@ switch (behavior) {
     emit({ type: "agent_settled" });
     process.exit(0);
     break;
+  case "usage-then-hang":
+    // Emit real usage, then hang: the worker's cumulative token guard must
+    // terminate the child and label the run budget_exhausted (not timed_out).
+    emit({ type: "agent_start" });
+    emit({ type: "message_end", message: { role: "assistant", content: "explored a bit", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: 0 } } });
+    setInterval(() => {}, 60_000);
+    break;
   case "usage-flow":
     emit({ type: "agent_start" });
     emit({ type: "message_end", message: { role: "assistant", content: "first", usage: { input: 100, output: 50, cacheRead: 10, cacheWrite: 5, cost: 0.01 } } });

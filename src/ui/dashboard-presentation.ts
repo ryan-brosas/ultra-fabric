@@ -5,7 +5,7 @@ import type { Entity } from "./dashboard-model.js";
 
 export const statusGlyph = (status: string): string => {
   if (status === "completed" || status === "done") return "✓";
-  if (status === "failed" || status === "timed_out" || status === "error") return "✗";
+  if (status === "failed" || status === "timed_out" || status === "budget_exhausted" || status === "error") return "✗";
   if (status === "blocked") return "!";
   if (status === "stopped" || status === "cancelled") return "■";
   if (status === "queued" || status === "pending" || status === "ready") return "○";
@@ -16,7 +16,7 @@ export const statusGlyph = (status: string): string => {
 
 export const colorStatus = (theme: Theme, status: string, value: string): string => {
   if (status === "completed" || status === "done") return theme.fg("success", value);
-  if (status === "failed" || status === "timed_out" || status === "error") {
+  if (status === "failed" || status === "timed_out" || status === "budget_exhausted" || status === "error") {
     return theme.fg("error", value);
   }
   if (status === "blocked" || status === "warning") return theme.fg("warning", value);
@@ -44,7 +44,7 @@ export const entityTail = (entity: Entity, now: number): string => {
     const summary =
       agent.status === "blocked" && narrative
         ? `needs input: ${narrative}`
-        : (agent.status === "failed" || agent.status === "timed_out") && narrative
+        : (agent.status === "failed" || agent.status === "timed_out" || agent.status === "budget_exhausted") && narrative
           ? `error: ${narrative}`
           : agent.status === "completed" && narrative
             ? `result: ${narrative}`

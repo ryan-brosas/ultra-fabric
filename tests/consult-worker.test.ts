@@ -61,6 +61,12 @@ describe("Ultra Consult worker boundary", () => {
   it("preserves controlled budget, timeout, and cancellation failures", () => {
     expect(consultWorkerFailureStatus(new Error("Fabric token budget exhausted")))
       .toBe("budget_exhausted");
+    // The one-shot worker's actual guard message (worker.ts enforceTokenLimit)
+    // says "token limit reached", not "token budget" — it must not degrade to
+    // a generic failure.
+    expect(consultWorkerFailureStatus(
+      new Error("Fabric token limit reached: 8039 tokens (limit 512); terminating deps.child"),
+    )).toBe("budget_exhausted");
     expect(consultWorkerFailureStatus(new Error("worker timed out"))).toBe("timed_out");
     expect(consultWorkerFailureStatus(new Error("request aborted"))).toBe("stopped");
     expect(consultWorkerFailureStatus(new Error("provider failed"))).toBe("failed");

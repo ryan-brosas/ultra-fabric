@@ -2626,7 +2626,7 @@ export class FabricDashboard implements Component, Focusable {
       ? entities.findIndex(
           (entity) =>
             entity.kind !== "main" &&
-            ["failed", "timed_out", "error"].includes(entity.status),
+            ["failed", "timed_out", "budget_exhausted", "error"].includes(entity.status),
         )
       : -1;
     const blockedIndex = preferAttention

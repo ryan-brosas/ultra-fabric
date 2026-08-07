@@ -65,5 +65,3 @@ export const extractImportEdges = (root: string): ImportEdgeResult => {
   }
   return { nodes, edges };
 };
-
-// Unit-testable helpers for the specifier rewrite logic.

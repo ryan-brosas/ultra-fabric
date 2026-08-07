@@ -72,7 +72,10 @@ export const armPrewalk = async (
   // one the scout is skipped.
   const scoutBrief =
     prewalk.autoScout === true && task && deps.scoutRun
-      ? await runScoutBrief(deps.scoutRun, task, runRoot)
+      ? await runScoutBrief(deps.scoutRun, task, runRoot, {
+          timeoutMs: prewalk.scoutTimeoutMs,
+          maxTokens: prewalk.scoutMaxTokens,
+        })
       : undefined;
   const armedPromptScouted = scoutBrief
     ? `${armedPromptFinal}\n\nScout brief:\n${scoutBrief}`
@@ -143,7 +146,10 @@ export const scoutOnTaskObserved = async (
   if (!controller.isArmed(context.sessionManager.getSessionId())) return "";
   const trimmed = task.trim();
   if (!trimmed) return "";
-  const brief = await runScoutBrief(deps.scoutRun, trimmed, runRoot);
+  const brief = await runScoutBrief(deps.scoutRun, trimmed, runRoot, {
+    timeoutMs: prewalk.scoutTimeoutMs,
+    maxTokens: prewalk.scoutMaxTokens,
+  });
   if (!brief) return "";
   // Make the spawn visible: the cheap model ran on its own context budget.
   context.ui.notify("auto-scout brief gathered (" + brief.length + " chars, prewalk:scout)", "info");

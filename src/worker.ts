@@ -505,7 +505,7 @@ function enforceTokenLimit(state: WorkerRunState, deps: WorkerRunDeps): void {
     deps.record.usage.cacheRead +
     deps.record.usage.cacheWrite;
   if (total <= deps.options.maxTokens) return;
-  state.terminalStatus = "timed_out";
+  state.terminalStatus = "budget_exhausted";
   state.terminalError = `Fabric token limit reached: ${total} tokens (limit ${deps.options.maxTokens}); terminating deps.child`;
   terminateChild(deps.child, "SIGTERM");
   setTimeout(() => terminateChild(deps.child, "SIGKILL"), KILL_GRACE_MS).unref();

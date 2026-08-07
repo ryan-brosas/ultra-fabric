@@ -40,7 +40,7 @@ The wheel is powerful because every spoke returns to the kernel. No model, persi
 
 The user states an outcome once. Main retains intent and final authority. Ultra Fabric may route, delegate, supervise, retry, compact, or verify only within explicit host-owned limits. It reports partial work and uncertainty instead of converting infrastructure failure into success.
 
-The delegation posture defaults to bounded, task-first utilization: `prewalk.autoScout` and `prewalk.delegateContext` are on by default so a cheap scout child gathers context before planning and recon lands on `scout`/`explorer` roles or `consult.run` workers instead of Main's context. Zero agents remains a valid configuration (set both to `false`) and every child stays bounded by admission (zero workers by default on consult), turn budgets, and spend caps. Power is available, not ambient.
+The delegation posture defaults to bounded, task-first utilization: `prewalk.delegateContext` is on by default so recon lands on `scout`/`explorer` roles or `consult.run` workers instead of Main's context, while `prewalk.autoScout` is explicit opt-in and runs a cheap scout child before planning only when enabled. Zero agents remains a valid configuration (set `delegateContext` to `false` and leave `autoScout` unset) and every child stays bounded by admission (zero workers by default on consult), turn budgets, and spend caps. Power is available, not ambient.
 
 ## What the source audit found
 

@@ -3,7 +3,7 @@
 // return the evidence capability it can serve. No server-name allowlists, so
 // the router works on any user's MCP set.
 
-export type EvidenceCapability = "web-search" | "web-fetch" | "repo-wiki" | "docs-search" | "health" | "none";
+export type EvidenceCapability = "web-search" | "web-fetch" | "repo-wiki" | "docs-search" | "computer-use" | "health" | "none";
 
 export interface EvidenceToolShape {
   name: string;
@@ -19,6 +19,11 @@ const schemaProps = (schema: Record<string, unknown>): string[] => {
 export const classifyToolCapability = (tool: EvidenceToolShape): EvidenceCapability => {
   const text = (tool.name + " " + tool.description).toLowerCase();
   const props = schemaProps(tool.inputSchema);
+
+  // Computer / browser use: action parameter (navigate, click, type, screenshot) or
+  // computer/computer-use naming in the tool name or description.
+  if (props.includes("action") && /(navigate|click|type|screenshot|extract|computer)/.test(text)) return "computer-use";
+  if (/(computer.?use|computer.?call|browser.*render|render.*browser)/.test(text) && props.includes("url")) return "computer-use";
 
   // URL fetch: a url parameter plus fetch/extract/scrape/crawl naming.
   if (props.includes("url") && /(fetch|extract|scrape|crawl)/.test(text)) return "web-fetch";

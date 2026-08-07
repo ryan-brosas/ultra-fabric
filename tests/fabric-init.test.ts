@@ -45,7 +45,7 @@ describe("planInit", () => {
     expect(agents.content).toContain("roadmap.md");
     expect(agents.content).toContain("codemap");
     expect(agents.content).toContain("delegate exploration breadth to them by default");
-    expect(agents.content).toContain("prewalk.autoScout and prewalk.delegateContext default on");
+    expect(agents.content).toContain("prewalk.delegateContext defaults on and prewalk.autoScout is explicit opt-in");
     expect(agents.content).toContain("fan out explorer or scout children in parallel");
   });
 

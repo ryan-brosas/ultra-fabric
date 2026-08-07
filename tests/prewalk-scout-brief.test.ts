@@ -9,6 +9,7 @@ import { normalizeFabricConfig } from "../src/config.js";
 import {
   buildScoutBrief,
   runScoutBrief,
+  scoutBridge,
   SCOUT_BUDGET_CATEGORY,
 } from "../src/prewalk/scout-brief.js";
 import { readBudgetLedgerDetailed } from "./support/budget-ledger-detail.js";
@@ -94,7 +95,7 @@ describe("prewalk scout brief", () => {
   });
 
   it("skips the scout entirely when autoScout is off", async () => {
-    // autoScout defaults on, so the opt-out must be explicit.
+    // autoScout is explicit opt-in: only autoScout: true spawns a scout.
     const controller = new PrewalkController();
     const ctx = context();
     const ext = extension();
@@ -104,6 +105,28 @@ describe("prewalk scout brief", () => {
       ext.value,
       controller,
       configFor({ autoScout: false }).prewalk,
+      ctx.value,
+      "anthropic/executor",
+      "any task",
+      "/tmp/run-root",
+      { scoutRun },
+    );
+
+    expect(scoutRun).not.toHaveBeenCalled();
+    const sent = ext.sendMessage.mock.calls[0]?.[0] as { content: string };
+    expect(sent.content).not.toContain("Scout brief");
+  });
+
+  it("skips the scout when autoScout is not configured (default off)", async () => {
+    const controller = new PrewalkController();
+    const ctx = context();
+    const ext = extension();
+    const scoutRun = vi.fn();
+
+    await armPrewalk(
+      ext.value,
+      controller,
+      configFor({}).prewalk,
       ctx.value,
       "anthropic/executor",
       "any task",
@@ -140,6 +163,76 @@ describe("prewalk scout brief", () => {
   });
 });
 
+describe("scoutBridge", () => {
+  // The host agent surface (AgentManager.wait) resolves records shaped like
+  // AgentRunRecord: status/text/value — NOT the seam's "result" field. The
+  // bridge must map the real record shape onto ScoutRunResult.result.
+  it("maps an AgentRunRecord-shaped wait result to the runner result", async () => {
+    const surface = {
+      spawn: vi.fn(async () => ({ id: "r1" })),
+      wait: vi.fn(async () => ({
+        id: "r1",
+        kind: "agent" as const,
+        lifecycle: "one-shot" as const,
+        role: "scout",
+        name: "scout",
+        task: "task",
+        status: "completed" as const,
+        transport: "stdio",
+        cwd: "/tmp",
+        startedAt: 1,
+        updatedAt: 2,
+        finishedAt: 3,
+        turns: 3,
+        toolCalls: 4,
+        text: "src/a.ts — does X",
+        model: "omniroute/opencode-go/deepseek-v4-flash",
+        usage: { input: 500, output: 40 },
+      })),
+    };
+    const runner = scoutBridge(surface);
+    const run = await runner!({ task: "t", role: "scout", maxTokens: 512, timeoutMs: 60000 });
+    expect(run.result).toBe("src/a.ts — does X");
+    expect(run.model).toBe("omniroute/opencode-go/deepseek-v4-flash");
+    expect(run.usage?.input).toBe(500);
+    expect(surface.spawn).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to a structured value when text is absent", async () => {
+    const surface = {
+      spawn: vi.fn(async () => ({ id: "r2" })),
+      wait: vi.fn(async () => ({
+        status: "completed" as const,
+        text: "",
+        value: { files: ["src/a.ts"], note: "renders X" },
+        usage: { input: 100, output: 0 },
+      })),
+    };
+    const runner = scoutBridge(surface);
+    const run = await runner!({ task: "t", role: "scout", maxTokens: 512, timeoutMs: 60000 });
+    expect(run.result).toEqual({ files: ["src/a.ts"], note: "renders X" });
+  });
+
+  it("returns partial text from a timed_out record instead of dropping it", async () => {
+    const surface = {
+      spawn: vi.fn(async () => ({ id: "r3" })),
+      wait: vi.fn(async () => ({
+        status: "timed_out" as const,
+        text: "src/prewalk/arm.ts — arms prewalk",
+        usage: { input: 700, output: 30 },
+      })),
+    };
+    const runner = scoutBridge(surface);
+    const run = await runner!({ task: "t", role: "scout", maxTokens: 512, timeoutMs: 60000 });
+    expect(run.result).toBe("src/prewalk/arm.ts — arms prewalk");
+    expect(run.usage?.input).toBe(700);
+  });
+
+  it("returns undefined when no agent surface is supplied", () => {
+    expect(scoutBridge(undefined)).toBeUndefined();
+  });
+});
+
 describe("buildScoutBrief", () => {
   it("bounds the brief to a token-safe size", () => {
     const long = "x".repeat(5000);
@@ -160,7 +253,7 @@ describe("runScoutBrief", () => {
     expect(brief).toBe("brief");
     expect(runner.mock.calls[0]?.[0]).toMatchObject({
       role: "scout",
-      maxTokens: 512,
+      maxTokens: 65_536,
     });
     expect(String(runner.mock.calls[0]?.[0]?.task)).toContain("TASK: task text");
   });

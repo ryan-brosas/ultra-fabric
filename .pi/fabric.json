@@ -8,7 +8,7 @@
     "verificationMode": "gated",
     "maxPhaseRevisions": 5,
     "model": "omniroute/opencode-go/deepseek-v4-flash",
-    "arm": "off",
+    "arm": "session",
     "triggerRefs": [
       "fabric.prewalk.checklist",
       "pi.edit",

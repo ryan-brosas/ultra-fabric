@@ -91,6 +91,16 @@ interface FabricPrewalkConfig {
   // supply a scout runner; without one the scout is skipped and never blocks
   // arming. Default on; set false to skip the scout pass.
   autoScout?: boolean;
+  // Scout agent wall-clock budget in ms. Default 180000 (3 min). Raised from
+  // the original 60s because a spawned worker must boot Pi, attach a model,
+  // and run several tool-call turns before producing its brief; 60s timed out
+  // mid-exploration on cheap models, discarding the scout's spend.
+  scoutTimeoutMs?: number;
+  // Scout agent cumulative token budget (input + output + cache summed across
+  // turns; the worker terminates the child when total spend crosses it).
+  // Default 65536: a Pi child burns ~7-8k context per turn, so the original
+  // 512 executed every scout on its first turn.
+  scoutMaxTokens?: number;
   // Reasoning effort for the in-session executor. Unset inherits agents.thinking.
   thinking?: FabricThinking;
   verificationMode?: FabricPrewalkVerificationMode;
@@ -340,7 +350,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
     arm: "task",
     delegateContext: true,
-    autoScout: true,
+    autoScout: false,
   },
   agents: {
     enabled: true,
@@ -979,8 +989,28 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
       ...(booleanValue(prewalk.failureMemory, false)
         ? { failureMemory: true }
         : {}),
-      ...(booleanValue(prewalk.autoScout, true)
+      ...(booleanValue(prewalk.autoScout, false)
         ? { autoScout: true }
+        : {}),
+      ...(typeof prewalk.scoutTimeoutMs === "number"
+        ? {
+            scoutTimeoutMs: boundedInteger(
+              prewalk.scoutTimeoutMs,
+              180_000,
+              MIN_AGENT_TIMEOUT_MS,
+              MAX_AGENT_TIMEOUT_MS,
+            ),
+          }
+        : {}),
+      ...(typeof prewalk.scoutMaxTokens === "number"
+        ? {
+            scoutMaxTokens: boundedInteger(
+              prewalk.scoutMaxTokens,
+              65_536,
+              1,
+              Number.MAX_SAFE_INTEGER,
+            ),
+          }
         : {}),
     },
     agents: {

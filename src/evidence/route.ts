@@ -38,12 +38,14 @@ export interface PlanOptions {
 const URL_RE = /^https?:\/\//i;
 const REPO_RE = /(github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+|\brepository\b|\brepo\b)/i;
 const DOCS_RE = /(documentation|\bdocs\b|library|reference|guide)/i;
+const COMPUTER_USE_RE = /(browse|computer.?use|render|take screenshot|navigate to|click |type )/i;
 
 export const classifyIntent = (query: string): EvidenceIntent => {
   const q = query.trim();
   if (URL_RE.test(q)) return "web-fetch";
   if (REPO_RE.test(q)) return "repo-wiki";
   if (DOCS_RE.test(q)) return "docs-search";
+  if (COMPUTER_USE_RE.test(q)) return "computer-use";
   return "web-search";
 };
 

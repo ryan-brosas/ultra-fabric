@@ -441,7 +441,7 @@ export const entitiesForOverview = (
   return entitiesFor(snapshot, run, panel);
 };
 const panelStatus = (entities: Entity[], fallback: string): string => {
-  if (entities.some((entity) => ["failed", "timed_out", "error"].includes(entity.status))) {
+  if (entities.some((entity) => ["failed", "timed_out", "budget_exhausted", "error"].includes(entity.status))) {
     return "failed";
   }
   if (entities.some((entity) => entity.status === "blocked")) return "blocked";
@@ -471,7 +471,7 @@ const withPanelProgress = (
   const status =
     panel.kind === "session"
       ? progressEntities.some((entity) =>
-          ["failed", "timed_out", "error"].includes(entity.status),
+          ["failed", "timed_out", "budget_exhausted", "error"].includes(entity.status),
         )
         ? "failed"
         : progressEntities.some((entity) => isActiveStatus(entity.status))
@@ -667,7 +667,7 @@ export const matchesFilter = (status: string, filter: StatusFilter): boolean => 
   if (filter === "all") return true;
   if (filter === "active") return isActiveStatus(status);
   if (filter === "completed") return status === "completed" || status === "done";
-  return status === "failed" || status === "timed_out" || status === "blocked" || status === "error";
+  return status === "failed" || status === "timed_out" || status === "budget_exhausted" || status === "blocked" || status === "error";
 };
 
 export const tokensFor = (

@@ -205,7 +205,8 @@ type FabricLifecycleEventType =
   | "run.completed"
   | "run.failed"
   | "run.stopped"
-  | "run.timed_out";
+  | "run.timed_out"
+  | "run.budget_exhausted";
 type FabricLifecycleDelivery = "steer" | "followUp";
 interface FabricLifecycleSource {
   id: string;

@@ -1,5 +1,105 @@
 [
   {
+    "task": "cotninue again for cleaning stuff on project making sure our all of our code smell is clean and high quality....  I think the agent utilization is not good it's still stuck on 0 token, please design this like opencode agent behavior feel free to look on arxiv docs, clone github repo that can help on this initiative",
+    "checklist": {
+      "items": [
+        {
+          "task": "RED: in tests/prewalk-scout-brief.test.ts add a scoutBridge describe — a fake ScoutAgentSurface whose wait() resolves an AgentRunRecord-shaped object ({ status: 'completed', text: 'src/a.ts — does X', model, usage }) must yield runner result 'src/a.ts — does X'; add cases for value fallback (structured result, no text) and a timed_out record with non-empty partial text still returning that text. Run the file and observe RED (current bridge maps only the nonexistent .result field).",
+          "validation": "vitest run tests/prewalk-scout-brief.test.ts shows the new scoutBridge tests failing while existing tests pass."
+        },
+        {
+          "task": "GREEN: fix scoutBridge in src/prewalk/scout-brief.ts to map the wait record's text (preferred, non-empty) then value into ScoutRunResult.result, keeping model/usage passthrough. Do not change the ScoutRunner seam shape.",
+          "validation": "vitest run tests/prewalk-scout-brief.test.ts fully green."
+        },
+        {
+          "task": "Config knobs: add optional scoutTimeoutMs and scoutMaxTokens to FabricPrewalkConfig in src/config.ts with validation (timeout clamped to MIN_AGENT_TIMEOUT_MS..MAX_AGENT_TIMEOUT_MS, tokens positive safe integer); thread them through runScoutBrief (new options parameter with raised defaults 180000ms / 4096 tokens replacing the 60000/512 consts) and pass prewalk config values at both call sites in src/prewalk/arm.ts plus the scoutBridge construction sites (src/index.ts:286,308 and src/commands/fabric.ts:171 only if they need the config surface). Update the existing runScoutBrief test that pins maxTokens 512 to the new default.",
+          "validation": "config normalize tests cover both knobs (valid, clamped, rejected shapes); runScoutBrief test asserts the new defaults; tsc --noEmit clean."
+        },
+        {
+          "task": "Settings/completeness: if tests/config-completeness.test.ts requires every prewalk config key to appear in the /fabric settings UI (src/ui/settings.ts), add scoutTimeoutMs and scoutMaxTokens entries there mirroring neighbouring prewalk toggles; otherwise record why not needed.",
+          "validation": "vitest run tests/config-completeness.test.ts green."
+        },
+        {
+          "task": "RED then GREEN: manager timeout/stop must preserve observed progress. In src/agents/one-shot-manager.ts, when the deadline or stop path falls back to failedRecord (lines ~1009, ~1059-1063, stop()), merge the latest non-terminal record's usage, turns, toolCalls, and text (from readRecord(statusFile) or managed.latestRecord) instead of zeroing them; keep status/error semantics unchanged. Add a test (tests/agent-manager.test.ts pattern, fake worker fixture that writes a non-terminal record with usage then hangs) asserting the timed_out result retains usage and partial text.",
+          "validation": "New manager test green; existing agent-manager, agents-provider, and worker-e2e tests stay green."
+        },
+        {
+          "task": "Utilization visibility check: with the fixes applied, confirm the budget ledger still records scout spend under prewalk:scout (existing ledger test) and that a timed-out scout run's status.json now carries non-zero usage via the merged record path; note in the run receipt that dashboard activity-entity wiring for host-spawned scouts is a separate follow-up if still 0.",
+          "validation": "vitest run tests/prewalk-scout-brief.test.ts green including the ledger test; manual node read of a fabricated run status confirms merged usage fields."
+        },
+        {
+          "task": "Full repository gate: pnpm exec tsc --noEmit, pnpm run build, pnpm run test, pnpm exec knip --no-gitignore, pnpm run smoke:package (stages separate to respect the 120s tool budget), then git diff --check and git status --short --branch. sources/opencode stays untracked reference material (verify .gitignore/.cgcignore cover sources/).",
+          "validation": "All stages exit 0; 180+ test files pass; diff check clean; git status shows only intended source/test/config changes with sources/opencode ignored."
+        }
+      ],
+      "readyAt": 1786071685736
+    },
+    "recordedAt": 1786072254292
+  },
+  {
+    "task": "let's continue looking for dead code, slop code and stuff that we can better",
+    "checklist": {
+      "items": [
+        {
+          "task": "Fix the broken import in tests/compaction-qa.test.ts: CompactionEvent lives in ../src/compaction/normalize.js (types.ts does not exist); merge it into the existing normalize import on line 3 and drop line 6.",
+          "validation": "`pnpm exec tsc --noEmit` passes and `pnpm exec knip --no-gitignore` no longer reports the unresolved import."
+        },
+        {
+          "task": "Delete dead types: remove FabricProjectMeshOmissionRow (src/ui/topology.ts:109) and FabricProjectMeshDisplayRow (src/ui/topology.ts:135) entirely — DisplayRow is referenced nowhere and OmissionRow only feeds it; remove the whole type re-export line at src/ui/word-diff/emphasis.ts:9 — no file imports types from emphasis.js.",
+          "validation": "grep confirms zero remaining references to FabricProjectMeshDisplayRow, FabricProjectMeshOmissionRow, and no `export type {` line in emphasis.ts; typecheck passes."
+        },
+        {
+          "task": "Add \"ignoreExportsUsedInFile\": true to knip.json. This resolves besselI (src/codemap/heat.ts:76, used at :112 and by tests/codemap-fovea-bridge.ts), OutlineRange (src/codemap/outline.ts:3), and FabricProjectMeshRow (src/ui/topology.ts) — all are referenced by exported interfaces so un-exporting them would break .d.ts declaration emit; the export keyword is required.",
+          "validation": "`pnpm run lint:dead` exits 0 with no findings."
+        },
+        {
+          "task": "Run the repository gate: pnpm run check stages (typecheck, build, tests, knip, package smoke) plus git diff --check and git status --short --branch.",
+          "validation": "All five check stages green (run stages separately if the 120s tool budget is hit); no whitespace errors; only the intended files modified."
+        }
+      ],
+      "readyAt": 1786069139566,
+      "easy": true
+    },
+    "recordedAt": 1786070175791
+  },
+  {
+    "task": "can we test it out",
+    "checklist": {
+      "items": [
+        {
+          "task": "Confirm what the inspo cgc graph holds: `cgc stats` and repo listing; identify registered context names (expect inspo) and check whether references resolve there. Record which inspo repos are queryable as contexts.",
+          "validation": "Output captured; at least one named context usable for mode cgc queries in this session."
+        },
+        {
+          "task": "Reindex the ultra-fabric self-graph with a forced full index (per AGENTS.md, watcher has no inherit resolution), since the last 8+ commits landed after the stat snapshot, and verify `.cgcignore` keeps sources/ and bench/ out.",
+          "validation": "Post-index stats show ultra-fabric file count near expected (~430 sources, not 13k+ vendored); a fresh cross-file call query resolves."
+        },
+        {
+          "task": "Live-test mode cgc through the codemap tool in this session: run skeleton/search/explore with a bare context name (e.g. pi-mono or omniroute) against the inspo graph; confirm reads stay read-only and results route correctly.",
+          "validation": "Tool returns bounded, routed results with a CGC source marker, not a fallback to the project graph; at least one explore evidence pack contains skeleton+routed symbols."
+        },
+        {
+          "task": "Live-test commit df1ef9e's fix: call mode cgc with a path-prefix context (e.g. /home/ryanj/work/inspo/pi-mono) and a bare name, and confirm the tool normalizes instead of passing the path as --context.",
+          "validation": "Path-prefix input does not surface CGC's --context error and returns the same repo's graph as the bare-name call; grep tests/codemap-cgc.test.ts to confirm the regression case is covered — add one focused test only if missing."
+        },
+        {
+          "task": "Exercise the auto-scout visibility path from fd06c4e: trigger one prewalk observation on Main and confirm the automatic scout spawn fires and is visible in the session (not silently dropped).",
+          "validation": "Scout spawn event appears in session output for a recon-shaped observation; no manual agent call needed for the observation itself."
+        },
+        {
+          "task": "Probe cgc failure surfaces: one call against an unknown context name and (if cheap) with falkordb unreachable; confirm the error is distinct and actionable, not a silent project-graph fallback.",
+          "validation": "Both failures produce explicit, distinguishable error messages identifying cgc/context as the problem."
+        },
+        {
+          "task": "Run the repo gate exactly: `pnpm run check`, `git diff --check`, `git status --short --branch`; commit any test additions under a conventional fix(test) or test(codemap) scope only if step 4/5/6 found a gap.",
+          "validation": "check passes green end-to-end; diff is clean of whitespace errors; any commit is minimal and lane-classified (upstream-shaped vs Ultra-native) per docs/adr/0001."
+        }
+      ],
+      "readyAt": 1786057665779
+    },
+    "recordedAt": 1786058631286
+  },
+  {
     "task": "let's buff it up add a cgc mode on to get inspo data from directly welll code..... and also algorithm to get sufficient data like explore github repo with efficient test and such",
     "checklist": {
       "items": [
@@ -459,97 +559,5 @@
       "readyAt": 1786003444603
     },
     "recordedAt": 1786004902719
-  },
-  {
-    "task": "yes please",
-    "checklist": {
-      "items": [
-        {
-          "task": "Add `src/codemap/heat.ts` — CSR builder from codemap's RankEdge[], applyNegP, besselI, heatKernel(seeds, t). Port pi-fovea's heat.ts adapting RankEdge → Csr.",
-          "validation": "heatKernel with empty seeds returns zero field; heatKernel with one seed returns vmax at that node; CSR symmetric with correct degree for a 3-node test graph"
-        },
-        {
-          "task": "Add `src/codemap/render-foveated.ts` — revealFoveated(g, field, {budget, disclosed?}) with Hot/Warm/Glow tiers. Binary-search prefix fit. Same tokenEstimate (4 chars/token) as existing codemap.",
-          "validation": "Field at vmax=0 returns (nothing lit) message; hot-tier node always fits in budget if budget >= 1 token; disclosed nodes counted in suppressed not shown; glow counts collapse per file"
-        },
-        {
-          "task": "Modify `src/codemap/build.ts` — add buildFoveaCsr(bundle) bridge that builds Csr from CodeGraphBundle's nodeKeys+edges+prebuilt",
-          "validation": "Returns {n, rowPtr, col, w, deg} matching fovea Csr shape; symmetric adjacency; correct rowPtr length (n+1)"
-        },
-        {
-          "task": "Modify `src/codemap/tool.ts` — add focus (query → symbol seeds → field t=4 → foveated render) and dwell (seeds→field at t or t*2 → delta render). Add parallel fieldCache. Update CodemapOperation union and codemapOperation function.",
-          "validation": "focus('buildCodeGraph') returns top-ranked symbols near buildCodeGraph; dwell doubles t and returns delta; skeleton/cascade/source unchanged; backward-compat expand still works"
-        },
-        {
-          "task": "Modify `src/providers/codemap-provider.ts` — wire focus and dwell actions matching tool parameter shapes",
-          "validation": "provider.invoke('focus', {query}) returns content text with hot/warm/glow; provider.invoke('dwell', {}) returns delta"
-        },
-        {
-          "task": "Add `tests/codemap-foveation.test.ts` — heat kernel (zero-field, seed-rank, 3-node CSR), render tiers (hot/warm/glow/budget-fit), focus→dwell cycle (seeds persist, dwell returns delta against disclosed set)",
-          "validation": "pnpm run test -- tests/codemap-foveation.test.ts passes all 3 groups (minimum 6 assertions)"
-        },
-        {
-          "task": "Check tool/provider registration — verify codemap tool schema in src/index.ts exposes focus/dwell, and Knip doesn't flag dead exports. Run pnpm run check.",
-          "validation": "pnpm run check passes (typecheck + build + tests + Knip + smoke)"
-        }
-      ],
-      "readyAt": 1785998704679
-    },
-    "recordedAt": 1785998746016
-  },
-  {
-    "task": "no.... it's bloated.... so I need to rebuild it also I don't really have a system to follow but we should just focus on development of ultra fabric instead you asking me this thing....",
-    "checklist": {
-      "items": [
-        {
-          "task": "RED: add regression tests to tests/type-checker.test.ts that typeCheckFabricCode accepts prewalk.checklist({ trivial: true }) and prewalk.checklist({ items: [...], easy: true }) against GUEST_TYPE_DECLARATIONS, plus the existing research-mode { items } form.",
-          "validation": "The trivial and easy cases fail with TS2353/TS2345 excess-property errors before any source change; the { items } case already passes."
-        },
-        {
-          "task": "GREEN: mirror the implemented contract into src/runtime/guest-types.ts — add trivial?: boolean and easy?: boolean to the guest FabricPrewalkChecklist (lines 1185-1188), and widen FabricPrewalkApi.checklist (line 1190) to the union { trivial: true } | { items: FabricPrewalkChecklistItem[]; easy?: boolean; trivial?: false }, matching src/prewalk/checklist.ts:14-27 and parsePrewalkChecklist's validation.",
-          "validation": "Item 1 tests pass; a trivial-with-items program is still rejected by the type checker, matching the runtime error 'Prewalk trivial checklist must not carry items'."
-        },
-        {
-          "task": "Gate: pnpm exec tsc --noEmit, pnpm run build, pnpm exec vitest run tests/type-checker.test.ts tests/prewalk-checklist.test.ts tests/prewalk-controller.test.ts, then git diff --check.",
-          "validation": "Every stage exits 0 and the diff is limited to src/runtime/guest-types.ts and tests/type-checker.test.ts."
-        }
-      ],
-      "readyAt": 1785997193282,
-      "easy": true
-    },
-    "recordedAt": 1785997353737
-  },
-  {
-    "task": "go ahead",
-    "checklist": {
-      "items": [
-        {
-          "task": "Re-read src/init/scaffold.ts lines 20 and 95-116 and tests/fabric-init.test.ts lines 9, 139, 148 to confirm the exact current contract before editing: LEGACY_CONTEXT is a flat string list, planInit marks every non-existing path 'create', and migrations are advisory strings appended after files.",
-          "validation": "Confirmed in source that planInit emits action 'create' for root project.md when only '.pi/project.md' is in existingPaths."
-        },
-        {
-          "task": "RED test in tests/fabric-init.test.ts: when a legacy .pi sibling exists and its root counterpart does not (new Set(['.pi/project.md'])), planInit must NOT emit a create action for root project.md, and must emit a migration line naming both the legacy path and the root target.",
-          "validation": "New test fails against current planInit for exactly that reason."
-        },
-        {
-          "task": "Reconcile the three existing tests that pin current behavior: fresh-project create-at-root (tests/fabric-init.test.ts:9), 'skips existing files and reports legacy .pi context' (:139), and 'emits no migration notices when no legacy .pi context exists' (:148).",
-          "validation": "All three pass with intent preserved; the fresh-project path with an empty existingPaths set is provably unchanged."
-        },
-        {
-          "task": "GREEN in src/init/scaffold.ts: pair each LEGACY_CONTEXT entry with its root sibling and, in planInit, mark the root file deferred instead of create when the legacy sibling exists and the root file does not. Keep the existing non-destructive contract: nothing is moved, overwritten, or deleted.",
-          "validation": "Items 2 and 3 pass; a scratch temp dir containing only .pi/project.md produces no blank root project.md."
-        },
-        {
-          "task": "Surface the new outcome in src/commands/fabric.ts runInit (line 821) so deferred files appear as their own notify line rather than silently vanishing from both the created and skipped lists.",
-          "validation": "A test asserts the notify output lists the deferred path and its migration guidance; created and skipped lists no longer misreport it."
-        },
-        {
-          "task": "Gate the slice: pnpm exec tsc --noEmit, pnpm run build, pnpm exec vitest run tests/fabric-init.test.ts, then git diff --check.",
-          "validation": "Every stage exits 0 and the diff touches only src/init/scaffold.ts, src/commands/fabric.ts, and tests/fabric-init.test.ts."
-        }
-      ],
-      "readyAt": 1785995307022
-    },
-    "recordedAt": 1785996059997
   }
 ]

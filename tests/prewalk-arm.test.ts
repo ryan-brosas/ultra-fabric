@@ -37,7 +37,7 @@ describe("scout on task observed", () => {
     const ctx = context();
     const ext = extension();
     const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fabric-scout-observe-"));
-    await autoArmPrewalk(ext.value, controller, configFor({}), ctx.value);
+    await autoArmPrewalk(ext.value, controller, configFor({ autoScout: true }), ctx.value);
     expect(controller.isArmed("session-1")).toBe(true);
 
     const scoutRun = vi.fn(async () => ({
@@ -47,7 +47,7 @@ describe("scout on task observed", () => {
     }));
     const brief = await scoutOnTaskObserved(
       controller,
-      configFor({}).prewalk,
+      configFor({ autoScout: true }).prewalk,
       ctx.value,
       "refactor the config normalizer",
       runRoot,
@@ -89,8 +89,27 @@ describe("scout on task observed", () => {
     const scoutRun = vi.fn();
     const brief = await scoutOnTaskObserved(
       controller,
-      configFor({}).prewalk,
+      configFor({ autoScout: true }).prewalk,
       context().value,
+      "any task",
+      undefined,
+      { scoutRun },
+    );
+    expect(scoutRun).not.toHaveBeenCalled();
+    expect(brief).toBe("");
+  });
+
+  it("skips the scout when autoScout is not configured (default off)", async () => {
+    const controller = new PrewalkController();
+    const ctx = context();
+    const ext = extension();
+    await autoArmPrewalk(ext.value, controller, configFor({}), ctx.value);
+    expect(controller.isArmed("session-1")).toBe(true);
+    const scoutRun = vi.fn();
+    const brief = await scoutOnTaskObserved(
+      controller,
+      configFor({}).prewalk,
+      ctx.value,
       "any task",
       undefined,
       { scoutRun },

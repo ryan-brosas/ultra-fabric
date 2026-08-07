@@ -126,6 +126,27 @@ describe.skipIf(!hasWorker)("AgentManager real worker e2e", () => {
     }
   });
 
+  it("terminates a child crossing its token budget with a distinct budget_exhausted status", async () => {
+    process.env.FAKE_PI_BEHAVIOR = "usage-then-hang";
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fabric-e2e-"));
+    roots.push(root);
+    const config = { ...DEFAULT_FABRIC_CONFIG.agents, timeoutMs: 5_000, maxConcurrent: 1 };
+    const manager = new AgentManager(process.cwd(), config, {
+      workerPath,
+      piBinary,
+      runRoot: root,
+    });
+    managers.push(manager);
+
+    // maxTokens is the cumulative spend guard (input+output+cache); the fake
+    // child reports 150 tokens against a limit of 20, so the worker must stop
+    // it as budget_exhausted — not the timeout path — and keep the usage.
+    const result = await manager.run({ task: "explore", transport: "process", maxTokens: 20 });
+    expect(result.status).toBe("budget_exhausted");
+    expect(result.error ?? "").toMatch(/token limit/i);
+    expect(result.usage).toMatchObject({ input: 100, output: 50 });
+  });
+
   it.each([
     { behavior: "compact-success", outcome: "completed", error: undefined },
     { behavior: "compact-failure", outcome: "failed", error: "child summary failed" },

@@ -464,7 +464,7 @@ const lineChar = (mask: number): string => {
 };
 
 const styleForStatus = (status: string): Cell["style"] => {
-  if (["failed", "timed_out", "error"].includes(status)) return "error";
+  if (["failed", "timed_out", "budget_exhausted", "error"].includes(status)) return "error";
   if (status === "blocked") return "warning";
   if (isActiveStatus(status)) return "success";
   return "dim";

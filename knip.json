@@ -8,5 +8,6 @@
   "project": [
     "src/**/*.ts"
   ],
+  "ignoreExportsUsedInFile": true,
   "ignoreBinaries": ["cgc"]
 }

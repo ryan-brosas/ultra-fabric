@@ -17,7 +17,7 @@ import {
 
 const statusGlyph = (status: string): string => {
   if (status === "completed" || status === "done") return "✓";
-  if (status === "failed" || status === "timed_out") return "✗";
+  if (status === "failed" || status === "timed_out" || status === "budget_exhausted") return "✗";
   if (status === "blocked") return "!";
   if (status === "stopped" || status === "cancelled") return "■";
   if (status === "queued" || status === "pending" || status === "ready") return "○";
@@ -27,7 +27,7 @@ const statusGlyph = (status: string): string => {
 
 const colorStatus = (theme: Theme, status: string, value: string): string => {
   if (status === "completed" || status === "done") return theme.fg("success", value);
-  if (status === "failed" || status === "timed_out") return theme.fg("error", value);
+  if (status === "failed" || status === "timed_out" || status === "budget_exhausted") return theme.fg("error", value);
   if (status === "blocked") return theme.fg("warning", value);
   if (status === "running" || status === "in_progress") return theme.fg("accent", value);
   return theme.fg("dim", value);

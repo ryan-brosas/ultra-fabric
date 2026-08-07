@@ -123,7 +123,7 @@ const metricsFrom = (value: unknown): FabricActivityMetrics | undefined => {
 const isFailedResult = (value: unknown): boolean => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const status = (value as Record<string, unknown>).status;
-  return status === "failed" || status === "stopped" || status === "timed_out";
+  return status === "failed" || status === "stopped" || status === "timed_out" || status === "budget_exhausted";
 };
 
 export class FabricActivityStore {

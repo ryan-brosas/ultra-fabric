@@ -16,6 +16,7 @@ export const FABRIC_LIFECYCLE_EVENTS = [
   "run.failed",
   "run.stopped",
   "run.timed_out",
+  "run.budget_exhausted",
   "tokens.usage",
 ] as const;
 

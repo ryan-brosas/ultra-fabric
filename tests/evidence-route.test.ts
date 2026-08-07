@@ -6,14 +6,18 @@ const webA = { name: "exa.omniroute_web_search", description: "Performs web sear
 const webB = { name: "serena.web_search", description: "Searches the web for a query string and returns results.", inputSchema: { type: "object", properties: { query: { type: "string" } } } };
 const fetchTool = { name: "exa.omniroute_web_fetch", description: "Fetches and extracts content from a URL.", inputSchema: { type: "object", properties: { url: { type: "string" } } } };
 const wikiTool = { name: "deepwiki.ask_question", description: "Ask any question about a GitHub repository.", inputSchema: { type: "object", properties: { repoName: { type: "string" }, question: { type: "string" } } } };
+const browserNav = { name: "exa.omniroute_browser_navigate", description: "Navigate a browser to a URL with click, type, and screenshot actions.", inputSchema: { type: "object", properties: { url: { type: "string" }, action: { type: "string" } } } };
+const computerUse = { name: "exa.omniroute_computer_use", description: "Control a computer-use browser rendering session for ChatGPT.", inputSchema: { type: "object", properties: { url: { type: "string" }, action: { type: "string" } } } };
 
-const tools = [webA, webB, fetchTool, wikiTool];
+const tools = [webA, webB, fetchTool, wikiTool, browserNav, computerUse];
 
 describe("classifyIntent", () => {
-  it("classifies URL, repo, docs, and bare queries", () => {
+  it("classifies URL, repo, docs, browse, and bare queries", () => {
     expect(classifyIntent("https://example.com/page")).toBe("web-fetch");
     expect(classifyIntent("how does github.com/facebook/react handle state?")).toBe("repo-wiki");
     expect(classifyIntent("cloudflare workers documentation")).toBe("docs-search");
+    expect(classifyIntent("browse to https://example.com and take a screenshot")).toBe("computer-use");
+    expect(classifyIntent("render the page at example.com")).toBe("computer-use");
     expect(classifyIntent("best way to test async code")).toBe("web-search");
   });
 });
@@ -23,6 +27,20 @@ describe("buildPlan", () => {
     const plan = buildPlan("web-search", tools, new Map());
     expect(plan.intent).toBe("web-search");
     expect(plan.attempts.map((a) => a.tool).sort()).toEqual([webA.name, webB.name]);
+  });
+
+  it("selects computer-use tools for computer-use intent", () => {
+    const plan = buildPlan("computer-use", tools, new Map());
+    expect(plan.intent).toBe("computer-use");
+    expect(plan.attempts.map((a) => a.tool).sort()).toEqual([browserNav.name, computerUse.name]);
+  });
+
+  it("buildPlan does not include computer-use tools in web-search", () => {
+    const plan = buildPlan("web-search", tools, new Map());
+    for (const t of plan.attempts) {
+      expect(t.tool).not.toBe(browserNav.name);
+      expect(t.tool).not.toBe(computerUse.name);
+    }
   });
 
   it("rotates fairly: a recently used tool is deprioritized on the next plan", () => {
