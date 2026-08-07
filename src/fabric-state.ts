@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 import { statSync } from "node:fs";
 import { FabricActivityStore } from "./activity/store.js";
+import { CarryStore } from "./runtime/carry-store.js";
 import { PersistentAgentRuntime } from "./agents/persistent/manager.js";
 import { AgentTemplateRegistry } from "./agents/persistent/template-registry.js";
 import { buildPersistentAgentContext } from "./agents/persistent/context.js";
@@ -215,6 +216,9 @@ export class FabricState {
   readonly activity = new FabricActivityStore();
   readonly prewalk = new PrewalkController();
   readonly sessionApprovals = new FabricSessionApprovals();
+  // Per-session carry namespace: fabric_exec guest state survives across calls
+  // within a Pi session (CodeAct REPL pattern), bounded and LRU-evicted.
+  readonly carry = new CarryStore();
   #widgetDismissedAt = 0;
   #contextQosTelemetry = {
     passes: 0,

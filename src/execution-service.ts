@@ -258,6 +258,9 @@ export interface FabricExecutionResult {
   transitions?: FabricRunTransition[];
   budget?: FabricRunBudgetSnapshot;
   consult?: FabricConsultOutcome;
+  // Session carry namespace returned by the sandbox: guest mutations to the
+  // injected global carry object, JSON-safe and size-bounded.
+  carry?: Record<string, unknown>;
 }
 
 interface FabricExecutionPartial {
@@ -280,6 +283,9 @@ export interface FabricExecutionOptions {
   maxAgentCalls?: number;
   display?: FabricRunDisplay;
   prewalk?: FabricPrewalkExecutionBoundary;
+  // Injected as the plain global carry in the sandbox; mutations come back in
+  // the result so the host can persist them per session.
+  carry?: Record<string, unknown>;
   onPartial(snapshot: FabricExecutionPartial): void;
 }
 
@@ -579,6 +585,7 @@ export class FabricExecutionService {
       ...(classifierUsages.length > 0
         ? { usage: aggregateUsage(classifierUsages) }
         : {}),
+      ...(sandboxResult.carry ? { carry: sandboxResult.carry } : {}),
     });
   }
 
@@ -1482,6 +1489,7 @@ export class FabricExecutionService {
           minimumTimeoutMsForHostCall,
           ...(checked.javascript ? { transpiledCode: checked.javascript } : {}),
           ...(options.strings ? { strings: options.strings } : {}),
+          ...(options.carry ? { carry: options.carry } : {}),
           ...(options.tokenBudget !== undefined ? { tokenBudget: options.tokenBudget } : {}),
           ...(executionSignal ? { signal: executionSignal } : {}),
         },

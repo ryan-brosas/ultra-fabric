@@ -1386,6 +1386,13 @@ interface FabricConsole {
 }
 declare const console: FabricConsole;
 declare const π: Readonly<Record<string, string>>;
+// Session carry namespace: a plain mutable object injected into every
+// fabric_exec run. Mutations survive across fabric_exec calls within the
+// same Pi session (CodeAct REPL pattern) and come back on the next call.
+// Only JSON-serializable values persist (functions and undefined are
+// dropped), the payload is size-bounded, and the namespace is cleared on
+// session start. Not updated when the run is aborted or times out.
+declare const carry: Record<string, unknown>;
 declare function print(...args: unknown[]): void;
 declare function setTimeout(handler: (...args: any[]) => void, timeout?: number): number;
 declare function clearTimeout(handle: number): void;

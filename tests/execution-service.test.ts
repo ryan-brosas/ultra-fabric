@@ -1967,3 +1967,31 @@ return runConsult({
     expect(claim?.mutation.ref).toBe("fabric.prewalk.checklist");
   });
 });
+
+describe("carry namespace round-trip", () => {
+  it.each(["quickjs", "node-process"] as const)(
+    "round-trips guest carry mutations through the %s sandbox",
+    async (runtime) => {
+      const registry = new ActionRegistry();
+      const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+      config.executor.runtime = runtime;
+      if (runtime === "node-process") config.executor.memoryLimitBytes = 128 * 1024 * 1024;
+      const service = new FabricExecutionService(registry, config);
+      const result = await service.execute({
+        code: `
+carry.token = "alpha-42";
+carry.count = typeof carry.count === "number" ? carry.count + 1 : 1;
+return { token: carry.token, count: carry.count };
+`,
+        signal: undefined,
+        parentToolCallId: "carry-roundtrip",
+        context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+        carry: { count: 5 },
+        onPartial() {},
+      });
+
+      expect(result.value).toEqual({ token: "alpha-42", count: 6 });
+      expect(result.carry).toEqual({ token: "alpha-42", count: 6 });
+    },
+  );
+});

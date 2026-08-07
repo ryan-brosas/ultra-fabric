@@ -180,6 +180,7 @@ export class NodeProcessRuntime {
         setup: GUEST_SETUP,
         code: options.transpiledCode ?? transpileFabricCode(code),
         strings: options.strings ?? {},
+        carry: options.carry ?? {},
         tokenBudget: options.tokenBudget,
         maxLogChars: options.maxLogChars ?? 100_000,
       });

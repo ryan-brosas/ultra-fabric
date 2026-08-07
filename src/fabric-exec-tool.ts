@@ -119,6 +119,9 @@ export const createFabricExecTool = (
       const result = await state.execution.execute({
         code,
         ...(params.strings ? { strings: params.strings } : {}),
+        ...(Object.keys(state.carry.snapshot(sessionId)).length > 0
+          ? { carry: state.carry.snapshot(sessionId) }
+          : {}),
         signal,
         parentToolCallId: toolCallId,
         context,
@@ -144,6 +147,8 @@ export const createFabricExecTool = (
           });
         },
       });
+
+      state.carry.persist(sessionId, result.carry);
 
       const selectedResultFormat =
         params.resultFormat ?? state.config.executor.resultFormat;

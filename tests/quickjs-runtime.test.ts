@@ -1007,3 +1007,51 @@ return r.split(",");
   });
 });
 
+
+describe("carry namespace", () => {
+  it("exposes an injected carry snapshot and returns guest mutations", async () => {
+    const result = await new QuickJsRuntime().execute(
+      `
+carry.token = "alpha-42";
+carry.count = (carry.count ?? 0) + 1;
+return "done";
+`,
+      async () => undefined,
+      { ...options, carry: { count: 5 } },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.carry).toEqual({ token: "alpha-42", count: 6 });
+  });
+
+  it("drops functions from carry by JSON serialization", async () => {
+    const result = await new QuickJsRuntime().execute(
+      `carry.fn = () => 1; carry.keep = "yes"; return 1;`,
+      async () => undefined,
+      { ...options, carry: {} },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.carry).toEqual({ keep: "yes" });
+  });
+
+  it("does not return an oversized carry and the run still succeeds", async () => {
+    const result = await new QuickJsRuntime().execute(
+      `carry.big = "y".repeat(300000); return 2;`,
+      async () => undefined,
+      { ...options, carry: {} },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.value).toBe(2);
+    expect(result.carry).toBeUndefined();
+  });
+
+  it("does not return a circular carry and the run still succeeds", async () => {
+    const result = await new QuickJsRuntime().execute(
+      `carry.self = carry; return "ok";`,
+      async () => undefined,
+      { ...options, carry: {} },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.value).toBe("ok");
+    expect(result.carry).toBeUndefined();
+  });
+});

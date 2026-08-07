@@ -11,6 +11,20 @@ description: >-
 
 One type-checked TS program in a fresh executor (isolated QuickJS by default). Only the `return` value reaches the model; `print()`/`console.log` go to the activity panel. `π` is not a tool.
 
+## `carry` — session-persistent guest state (REPL pattern)
+`carry` is a plain mutable object injected into every fabric_exec run. Mutations survive across fabric_exec calls **within the same Pi session**, so a later call starts from where the earlier one left off (the CodeAct persistent-interpreter pattern). Only JSON-serializable values persist (functions and `undefined` are dropped); payloads are size-bounded; the namespace clears on session start and is **not** updated when a run is aborted or times out.
+
+```ts
+// call 1: record context
+carry.token = "alpha-42";
+carry.count = typeof carry.count === "number" ? carry.count + 1 : 1;
+return "saved";
+
+// call 2 (same session): read it back
+return { token: carry.token, count: carry.count };
+```
+Use it for accumulated findings, parse results, and decision state instead of re-reading the workspace; do not use it as a cache for mutable host objects.
+
 ## `pi` core tools (full code mode only)
 `pi.<tool>(arg)` — single arg: bare string (primary field) or options object. Multi-arg positional calls are accepted for `grep`/`find` (`pattern, path, limit`), `write` (`path, content`), and `edit` (`path, oldText, newText`); one-field tools (`read`/`bash`/`ls`) stay single-arg — a 2-arg call on those is a type error so the extra arg isn't silently dropped.
 

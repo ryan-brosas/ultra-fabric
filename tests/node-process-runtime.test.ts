@@ -156,3 +156,33 @@ await Promise.all([
     expect(result.error).toBe("Execution cancelled");
   });
 });
+
+describe("carry namespace", () => {
+  it("exposes an injected carry snapshot and returns guest mutations", async () => {
+    const result = await new NodeProcessRuntime().execute(
+      `carry.token = "alpha-42"; carry.count = (carry.count ?? 0) + 1; return "done";`,
+      async () => undefined,
+      { ...options, carry: { count: 5 } },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.carry).toEqual({ token: "alpha-42", count: 6 });
+  });
+
+  it("drops functions and oversized carry values without failing the run", async () => {
+    const fn = await new NodeProcessRuntime().execute(
+      `carry.fn = () => 1; carry.keep = "yes"; return 1;`,
+      async () => undefined,
+      { ...options, carry: {} },
+    );
+    expect(fn.error).toBeUndefined();
+    expect(fn.carry).toEqual({ keep: "yes" });
+
+    const big = await new NodeProcessRuntime().execute(
+      `carry.big = "y".repeat(300000); return 2;`,
+      async () => undefined,
+      { ...options, carry: {} },
+    );
+    expect(big.value).toBe(2);
+    expect(big.carry).toBeUndefined();
+  });
+});

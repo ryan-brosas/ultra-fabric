@@ -1,5 +1,5 @@
 import releaseSyncVariant from "@jitl/quickjs-singlefile-mjs-release-sync";
-import { newQuickJSWASMModuleFromVariant } from "quickjs-emscripten-core";
+import { newQuickJSWASMModuleFromVariant, type QuickJSContext } from "quickjs-emscripten-core";
 import { runAbortable, settleWithin } from "../async-settlement.js";
 import { transpileFabricCode } from "./type-checker.js";
 
@@ -14,6 +14,9 @@ export interface FabricSandboxResult {
   logs: string[];
   terminationReason: FabricSandboxTerminationReason;
   error?: string;
+  // Session carry namespace returned after a completed run: guest mutations
+  // to the injected global carry object, JSON-serialized and size-bounded.
+  carry?: Record<string, unknown>;
 }
 
 export interface FabricSandboxOptions {
@@ -21,6 +24,8 @@ export interface FabricSandboxOptions {
   memoryLimitBytes: number;
   maxLogChars?: number;
   strings?: Record<string, string>;
+  // Injected as the plain global `carry`; mutations come back via result.carry.
+  carry?: Record<string, unknown>;
   tokenBudget?: number;
   signal?: AbortSignal;
   minimumTimeoutMsForHostCall?(
@@ -35,6 +40,35 @@ export type FabricHostCall = (
   args: Record<string, unknown>,
   signal: AbortSignal,
 ) => Promise<unknown>;
+
+// Serialized-size cap for the session carry namespace returned by a guest run.
+// Shared by the QuickJS and node-process sandboxes and the host carry store.
+export const CARRY_MAX_SERIALIZED_CHARS = 256_000;
+
+const extractGuestCarry = (
+  context: QuickJSContext,
+): Record<string, unknown> | undefined => {
+  try {
+    const extraction = context.evalCode(
+      "JSON.stringify(globalThis.carry === undefined ? null : globalThis.carry)",
+      "pi-fabric-carry-extract.js",
+    );
+    if (extraction.error) {
+      extraction.error.dispose();
+      return undefined;
+    }
+    const serialized = context.dump(extraction.value);
+    extraction.value.dispose();
+    if (typeof serialized !== "string" || serialized.length > CARRY_MAX_SERIALIZED_CHARS) {
+      return undefined;
+    }
+    const parsed = JSON.parse(serialized) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    return Object.keys(parsed).length > 0 ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 type QuickJsModule = Awaited<ReturnType<typeof newQuickJSWASMModuleFromVariant>>;
 
@@ -974,6 +1008,9 @@ export class QuickJsRuntime {
       const strings = jsonHandle(context, jsonObject, jsonParse, options.strings ?? {});
       context.setProp(context.global, "π", strings);
       strings.dispose();
+      const carrySnapshot = jsonHandle(context, jsonObject, jsonParse, options.carry ?? {});
+      context.setProp(context.global, "carry", carrySnapshot);
+      carrySnapshot.dispose();
       const tokenBudget = context.newNumber(options.tokenBudget ?? Number.POSITIVE_INFINITY);
       context.setProp(context.global, "__fabricTokenBudget", tokenBudget);
       tokenBudget.dispose();
@@ -1075,7 +1112,8 @@ export class QuickJsRuntime {
       }
       const value = context.dump(resolution.value);
       resolution.value.dispose();
-      return { value, logs, terminationReason: "completed" };
+      const carry = extractGuestCarry(context);
+      return { value, logs, terminationReason: "completed", ...(carry ? { carry } : {}) };
     } catch (error) {
       const deadlineExceeded = timedOut || interruptedByDeadline || Date.now() > executionDeadlineAt;
       if (deadlineExceeded) timedOut = true;

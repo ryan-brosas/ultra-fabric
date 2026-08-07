@@ -260,6 +260,7 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
 
   pi.on("session_start", async (_event, context) => {
     pendingHandoffs.clear();
+    state.carry.clear();
     directToolApproval.clear();
     fabricUi.stop();
     suspendToolCapture();

@@ -24,6 +24,18 @@ const jsonCompatible = (value) => {
   return serialized === undefined ? undefined : JSON.parse(serialized);
 };
 
+const CARRY_MAX_SERIALIZED_CHARS = 256000;
+
+const boundedCarry = (value) => {
+  const carry = jsonCompatible(value);
+  if (!carry || typeof carry !== "object" || Array.isArray(carry)) return undefined;
+  try {
+    return JSON.stringify(carry).length <= CARRY_MAX_SERIALIZED_CHARS ? carry : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const run = async (message) => {
   const logs = [];
   let logChars = 0;
@@ -61,6 +73,7 @@ const run = async (message) => {
     __fabricTokenBudget: message.tokenBudget ?? Number.POSITIVE_INFINITY,
     print,
     π: jsonCompatible(message.strings),
+    carry: jsonCompatible(message.carry) ?? {},
   };
   const context = vm.createContext(sandbox, {
     name: "pi-fabric-node-process",
@@ -73,16 +86,19 @@ const run = async (message) => {
       filename: "pi-fabric-guest.js",
     });
     const value = jsonCompatible(await promise);
-    send({ type: "result", result: { value, logs, terminationReason: "completed" } });
+    const result = { value, logs, terminationReason: "completed" };
+    const carry = boundedCarry(sandbox.carry);
+    if (carry && Object.keys(carry).length > 0) result.carry = carry;
+    send({ type: "result", result });
   } catch (error) {
-    send({
-      type: "result",
-      result: {
-        logs,
-        terminationReason: "runtime_error",
-        error: error?.stack ?? error?.message ?? String(error),
-      },
-    });
+    const result = {
+      logs,
+      terminationReason: "runtime_error",
+      error: error?.stack ?? error?.message ?? String(error),
+    };
+    const carry = boundedCarry(sandbox.carry);
+    if (carry && Object.keys(carry).length > 0) result.carry = carry;
+    send({ type: "result", result });
   }
 };
 
