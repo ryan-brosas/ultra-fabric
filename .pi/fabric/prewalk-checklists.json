@@ -1,5 +1,156 @@
 [
   {
+    "task": "what did we do?",
+    "checklist": {
+      "items": [
+        {
+          "task": "RED then GREEN for the session store: new tests/carry-store.test.ts covering per-session isolation, defensive copies, oversized-payload rejection keeping the prior snapshot, eviction beyond the session bound with recency refresh, and clear(); implement src/runtime/carry-store.ts (CarryStore class, serialized cap CARRY_MAX_SERIALIZED_CHARS from quickjs-runtime.ts, default 8-session bound, LRU-style eviction).",
+          "validation": "Store tests observed failing on missing module, then all green after implementation."
+        },
+        {
+          "task": "Plumb carry through the execution path: FabricExecutionOptions.carry and FabricExecutionResult.carry in src/execution-service.ts, forwarded into the sandbox options next to strings and surfaced from sandboxResult; fabric-exec-tool.ts reads state.carry.snapshot(sessionId) before execute and persists result.carry after; FabricState owns the CarryStore instance; src/index.ts clears it on session_start next to pendingHandoffs.clear().",
+          "validation": "tsc clean; an execution-service or tool-level test proves carry round-trips through execute(); existing execution-service tests stay green."
+        },
+        {
+          "task": "Type and document the surface: declare const carry: Record<string, unknown> with a persistence-scope doc comment in src/runtime/guest-types.ts, and a short carry section with a two-call example in the fabric-exec skill reference (skills/fabric-exec) or docs.",
+          "validation": "Guest programs using carry type-check (type-checker path accepts the declaration); doc/skill mention exists; knip clean."
+        },
+        {
+          "task": "Live headless proof with the rebuilt dist: isolated PI_CODING_AGENT_DIR (makora model, /tmp/prewalk-isolated pattern), one pi -p run whose prompt makes two sequential fabric_exec calls — first sets carry.token='alpha-42', second returns carry.token — and the final answer contains alpha-42.",
+          "validation": "Transcript shows two fabric_exec calls and the output contains alpha-42."
+        },
+        {
+          "task": "Consistency sweep then the staged gate: verify consult worker requests and schema-enforce mode gain no unintended carry access, compaction/handoff ignore carry safely; run typecheck, build, full vitest, knip, smoke:package, git diff --check, git status.",
+          "validation": "Sweep shows no carry in worker requests; all five gate stages exit 0; only intended files dirty."
+        }
+      ],
+      "readyAt": 1786098697096
+    },
+    "recordedAt": 1786099730424
+  },
+  {
+    "task": "did we apply that lesson?",
+    "checklist": {
+      "items": [
+        {
+          "task": "Locate the existing runtime test files for quickjs and node-process (tests/ directory; find how they drive executeGuestProgram/sandbox runs) and write RED tests for a session carry namespace: an injected carry snapshot is visible as a plain global object in guest code; guest mutations to carry come back in the run result envelope; functions/undefined values are dropped by JSON serialization; a circular or oversized (>256000 serialized chars) carry is not returned and the run still succeeds.",
+          "validation": "RED observed: current runtimes expose no carry global and no carry field in results; new tests fail on both runtime paths."
+        },
+        {
+          "task": "Implement runtime support. QuickJS (src/runtime/quickjs-runtime.ts): inject options.carry via the same jsonHandle path as π at setup; after successful evaluation extract JSON.stringify(globalThis.carry) via context.evalCode with the size cap; skip extraction on timeout/abort. Node child (src/runtime/node-process-child-source.ts): add carry to the sandbox from message.carry and include bounded jsonCompatible(sandbox.carry) in both the success and runtime_error result envelopes; thread the field through src/runtime/node-process-runtime.ts message and result types.",
+          "validation": "Runtime RED tests turn GREEN on both runtimes; no other runtime tests regress."
+        },
+        {
+          "task": "Plumb the session store: a bounded per-session carry store (Map keyed by sessionId, serialized-size cap 256000 chars, evict oldest sessions beyond 8) owned by FabricState or a small pure module in src/runtime or src/; fabric-exec-tool.ts reads the snapshot for context.sessionManager.getSessionId() before execute and persists the returned carry after; execution-service.ts forwards options.carry into the sandbox runtime and surfaces result.carry. Clear the store on session_start in src/index.ts next to pendingHandoffs.clear().",
+          "validation": "Unit tests for the store (cap, eviction, per-session isolation) pass; an execution-service-level test proves carry round-trips through execute(); wiring compiles with tsc."
+        },
+        {
+          "task": "Type and document the surface: declare const carry: Record<string, unknown> in src/runtime/guest-types.ts with a doc comment stating persistence scope (per Pi session, JSON-serializable values only, not updated on timeout/abort), and add a short section to the fabric-exec skill reference or docs describing carry with a two-call example.",
+          "validation": "Type-checker accepts guest programs using carry (type-checker test or transpile path covers the declaration); docs/skill mention exists; knip stays clean."
+        },
+        {
+          "task": "Live headless proof with the rebuilt dist: isolated PI_CODING_AGENT_DIR (makora model, pattern from /tmp/prewalk-isolated), one pi -p run whose prompt makes two sequential fabric_exec calls — first sets carry.token = 'alpha-42', second returns carry.token — and the final answer contains alpha-42.",
+          "validation": "Transcript shows two fabric_exec calls and the final output contains alpha-42; session store did not leak across the isolated session boundary."
+        },
+        {
+          "task": "Consistency sweep: schema enforce mode and consult workers must not gain unintended carry access (workers spawn fresh Pi children, unaffected; verify no carry leakage through the worker request path), and compaction/handoff paths ignore carry safely.",
+          "validation": "grep-based sweep plus targeted assertions where cheap; no worker request contains carry; enforce-mode test suite stays green."
+        },
+        {
+          "task": "Run the staged repository gate: typecheck, build, full vitest, knip, smoke:package, then git diff --check and git status --short --branch.",
+          "validation": "All five stages exit 0; only intended files dirty (two runtimes, child source, execution-service, fabric-exec-tool, fabric-state or new store module, guest-types, tests, one doc/skill file)."
+        }
+      ],
+      "readyAt": 1786097832202
+    },
+    "recordedAt": 1786098207645
+  },
+  {
+    "task": "can we go deep on making our stuff better like fabric_exec we did cloned stuff earlier look on cgc stuff",
+    "checklist": {
+      "items": [
+        {
+          "task": "Truncated read-modify-write guard in src/providers/pi-tools-provider.ts: when a pi.read result carries the core truncation marker ('[Showing lines A-B of N (...). Use offset=... to continue.]'), record the resolved path in a per-run set; reject a later pi.write full-overwrite to that path in the same run, and reject any pi.write whose content itself contains a truncation-marker line. Error message steers to pi.edit or offset reads. RED tests first in the pi-tools provider test file (find it; extend, do not create a parallel file).",
+          "validation": "RED observed: write after truncated read currently succeeds (data loss); after fix both guard paths throw with the guidance message, pi.edit on the same path still works, and a normal untruncated read-then-write stays allowed."
+        },
+        {
+          "task": "Pathological scalar-array elision in formatFabricValue (src/ui/structured.ts): when an array exceeds a bounded threshold (e.g. 100 items) and items are short scalars, render head and tail samples plus one '(N items elided)' line instead of every item, preserving JSON format mode behavior and hoisted-section logic. RED test reproduces the 10k numeric-string-keys dump shrinking from tens of KB to under 1 KB.",
+          "validation": "RED observed: current output renders every item; after fix the elided rendering appears, small arrays are untouched, and existing structured/format tests stay green."
+        },
+        {
+          "task": "Sweep both changes for consistency: bash truncation details path in normalizeResult stays intact, write-preview and lease paths unaffected, and docs mention the write guard in the appropriate doc (docs/configuration.md or docs/quality.md, one short paragraph).",
+          "validation": "grep shows no other write path bypasses the guard (captured-tools override path included or explicitly documented as out of scope); docs updated."
+        },
+        {
+          "task": "Run the staged repository gate: typecheck, build, full vitest, knip, smoke:package, then git diff --check and git status --short --branch.",
+          "validation": "All five stages exit 0; only intended files dirty (pi-tools-provider, structured.ts, their test files, one doc)."
+        }
+      ],
+      "readyAt": 1786096844053,
+      "easy": true
+    },
+    "recordedAt": 1786097434238
+  },
+  {
+    "task": "can we improve codemode or well the original fabric center gravity of tool, also I don't see any agent utilization, nothing is being spawn.... again motherfucker look on cgc graph for better view of the situation, look for inspo as well, look on arxiv then get a code from a github repo, clone it put it on inspo and embed it... also remove cgc ignore since it's blocking the whole stuff so... remove cgcingore on all possible folder we put",
+    "checklist": {
+      "items": [
+        {
+          "task": "Recon the zero-utilization path: read src/consult/policy.ts (admission shape :20), src/consult/reducer.ts:99, src/agents/one-shot-manager.ts (admission field :122, spawn :484), src/agents/manager.ts:28, and consult config defaults at src/config.ts:296; enumerate every gate that blocks a spawn.",
+          "validation": "A written list of each gate with file:line and its default value, explicitly naming which default(s) produce 'zero workers admitted' and where autoScout opt-in is enforced."
+        },
+        {
+          "task": "Remove .cgcignore from the checkout (delete the file entirely per operator order), then trigger a forced full reindex of the ultra-fabric graph so sources/ and bench/ are covered.",
+          "validation": "codemap search on the project graph returns symbols from sources/ and bench/; index completes without error. Record the new file count so regression is visible."
+        },
+        {
+          "task": "Research on arXiv: pull CodeAct (arXiv:2402.01030, 'Executable Code Actions Elicit Better LLM Agents') plus one adjacent code-as-action/tool-orchestration paper; extract 2-3 concrete mechanisms that strengthen fabric_exec as the tool center of gravity (e.g., code-action loop, self-debug retry, environment feedback compaction).",
+          "validation": "Findings note mapping each mechanism to a specific Ultra Fabric module (fabric_exec surface, consult admission, agent manager) with a one-line adoption verdict per mechanism."
+        },
+        {
+          "task": "Clone the CodeAct reference repo (xingyaoww/code-act) into the operator inspo library outside this checkout, then index/embed it into the cgc 'inspo' graph.",
+          "validation": "codemap mode=cgc search for its agent-loop symbols returns hits from the cloned repo path; clone lives outside the ultra-fabric checkout."
+        },
+        {
+          "task": "Design the utilization fix informed by recon + inspo: adjust consult admission defaults/heuristics so a justified scout/explorer delegation is actually admitted (raise default admitted-worker cap from zero to a bounded value, or admit when justification+independence are present), keeping fan-out bounded by budgets and autoScout still opt-in. Write RED tests first in tests/consult-reducer.test.ts and tests/consult-worker.test.ts.",
+          "validation": "New tests observed failing (RED) that assert: justified consult.run admits >=1 worker under default config, unbounded fan-out still rejected, autoScout never spawns on prompt send."
+        },
+        {
+          "task": "Implement the minimum GREEN change in src/consult/policy.ts / src/consult/reducer.ts (and src/config.ts default if needed), keeping policy pure and effects in the agent manager adapters; add a utilization counter to outcomes/telemetry so future 'nothing spawns' claims are checkable from src/outcomes/store.ts.",
+          "validation": "RED tests now pass; discriminated failure states (not_admitted vs budget-exhausted vs rejected) remain distinct; no changes leak Ultra policy into upstream-shaped files."
+        },
+        {
+          "task": "Run the repository gate as separate stages (typecheck, build, tests, knip, package smoke), then git diff --check and git status --short --branch.",
+          "validation": "All five stages green, no whitespace errors, working tree contains only the intended changes (.cgcignore deletion, consult admission slice, tests)."
+        }
+      ],
+      "readyAt": 1786093536440
+    },
+    "recordedAt": 1786094991180
+  },
+  {
+    "task": "commit, push, and publish",
+    "checklist": {
+      "items": [
+        {
+          "task": "Commit the dirty tree in three logical slices: feat(compaction) global threshold, feat(prewalk) checklist progress, fix(compaction)+chore(deps) Pi 0.84.1 compat; runtime checklist ledger rides with the release commit or its own chore.",
+          "validation": "git log shows three clean conventional commits; git status clean except release files."
+        },
+        {
+          "task": "Mark 0.31.1-ultra.12 per the release skill: bump package.json, CHANGELOG section, both README pins; commit exactly those three files as chore(release): mark 0.31.1-ultra.12.",
+          "validation": "git show --stat HEAD lists only package.json, CHANGELOG.md, README.md."
+        },
+        {
+          "task": "Tag v0.31.1-ultra.12 annotated, push main then the tag by explicit ref; verify the Publish npm prerelease workflow succeeds and the registry next dist-tag moves.",
+          "validation": "gh run conclusion success; registry dist-tags show next = 0.31.1-ultra.12 with trustedPublisher github."
+        }
+      ],
+      "readyAt": 1786092144674,
+      "easy": true
+    },
+    "recordedAt": 1786092911804
+  },
+  {
     "task": "also can we look on ultra-fabric to make it work to the latest version of pi... it is kind of breaking the tui or something so can we adjust it to the latest version",
     "checklist": {
       "items": [
@@ -342,178 +493,5 @@
       "readyAt": 1786024779100
     },
     "recordedAt": 1786025218835
-  },
-  {
-    "task": "can you monitor this.... and run it on our stuff directly... the purpose of the test it to test ultra fabric to test it on deep swe stuff",
-    "checklist": {
-      "items": [
-        {
-          "task": "Stop the invalid full run before additional paid cells fail.",
-          "validation": "Original matrix pid is stopped; preserve its two connection failures as infrastructure evidence."
-        },
-        {
-          "task": "Add a regression test for OmniRoute reachability from Pier Docker cells.",
-          "validation": "RED test requires fabric-prewalk to inject OMNIROUTE_URL into the agent process environment without exposing credentials."
-        },
-        {
-          "task": "Implement the smallest upstream-shaped harness fix.",
-          "validation": "Pier adapter accepts a configured OmniRoute URL and forwards it only to the cell process; no Ultra policy change or dependency."
-        },
-        {
-          "task": "Probe the Docker endpoint directly before relaunch.",
-          "validation": "A disposable container reaches /v1/models through the configured host route and sees opencode-go/deepseek-v4-flash."
-        },
-        {
-          "task": "Relaunch Ultra Fabric itself across all 113 DeepSWE tasks.",
-          "validation": "Config records ultra-fabric 0.31.1-ultra.9 tarball, fabric-prewalk, exact OmniRoute model, one attempt per task, and bounded concurrency."
-        },
-        {
-          "task": "Monitor and preserve honest benchmark state.",
-          "validation": "Persistent supervisor remains active; new matrix is alive with a real Ultra Fabric session, and final aggregation separates verifier results from infrastructure failures."
-        },
-        {
-          "task": "Run focused and repository verification for the harness change.",
-          "validation": "Run Python adapter tests, DeepSWE harness tests, pnpm run check, git diff --check, and git status --short --branch before committing or publishing."
-        }
-      ],
-      "readyAt": 1786021813673
-    },
-    "recordedAt": 1786022819206
-  },
-  {
-    "task": "do all of the deepswe not only lol",
-    "checklist": {
-      "items": [
-        {
-          "task": "Freeze the complete local DeepSWE corpus manifest.",
-          "validation": "Generate a sorted manifest from every directory under deep-swe/tasks and assert exactly 113 unique tasks."
-        },
-        {
-          "task": "Validate the complete Prewalk matrix before spending model capacity.",
-          "validation": "Dry-run must select 113 tasks, one attempt, only fabric-prewalk, and model omniroute/opencode-go/deepseek-v4-flash."
-        },
-        {
-          "task": "Validate runtime prerequisites without exposing credentials.",
-          "validation": "Confirm Pier, OmniRoute provider, Docker, and the requested model endpoint are available."
-        },
-        {
-          "task": "Launch one official verifier-backed attempt for every DeepSWE task.",
-          "validation": "Start a persistent background matrix with bounded concurrency and save PID, command, manifest, and logs under a timestamped ignored results directory."
-        },
-        {
-          "task": "Prove the benchmark is running rather than merely queued.",
-          "validation": "Observe the process alive and a Pier job/result directory or substantive runner output after startup."
-        },
-        {
-          "task": "Preserve honest completion criteria.",
-          "validation": "Do not claim suite results until all 113 task cells terminate and per-task verifier outputs are aggregated; report infrastructure failures separately from solve failures."
-        }
-      ],
-      "readyAt": 1786021451104
-    },
-    "recordedAt": 1786021631895
-  },
-  {
-    "task": "commit, push and publish",
-    "checklist": {
-      "items": [
-        {
-          "task": "Stage only the completed DeepSWE harness, tests, README, and evidence changes.",
-          "validation": "Cached diff excludes runtime checklist memory and unrelated root-level context files."
-        },
-        {
-          "task": "Keep the graded patch byte-exact while satisfying repository whitespace checks.",
-          "validation": "Store deterministic gzip and record both uncompressed md5 and compressed sha256 in the receipt."
-        },
-        {
-          "task": "Commit and push the implementation work before release metadata.",
-          "validation": "Create one conventional commit and confirm origin/main contains it."
-        },
-        {
-          "task": "Cut the next prerelease according to the release skill.",
-          "validation": "Bump package.json to 0.31.1-ultra.9 and add a dated changelog section, committed separately."
-        },
-        {
-          "task": "Publish only through the annotated v0.31.1-ultra.9 tag.",
-          "validation": "Push main then explicit refs/tags/v0.31.1-ultra.9; do not use local publish or --follow-tags."
-        },
-        {
-          "task": "Verify npm trusted publishing and final repository state.",
-          "validation": "Confirm npm next dist-tag and trustedPublisher github, then run git status --short --branch."
-        }
-      ],
-      "readyAt": 1786020751580
-    },
-    "recordedAt": 1786021120119
-  },
-  {
-    "task": "yes please and update our readme based on result, don't cheat on this please",
-    "checklist": {
-      "items": [
-        {
-          "task": "Preserve the completed live scc run as immutable evidence before changing documentation.",
-          "validation": "Write a compact JSON receipt and copy the exact 27,914-byte model.patch under bench/results/live-prewalk/."
-        },
-        {
-          "task": "Report only measurements actually observed in the live run.",
-          "validation": "README must state reward 1, P2P 286/286, F2P 31/31, exact model, and exact task/base commit."
-        },
-        {
-          "task": "Disclose process limitations and contamination risks.",
-          "validation": "README must state one task, no live baseline, no trustworthy cost/wall-time metrics, explorer token-limit failure, and reference-patch inspection."
-        },
-        {
-          "task": "Keep the earlier Pier benchmark separate from the new live Prewalk result.",
-          "validation": "Use a distinct subsection and do not merge scores, costs, attempts, or model claims."
-        },
-        {
-          "task": "Do not claim a canary-8 or 36-task result until every named task is independently run and graded.",
-          "validation": "README labels broader subset work as pending rather than extrapolating 1/1."
-        },
-        {
-          "task": "Verify documentation and repository gates after edits.",
-          "validation": "Run focused docs tests, pnpm run check, git diff --check, and git status --short --branch."
-        }
-      ],
-      "readyAt": 1786020325238
-    },
-    "recordedAt": 1786020568225
-  },
-  {
-    "task": "yes please go ahead",
-    "checklist": {
-      "items": [
-        {
-          "task": "Inspect the current --format-multi accumulation path and identify where per-file records remain resident.",
-          "validation": "processor/formatters.go:fileSummarizeMulti shows all FileJob pointers appended before replay."
-        },
-        {
-          "task": "Add CLI flags and fail-fast validation for bounded-memory directory and positive in-memory limit.",
-          "validation": "Official invalid-config subtests reject missing dir, missing max, zero, and negative limits."
-        },
-        {
-          "task": "Implement bounded per-file storage with spill files kept through process exit and create missing directories.",
-          "validation": "Official spill tests require a non-empty regular file and successful creation of a nested missing directory."
-        },
-        {
-          "task": "Preserve json, json2, csv, and csv-stream output, destinations, ordering, and sorted csv-stream behavior.",
-          "validation": "Official parity and destination tests compare bounded and unbounded bytes and sorted filenames."
-        },
-        {
-          "task": "Preserve tabular and wide aggregate totals and exclude a spill directory nested under scanned paths.",
-          "validation": "Official aggregate and inside-vs-outside spill-directory tests compare totals and JSON output."
-        },
-        {
-          "task": "Emit bounded-memory stats only when requested, including spills and peak in-memory file count.",
-          "validation": "Official stats parser requires exactly one bounded-memory stderr line with both integer fields."
-        },
-        {
-          "task": "Run focused parity and spill tests, repository Go tests, then the official DeepSWE verifier.",
-          "validation": "Both focused tagged tests and the base suite must pass before grading."
-        }
-      ],
-      "readyAt": 1786020025979
-    },
-    "recordedAt": 1786020152432
   }
 ]

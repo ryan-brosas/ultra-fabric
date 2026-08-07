@@ -24,6 +24,7 @@ Effort is relative scope, not a time promise.
 ### Produce representative Slice 8 benchmark and soak evidence
 
 - Status: active
+- Evidence reset (2026-08-07): the 113-task fabric-prewalk run `bench/results/deepswe-all113/20260806-v3b` is invalid — all 29 completed cells scored f2p=0 because default `triggerRefs` omitted `fabric.prewalk.checklist`, so headless sessions ended at the accepted plan with no executor continuation (fixed in src/prewalk/controller.ts and src/config.ts, headless-proven). Paired evidence must be regenerated on the fixed defaults.
 - Effort: `L` because the gate needs at least 20 representative tasks, paired arms, exact oracles, provenance, cost controls, and comparative analysis.
 - Evidence: `docs/ultra-fabric.md` adoption status and Benchmark section, plus `scripts/benchmark-prewalk-real.mjs` and `scripts/benchmark-prewalk.mjs`.
 - Dependencies: tested Slices 0 through 7, an operator-attested representative manifest, model authentication, an approved cost boundary, and deterministic repository oracles.
