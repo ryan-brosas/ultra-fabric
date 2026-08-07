@@ -6,7 +6,7 @@ Detailed context lives in `.pi/project.md`, `.pi/roadmap.md`, and `.pi/tech-stac
 
 - Ultra Fabric is a resilient Pi orchestration runtime forked from `monotykamary/pi-fabric`.
 - Support Node.js 24+ and Pi 0.83.x. Use pnpm with the committed lockfile.
-- Main retains task intent and final authority. Ordinary work stays on Main; prewalk.delegateContext defaults on while prewalk.autoScout is explicit opt-in (scouts spawn only on request, never on prompt send), and worker fan-out stays bounded by admission and budgets.
+- Main retains task intent and final authority. Ordinary work stays on Main; prewalk.autoScout is explicit opt-in (scouts spawn only on request, never on prompt send), and worker fan-out stays bounded by admission and budgets.
 - Keep automatic policy promotion disabled until the documented Slice 8 benchmark and soak gates pass.
 
 ## Working contract

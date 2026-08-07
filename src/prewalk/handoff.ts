@@ -26,24 +26,8 @@ const PREWALK_CONTINUE_PROMPT = [
   "Finish the remaining implementation, check matching call sites for consistency, and run the relevant verification before reporting completion.",
 ].join(" ");
 
-// Shared plan-then-delegate discipline injected into the armed and
-// continuation prompts when prewalk.delegateContext is enabled. Keeps
-// planning on Main's intent while spending worker context on retrieval.
-// Phrasing avoids "always" and "must delegate": delegation stays conditional,
-// never unconditional, so an inline zero-agents posture remains reachable by
-// disabling delegateContext; consult admission itself is bounded, not zero.
-export const PREWALK_DELEGATE_DISCIPLINE = [
-  "Plan on Main's intent; the executor implements and verifies.",
-  "Offload context gathering: delegate recon and research to scout (fast reconnaissance) or explorer (bounded deep exploration), or to consult.run partition workers, and take back structured findings or evidence locators instead of whole files.",
-  "consult.run admits at most one call per fabric_exec and up to the configured worker ceiling (3 by default), gated by justification, non-overlapping scopes, and the parent budget; a not_admitted result means continue inline. Delegation stays conditional, never unconditional.",
-].join(" ");
-
-const withDelegation = (text: string, delegateContext?: boolean): string =>
-  delegateContext ? `${text}\n\n${PREWALK_DELEGATE_DISCIPLINE}` : text;
-
 export const checklistContinuationPrompt = (
   checklist: FabricPrewalkChecklist,
-  opts?: { delegateContext?: boolean },
 ): string => [
   "Continue the existing implementation in this same session under the executor model. The first mutation already succeeded.",
   "Keep this host-accepted checklist active until every remaining item and validation is complete:",
@@ -53,7 +37,6 @@ export const checklistContinuationPrompt = (
   "As you complete each checklist item above, emit its [DONE:n] marker in the same turn, where n is the item's number above; for example [DONE:2] for item 2. The host advances the checklist and strikes the item through from these markers.",
   "Before claiming completion: sweep every other call site for any pattern, signature, or check you changed and apply the same change; keep the diff minimal and confirm no out-of-scope behavior changed; run the full test module the change lives in, not just the test you expect to flip.",
   "Finish the implementation, run every listed validation plus the relevant final verification, and only then report completion.",
-  ...(opts?.delegateContext ? [PREWALK_DELEGATE_DISCIPLINE] : []),
 ].join("\n");
 
 // Forced continuation after a completed trajectory handoff: Main must not
@@ -81,11 +64,9 @@ const PREWALK_RESEARCH_ENRICHMENT = [
   "When the task depends on an unfamiliar algorithm, technique, or external system, ground it before implementation: find one aligned arXiv paper for the technique and clone the aligned GitHub repository into sources/ for reference, instead of fetching isolated files.",
 ].join(" ");
 
-const researchArmedPrompt = (model: string, delegateContext = false): string => [
+const researchArmedPrompt = (model: string): string => [
   `Prewalk armed → ${model} (research).`,
   "Before any further mutation, commit to a deep, concrete remaining execution plan grounded in the context already gathered. Cover the target files or symbols, dependencies, edge cases, and proof.",
-  ...(delegateContext ? [PREWALK_DELEGATE_DISCIPLINE] : []),
-  "Support roles back this prewalk: scout for fast codebase reconnaissance, explorer for bounded deep exploration, planner for dependency-aware sequencing, and reviewer for fresh-context review. Delegate breadth-first retrieval to these roles or to consult.run partition workers; they spend their own context and return structured findings, not whole files. consult.run admits one call and up to the configured worker ceiling (3 by default) for justified, non-overlapping scopes or rising context pressure; not_admitted means continue inline. The executor owns all mutation, never the worker role.",
   PREWALK_RESEARCH_ENRICHMENT,
   "In that same reply, call prewalk.checklist({ items }) inside fabric_exec with 5-9 ordered items; every item needs a concrete task and specific validation. The host rejects mutation until the checklist is accepted.",
   "Easy escape: bounded mid-tier tasks may call prewalk.checklist({ easy: true, items }) with 2-4 items; the host still hands off but Main skips deep research.",
@@ -94,10 +75,7 @@ const researchArmedPrompt = (model: string, delegateContext = false): string => 
   "The executor owns the remaining implementation and verification through completion.",
 ].join("\n");
 
-export const prewalkArmedPrompt = (
-  model: string,
-  opts?: { delegateContext?: boolean },
-): string => researchArmedPrompt(model, opts?.delegateContext === true);
+export const prewalkArmedPrompt = (model: string): string => researchArmedPrompt(model);
 
 const customMessageText = (content: unknown): string | undefined => {
   if (typeof content === "string") return content;
@@ -146,7 +124,6 @@ export interface PendingFabricHandoff {
   maxPhaseRevisions?: number;
   revision?: number;
   returnModel?: string;
-  delegateContext?: boolean;
 }
 
 const createPrewalkPending = (input: {
@@ -209,7 +186,6 @@ const createPrewalkPending = (input: {
       : {}),
     ...(input.revision ? { revision: input.revision.number } : {}),
     ...(input.returnModel ? { returnModel: input.returnModel } : {}),
-    ...(input.arm.delegateContext ? { delegateContext: true } : {}),
   };
 };
 
@@ -375,10 +351,8 @@ const runResearchPrewalk = async (
     "info",
   );
   const basePrompt = pending.checklist
-    ? checklistContinuationPrompt(pending.checklist, {
-        ...(pending.delegateContext ? { delegateContext: true } : {}),
-      })
-    : withDelegation(PREWALK_CONTINUE_PROMPT, pending.delegateContext);
+    ? checklistContinuationPrompt(pending.checklist)
+    : PREWALK_CONTINUE_PROMPT;
   queuePrewalkContinuation(
     extension,
     pending,

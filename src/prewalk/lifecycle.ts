@@ -14,7 +14,6 @@ export interface FabricPrewalkArm {
   thinking?: FabricThinking;
   verificationMode?: "gated";
   maxPhaseRevisions?: number;
-  delegateContext?: boolean;
 }
 
 export interface FabricPrewalkRearmDefaults {
@@ -24,7 +23,6 @@ export interface FabricPrewalkRearmDefaults {
   thinking?: FabricThinking;
   verificationMode?: "gated";
   maxPhaseRevisions?: number;
-  delegateContext?: boolean;
 }
 
 interface FabricPrewalkPhaseState {
@@ -139,7 +137,6 @@ const toArmed = (
   ...(status.maxPhaseRevisions !== undefined
     ? { maxPhaseRevisions: status.maxPhaseRevisions }
     : {}),
-  ...(status.delegateContext ? { delegateContext: true } : {}),
   ...(status.revision !== undefined ? { revision: status.revision } : {}),
   ...(status.revisionGate ? { revisionGate: status.revisionGate } : {}),
   ...(status.revisionFeedback ? { revisionFeedback: status.revisionFeedback } : {}),
@@ -166,7 +163,6 @@ const applyRearm = (
   ...(rearm.maxPhaseRevisions !== undefined
     ? { maxPhaseRevisions: rearm.maxPhaseRevisions }
     : {}),
-  ...(rearm.delegateContext ? { delegateContext: true } : {}),
 });
 
 const finish = (

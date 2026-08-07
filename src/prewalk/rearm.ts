@@ -22,6 +22,6 @@ export const prewalkRearmDefaults = (
           maxPhaseRevisions: prewalk.maxPhaseRevisions ?? 2,
         }
       : {}),
-    ...(prewalk.delegateContext ? { delegateContext: true } : {}),
+
   };
 };

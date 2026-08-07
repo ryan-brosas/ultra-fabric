@@ -237,7 +237,7 @@ export class PrewalkController {
     thinking?: FabricThinking;
     verificationMode?: "gated";
     maxPhaseRevisions?: number;
-    delegateContext?: boolean;
+
   }): FabricPrewalkStatus {
     const model = input.model.trim();
     if (!model.includes("/")) throw new Error("Prewalk requires a provider/model executor target");
@@ -266,7 +266,7 @@ export class PrewalkController {
               ),
             }
           : {}),
-        ...(input.delegateContext ? { delegateContext: true } : {}),
+
       },
     });
   }

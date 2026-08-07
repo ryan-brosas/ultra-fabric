@@ -160,21 +160,18 @@ describe("Fabric configuration", () => {
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
       arm: "task",
-      delegateContext: true,
     });
     expect(normalizeFabricConfig({ prewalk: { model: "   " } }).prewalk).toEqual({
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
       arm: "task",
-      delegateContext: true,
     });
     expect(normalizeFabricConfig({ prewalk: { arm: "off" } }).prewalk).toEqual({
       triggerRisks: [],
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
       arm: "off",
-      delegateContext: true,
     });
         // Arming defaults to per-task (the legacy always-rearm default) and only
     // stays off when the user explicitly opts out.
@@ -239,18 +236,13 @@ describe("Fabric configuration", () => {
     expect(normalizeFabricConfig({ codemap: { cgc: { context: "   " } } }).codemap).not.toHaveProperty(
       "context",
     );
-    // delegateContext defaults on (opencode-style task-first delegation) but
     // autoScout is explicit opt-in: sending a prompt never spawns a scout, and
     // an explicit false still disables it. Learning and retirement levers stay
     // opt-in until the Slice 8 benchmark gate.
-    expect(DEFAULT_FABRIC_CONFIG.prewalk).toMatchObject({ autoScout: false, delegateContext: true });
-    expect(normalizeFabricConfig({}).prewalk).toMatchObject({ delegateContext: true });
+    expect(DEFAULT_FABRIC_CONFIG.prewalk).toMatchObject({ autoScout: false });
     expect(normalizeFabricConfig({}).prewalk).not.toHaveProperty("autoScout");
     expect(normalizeFabricConfig({ prewalk: { autoScout: false } }).prewalk).not.toHaveProperty(
       "autoScout",
-    );
-    expect(normalizeFabricConfig({ prewalk: { delegateContext: false } }).prewalk).not.toHaveProperty(
-      "delegateContext",
     );
     // A configured run root must be absolute so agent evidence lands somewhere predictable.
     expect(normalizeFabricConfig({ agents: { runRoot: "/tmp/fabric-runs" } }).agents.runRoot).toBe(
@@ -796,7 +788,6 @@ describe("Fabric configuration", () => {
       triggerEffects: ["workspace"],
       triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
       arm: "task",
-      delegateContext: true,
     });
   });
 

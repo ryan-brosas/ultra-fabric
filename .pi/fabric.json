@@ -2,7 +2,6 @@
   "configVersion": 3,
   "prewalk": {
     "thinking": "max",
-    "delegateContext": true,
     "handoffRetirement": true,
     "reuseChecklists": true,
     "verificationMode": "gated",

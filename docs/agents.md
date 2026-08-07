@@ -144,7 +144,7 @@ Failed mutation attempts release the reservation and do not switch models. Trigg
 
 For a host-enforced verification loop, set `prewalk.verificationMode` to `"gated"`. The hidden verify turn must run checks and report `workflow.gate()`; passing evidence settles, `revise` creates one scoped executor handoff, and missing/aborted/crashed evidence blocks at the configured `maxPhaseRevisions` cap. Omit the field for legacy prompt-only verification.
 
-`prewalk.delegateContext` defaults on to keep context gathering off Main; set it to `false` to restore the zero-agents planning posture. With the flag on, the armed planning instruction and the executor continuation both carry an explicit plan-then-delegate discipline: the frontier model plans and the executor implements and verifies, while recon and research go to the `scout`/`explorer` support roles or `consult.run` partition workers that return structured findings or evidence locators instead of whole files. Delegation stays conditional and bounded (one consult.run per fabric_exec, zero workers by admission default), so Main never fans out without an explicit call.
+Recon and research stay on Main's own context. Support roles (`scout`, `explorer`, `worker`, `reviewer`) and `consult.run` workers run only on explicit request through `agents.run` or the `consult.run` surface, and every child stays bounded by admission, turn budgets, and spend caps. The prewalk prompts carry no plan-then-delegate discipline.
 
 Three more opt-in levers tune the planning/execution split:
 

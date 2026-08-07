@@ -41,11 +41,8 @@ export const armPrewalk = async (
       : {}),
     arm: prewalk.arm,
     ...(prewalk.fallbackModels ? { fallbackModels: prewalk.fallbackModels } : {}),
-    ...(prewalk.delegateContext ? { delegateContext: true } : {}),
   });
-  const armedPrompt = prewalkArmedPrompt(model, {
-    ...(prewalk.delegateContext ? { delegateContext: true } : {}),
-  });
+  const armedPrompt = prewalkArmedPrompt(model);
   // Checklist memory: seed the planning phase with the nearest prior accepted
   // checklist for a similar task so Main adapts instead of re-deriving.
   const memoryDir = prewalkMemoryDir(runRoot);

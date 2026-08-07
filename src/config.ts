@@ -70,11 +70,6 @@ interface FabricPrewalkConfig {
   // Consolidates the former alwaysRearm/autoArm pair, which both expressed the
   // same "arm again" intent at different lifecycle boundaries.
   arm: "off" | "session" | "task";
-  // Prefer offloading context gathering to support roles/consult workers. When
-  // on, the armed and continuation prompts carry an explicit plan-then-delegate
-  // discipline so recon spends worker context, not Main's. Default on; set
-  // false to restore the zero-agents planning posture.
-  delegateContext?: boolean;
   // Retire Main's planning-phase read/grep/find/ls results once the executor
   // continuation is live; the accepted checklist carries the plan so the
   // executor replays only what it touches. Default off.
@@ -364,7 +359,6 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     triggerEffects: ["workspace"],
     triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
     arm: "task",
-    delegateContext: true,
     autoScout: false,
   },
   agents: {
@@ -995,9 +989,6 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         const raw = typeof prewalk.researchAgent === "string" ? prewalk.researchAgent.trim() : "";
         return raw && /^[a-z][a-z0-9-]{0,31}$/.test(raw) ? { researchAgent: raw } : {};
       })(),
-      ...(booleanValue(prewalk.delegateContext, true)
-        ? { delegateContext: true }
-        : {}),
       ...(booleanValue(prewalk.handoffRetirement, false)
         ? { handoffRetirement: true }
         : {}),

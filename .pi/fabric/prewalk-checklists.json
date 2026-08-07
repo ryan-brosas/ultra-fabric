@@ -1,5 +1,65 @@
 [
   {
+    "task": "can we review the agent utilization, I don't see we using it in away main session or planning phase so? should we remove it completely since there is no freaking use",
+    "checklist": {
+      "items": [
+        {
+          "task": "Remove PREWALK_DELEGATE_DISCIPLINE, withDelegation, the unconditional support-roles paragraph, and every delegateContext param/propagation from src/prewalk/handoff.ts",
+          "validation": "grep delegateContext src/prewalk/handoff.ts returns 0 hits; armed and continuation prompts no longer contain 'consult.run' or 'Support roles' prose"
+        },
+        {
+          "task": "Remove the delegateContext field from src/config.ts (interface, DEFAULT_FABRIC_CONFIG, normalize) and its propagation in src/prewalk/arm.ts, rearm.ts, controller.ts, lifecycle.ts",
+          "validation": "grep delegateContext src/ (excluding dist) returns 0 hits; tsc --noEmit exit 0"
+        },
+        {
+          "task": "Rewrite the two delegation sentences in the src/init/scaffold.ts AGENTS.md template (Agent surfaces bullet and Fabric behavior bullet) to describe autoScout opt-in and role agents without the delegateContext lever",
+          "validation": "updated tests/fabric-init.test.ts:48 expectation passes; template no longer mentions delegateContext"
+        },
+        {
+          "task": "Update tests: delete tests/prewalk-delegation.test.ts (tests a removed lever; port any generic armed-prompt assertions into prewalk tests first), fix tests/config.test.ts and tests/fabric-init.test.ts expectations",
+          "validation": "npx vitest run tests/config.test.ts tests/fabric-init.test.ts and the prewalk suites pass"
+        },
+        {
+          "task": "Update docs and config: AGENTS.md invariant line 9, docs/agents.md:147, docs/configuration.md:161 (also fix its stale 'autoScout defaults to true' claim), docs/ultra-fabric.md:43/319/383, and drop the delegateContext key from .pi/fabric.json",
+          "validation": "grep -rn delegateContext across the repo excluding CHANGELOG.md, dist/, and git history returns 0 hits"
+        },
+        {
+          "task": "Run the repository gate stage by stage",
+          "validation": "tsc --noEmit, fresh build, full vitest suite, knip, package smoke all exit 0; git diff --check clean"
+        }
+      ],
+      "readyAt": 1786137363460,
+      "doneIndexes": [
+        0,
+        3,
+        4
+      ]
+    },
+    "recordedAt": 1786138359195
+  },
+  {
+    "task": "yes commit, push, and release",
+    "checklist": {
+      "items": [
+        {
+          "task": "Commit the widget fix (src/index.ts, src/prewalk/checklist-progress.ts, tests/prewalk-progress.test.ts) as feat(prewalk), then .pi/fabric/prewalk-checklists.json as chore(prewalk): record checklist memory state",
+          "validation": "git log shows both commits; git status has no staged leftovers beyond untracked root context files"
+        },
+        {
+          "task": "Mark 0.31.1-ultra.18 per the release skill: bump package.json, add the CHANGELOG section, update both README install pins, commit exactly those three files, tag annotated v0.31.1-ultra.18, push main then the tag by explicit ref",
+          "validation": "release commit touches exactly 3 files; CI publish succeeds; npm dist-tags show next: 0.31.1-ultra.18 with trustedPublisher.id == github"
+        }
+      ],
+      "readyAt": 1786136760148,
+      "easy": true,
+      "doneIndexes": [
+        0,
+        1
+      ]
+    },
+    "recordedAt": 1786137090518
+  },
+  {
     "task": "can we make our prewalk checklist UX better like when we are over doing the task we should clear the list on the screen? '/tmp/localterm-paste/48ff91bd-9c51-4bd5-ad9a-9245ef9bafa0/pasted-1786136187058-1eaae72e.png'",
     "checklist": {
       "items": [
@@ -428,56 +488,5 @@
       "readyAt": 1786105322087
     },
     "recordedAt": 1786106461728
-  },
-  {
-    "task": "restarted",
-    "checklist": {
-      "items": [
-        {
-          "task": "Extend .github/workflows/release.yml after npm publication to generate a detailed GitHub Release from the matching CHANGELOG section, including an install command, compare link, npm/package links, and GitHub's generated commit notes; use only checked-in scripts and GitHub CLI/API with least-privilege contents:write.",
-          "validation": "Workflow YAML is syntactically valid; tag/version and changelog extraction are deterministic; release creation is idempotent for reruns."
-        },
-        {
-          "task": "Add a small tested Node script under scripts/ that extracts exactly the current version section from CHANGELOG.md and emits release title/body files without network or model calls; add focused tests for first section, missing version, and stopping before the next heading.",
-          "validation": "New focused tests observe RED then GREEN and script CLI produces a detailed body for 0.31.1-ultra.13."
-        },
-        {
-          "task": "Document the automated GitHub Release behavior in the release skill and verify the repository gate.",
-          "validation": "Release skill names generated artifacts and rerun behavior; pnpm run check, git diff --check, and status pass."
-        }
-      ],
-      "readyAt": 1786103805258,
-      "easy": true
-    },
-    "recordedAt": 1786104348299
-  },
-  {
-    "task": "what did we do?",
-    "checklist": {
-      "items": [
-        {
-          "task": "RED then GREEN for the session store: new tests/carry-store.test.ts covering per-session isolation, defensive copies, oversized-payload rejection keeping the prior snapshot, eviction beyond the session bound with recency refresh, and clear(); implement src/runtime/carry-store.ts (CarryStore class, serialized cap CARRY_MAX_SERIALIZED_CHARS from quickjs-runtime.ts, default 8-session bound, LRU-style eviction).",
-          "validation": "Store tests observed failing on missing module, then all green after implementation."
-        },
-        {
-          "task": "Plumb carry through the execution path: FabricExecutionOptions.carry and FabricExecutionResult.carry in src/execution-service.ts, forwarded into the sandbox options next to strings and surfaced from sandboxResult; fabric-exec-tool.ts reads state.carry.snapshot(sessionId) before execute and persists result.carry after; FabricState owns the CarryStore instance; src/index.ts clears it on session_start next to pendingHandoffs.clear().",
-          "validation": "tsc clean; an execution-service or tool-level test proves carry round-trips through execute(); existing execution-service tests stay green."
-        },
-        {
-          "task": "Type and document the surface: declare const carry: Record<string, unknown> with a persistence-scope doc comment in src/runtime/guest-types.ts, and a short carry section with a two-call example in the fabric-exec skill reference (skills/fabric-exec) or docs.",
-          "validation": "Guest programs using carry type-check (type-checker path accepts the declaration); doc/skill mention exists; knip clean."
-        },
-        {
-          "task": "Live headless proof with the rebuilt dist: isolated PI_CODING_AGENT_DIR (makora model, /tmp/prewalk-isolated pattern), one pi -p run whose prompt makes two sequential fabric_exec calls — first sets carry.token='alpha-42', second returns carry.token — and the final answer contains alpha-42.",
-          "validation": "Transcript shows two fabric_exec calls and the output contains alpha-42."
-        },
-        {
-          "task": "Consistency sweep then the staged gate: verify consult worker requests and schema-enforce mode gain no unintended carry access, compaction/handoff ignore carry safely; run typecheck, build, full vitest, knip, smoke:package, git diff --check, git status.",
-          "validation": "Sweep shows no carry in worker requests; all five gate stages exit 0; only intended files dirty."
-        }
-      ],
-      "readyAt": 1786098697096
-    },
-    "recordedAt": 1786099730424
   }
 ]
