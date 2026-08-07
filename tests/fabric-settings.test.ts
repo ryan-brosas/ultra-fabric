@@ -75,6 +75,26 @@ describe("FabricSettingsComponent", () => {
     expect(lines.some((line) => line.includes("Executor"))).toBe(true);
   });
 
+  it("renders a Code graph section with the CGC bridge toggle", () => {
+    const items = buildItems();
+    const codemap = items.find((item) => item.id === "codemap");
+    expect(codemap).toBeDefined();
+    expect(codemap!.label).toBe("Code graph ›");
+    const lines = codemap!.submenu!("", () => {}).render(100).join("\n");
+    expect(lines).toContain("CGC bridge");
+    expect(lines).toContain("CGC query timeout");
+  });
+
+  it("surfaces the CGC bridge state in the section summary", () => {
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.codemap.enabled = false;
+    const items = buildFabricSettingsItems(theme, config, () => {}, {
+      keepVisibleCandidates: [],
+      modelSource: fakeModelSource,
+    });
+    expect(items.find((i) => i.id === "codemap")!.currentValue).toBe("AST only");
+    expect(items.find((i) => i.id === "codemap")!.currentValue).not.toBe("true");
+  });
   it("renders every section", () => {
     const items = buildItems();
     const component = new FabricSettingsComponent(theme, items, () => {}, () => {});
@@ -86,14 +106,14 @@ describe("FabricSettingsComponent", () => {
       "Executor",
       "Approvals",
       "MCP",
+      "Code graph",
       "Prewalk",
       "Agents",
       "Ultra Consult",
       "Capture",
       "UI",
-      "Compaction",
     ];
-    for (const label of [...visible, "Retention", "Mesh"]) {
+    for (const label of [...visible, "Compaction", "Retention", "Mesh"]) {
       expect(labels).toContain(label);
     }
     // The list pages: only the first rows render, with the rest reachable
@@ -101,8 +121,8 @@ describe("FabricSettingsComponent", () => {
     for (const label of visible) {
       expect(lines).toContain(label);
     }
-    expect(lines).toContain("(1/13)");
-    expect(items.length).toBe(13);
+    expect(lines).toContain("(1/14)");
+    expect(items.length).toBe(14);
   });
 
   it("marks submenu rows with a drill-in marker and leaves inline toggles plain", () => {

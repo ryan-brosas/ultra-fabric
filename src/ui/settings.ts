@@ -86,6 +86,7 @@ const ROOT_ITEM_IDS = [
   "outcomes",
   "retention",
   "mesh",
+  "codemap",
 ] as const;
 const RELOAD_SECTIONS = new Set(["mesh", "agents", "mcp", "outcomes", "retention"]);
 
@@ -294,6 +295,8 @@ const summaryFor = (id: string, config: FabricConfig): string => {
       return `${formatRetention(config.retention.orphanedTempRunMs)} · ${formatRetention(config.retention.oneShotRunMs)} · ${formatRetention(config.retention.persistentAgentRunArchiveMs)}`;
     case "mesh":
       return config.mesh.enabled ? "enabled" : "disabled";
+    case "codemap":
+      return config.codemap.enabled ? "AST + CGC" : "AST only";
     default:
       return "";
   }
@@ -793,6 +796,32 @@ export const buildFabricSettingsItems = (
               formatMs,
               "MCP call timeout",
               "Timeout for individual MCP tool calls.",
+            ),
+          }),
+        ],
+        persist,
+      ),
+    }),
+    setting("codemap", "Code graph", summaryFor("codemap", config), {
+      description: "Project code graph (built-in AST) and the read-only CGC reference bridge.",
+      submenu: sectionSubmenu(
+        theme,
+        "Code graph",
+        "The built-in AST graph is always on. The CGC bridge is opt-in read-only access to reference graphs (inspo clones); it never merges into the project namespace.",
+        [
+          setting("codemap.cgc.enabled", "CGC bridge", config.codemap.enabled ? "true" : "false", {
+            description:
+              "Allow codemap mode 'cgc' to query CGC reference graphs in read-only mode. Keeps reference symbol names out of the project AST namespace. Disable to fall back to the project AST graph only.",
+            values: BOOLEANS,
+          }),
+          setting("codemap.cgc.timeoutMs", "CGC query timeout", formatMs(config.codemap.timeoutMs), {
+            description: "Wall-clock timeout for a single CGC cypher query.",
+            submenu: numericSubmenu(
+              theme,
+              [2_000, 5_000, 10_000, 20_000, 30_000, 60_000],
+              formatMs,
+              "CGC query timeout",
+              "Wall-clock timeout for a single CGC cypher query.",
             ),
           }),
         ],
