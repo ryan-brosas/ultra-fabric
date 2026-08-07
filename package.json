@@ -1,6 +1,6 @@
 {
   "name": "ultra-fabric",
-  "version": "0.31.1-ultra.9",
+  "version": "0.31.1-ultra.10",
   "description": "A resilient, adaptive orchestration runtime for Pi",
   "type": "module",
   "main": "./dist/index.js",

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.31.1-ultra.10 - 2026-08-07
+
+- runtime: add a distinct `budget_exhausted` terminal status threaded through the worker, agent manager, lifecycle events, activity ledger, evidence classification, and dashboards so budget exhaustion is never collapsed into timed_out; failure records preserve observed progress.
+- prewalk: make `autoScout` explicit opt-in (scouts spawn only on request, never on prompt send) and add `scoutTimeoutMs` / `scoutMaxTokens` budget knobs (defaults 3 min / 64k tokens).
+- codemap: add cgc reference mode with an explore evidence pipeline, member-level disclosure, wider import specifier coverage, and actionable cgc errors.
+- startup: warn when the loaded build is stale vs current source.
+- settings: add a CGC bridge toggle section to /fabric settings.
+- cleanup: remove 21 dead exports and the superseded codemap-heat-render test.
+
 ## 0.31.1-ultra.9 - 2026-08-06
 
 - bench: fabric-prewalk becomes a first-class DeepSWE matrix config with an isolated prewalk-first fabric.json, omniroute provider upload, and config-aware model selection.
