@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.1-ultra.12 - 2026-08-07
+
+- compaction: auto-compact every model via a global `compaction.threshold` (default 0.85); per-model entries still win. Models without an entry previously never auto-compacted.
+- prewalk: `[DONE:n]` markers in executor turns mark checklist items complete, rendered as a checklist n/m status and ASCII widget; the per-turn reminder omits finished items and carries a done-count header, cutting re-sent tokens on long workflows.
+- compat: adapt OpenAI compaction request headers to Pi 0.84 `ProviderHeaders` (values may be null; filtered before fetch). `@earendil-works/{pi-coding-agent,pi-tui,pi-ai}` devDeps bumped 0.83.0 → 0.84.1; render/TUI suites verified on 0.84.1.
+
 ## 0.31.1-ultra.11 - 2026-08-07
 
 - init: `/fabric init` copies legacy `.pi` context files to their root-level siblings instead of only reporting the migration.
