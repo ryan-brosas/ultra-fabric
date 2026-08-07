@@ -2,6 +2,7 @@ import crossSpawn from "cross-spawn";
 import type { SymbolIndex } from "./symbols.js";
 import { enclosingSymbol } from "./symbols.js";
 import { computeEdgeWeight, type RankEdge } from "./rank.js";
+import { chunkPaths } from "./outline.js";
 import { groupFilesByLang } from "./lang.js";
 import { buildImportScope, resolveDefiners } from "./scope.js";
 
@@ -49,24 +50,28 @@ export const extractCallEdges = (
   // extracted across a polyglot tree.
   const matches: AstGrepMatch[] = [];
   for (const [lang, langFiles] of groupFilesByLang(files)) {
-    let stdout: string;
-    try {
-      const res = crossSpawn.sync(
-        binary,
-        ["run", "--pattern", "$F($$$)", "--lang", lang, "--json=compact", ...langFiles],
-        { cwd, encoding: "utf8", timeout: 60_000, maxBuffer: 50 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] },
-      );
-      if (res.error || res.status !== 0) continue;
-      stdout = res.stdout;
-    } catch {
-      continue;
-    }
-    if (!stdout.trim()) continue;
-    try {
-      const parsed = JSON.parse(stdout) as AstGrepMatch[];
-      if (Array.isArray(parsed)) matches.push(...parsed);
-    } catch {
-      // ignore unparseable output for this language group
+    // Chunk like the outline path so Windows cmd.exe shims never truncate the
+    // argv of large per-language file lists.
+    for (const chunk of chunkPaths(langFiles)) {
+      let stdout: string;
+      try {
+        const res = crossSpawn.sync(
+          binary,
+          ["run", "--pattern", "$F($$$)", "--lang", lang, "--json=compact", ...chunk],
+          { cwd, encoding: "utf8", timeout: 60_000, maxBuffer: 50 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] },
+        );
+        if (res.error || res.status !== 0) continue;
+        stdout = res.stdout;
+      } catch {
+        continue;
+      }
+      if (!stdout.trim()) continue;
+      try {
+        const parsed = JSON.parse(stdout) as AstGrepMatch[];
+        if (Array.isArray(parsed)) matches.push(...parsed);
+      } catch {
+        // ignore unparseable output for this language group
+      }
     }
   }
 

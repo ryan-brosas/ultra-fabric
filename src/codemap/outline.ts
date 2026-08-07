@@ -96,27 +96,53 @@ export interface OutlineOptions {
   cwd?: string;
 }
 
+// Windows cmd.exe shims truncate command lines at 8191 characters. A full-tree
+// ast-grep argv (hundreds of file paths) exceeds that and fails silently, so
+// chunk the file list into bounded batches and merge the JSON results. Chunks
+// keep order so callers see the same outline on every platform.
+export const CHUNK_TARGET_CHARS = 3500;
+
+export const chunkPaths = (filePaths: readonly string[], maxChars = CHUNK_TARGET_CHARS): string[][] => {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let chars = 0;
+  for (const file of filePaths) {
+    if (current.length > 0 && chars + file.length + 1 > maxChars) {
+      chunks.push(current);
+      current = [];
+      chars = 0;
+    }
+    current.push(file);
+    chars += file.length + 1;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+};
+
 export const runOutline = (
   filePaths: readonly string[],
   options: OutlineOptions = {},
 ): OutlineFile[] => {
   const binary = options.binary ?? "ast-grep";
   const cwd = options.cwd ?? process.cwd();
-  try {
-    const res = crossSpawn.sync(binary, ["outline", "--json=compact", ...filePaths], {
-      cwd,
-      encoding: "utf8",
-      timeout: 60_000,
-      maxBuffer: 10 * 1024 * 1024,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    if (res.error || res.status !== 0) return [];
-    const stdout = res.stdout;
-    if (!stdout.trim()) return [];
-    const raw = JSON.parse(stdout) as RawFile[];
-    if (!Array.isArray(raw)) return [];
-    return raw.map(toFile);
-  } catch {
-    return [];
+  const files: OutlineFile[] = [];
+  for (const chunk of chunkPaths(filePaths)) {
+    try {
+      const res = crossSpawn.sync(binary, ["outline", "--json=compact", ...chunk], {
+        cwd,
+        encoding: "utf8",
+        timeout: 60_000,
+        maxBuffer: 10 * 1024 * 1024,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      if (res.error || res.status !== 0) continue;
+      const stdout = res.stdout;
+      if (!stdout.trim()) continue;
+      const raw = JSON.parse(stdout) as RawFile[];
+      if (Array.isArray(raw)) files.push(...raw.map(toFile));
+    } catch {
+      // skip this chunk; other chunks still contribute
+    }
   }
+  return files;
 };

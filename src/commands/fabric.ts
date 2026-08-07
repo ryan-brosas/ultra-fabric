@@ -822,14 +822,20 @@ const detectProject = (cwd: string): DetectedContext | null => {
   }
   let gh: string | null = null;
   let git: string | null = null;
+  // Identity detection is best-effort and must never stall /fabric init: bound
+  // each probe so a hanging gh/git invocation (for example an unauthenticated
+  // gh api retry on CI) cannot block the command for seconds. Prompts are
+  // disabled so a non-interactive runner fails fast instead of waiting.
+  const PROBE_TIMEOUT_MS = 2_000;
+  const probeEnv = { ...process.env, GH_PROMPT_DISABLED: "1", GIT_TERMINAL_PROMPT: "0" };
   try {
-    gh = execFileSync("gh", ["api", "user", "--jq", ".login"], { cwd, encoding: "utf8", timeout: 10_000, stdio: ["pipe", "pipe", "pipe"] }).trim() || null;
+    gh = execFileSync("gh", ["api", "user", "--jq", ".login"], { cwd, encoding: "utf8", timeout: PROBE_TIMEOUT_MS, env: probeEnv, stdio: ["pipe", "pipe", "pipe"] }).trim() || null;
   } catch {
     /* gh unavailable or unauthenticated */
   }
   if (!gh) {
     try {
-      git = execFileSync("git", ["config", "user.name"], { cwd, encoding: "utf8", timeout: 10_000, stdio: ["pipe", "pipe", "pipe"] }).trim() || null;
+      git = execFileSync("git", ["config", "user.name"], { cwd, encoding: "utf8", timeout: PROBE_TIMEOUT_MS, env: probeEnv, stdio: ["pipe", "pipe", "pipe"] }).trim() || null;
     } catch {
       /* no git identity */
     }

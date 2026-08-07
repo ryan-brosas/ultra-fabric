@@ -2,6 +2,7 @@ import crossSpawn from "cross-spawn";
 import type { SymbolIndex } from "./symbols.js";
 import { enclosingSymbol } from "./symbols.js";
 import { groupFilesByLang } from "./lang.js";
+import { chunkPaths } from "./outline.js";
 
 // Typed AST literal index: string literals and comments, extracted as AST nodes
 // (not a raw file-content scan). Each entry carries its file, 1-indexed line, the
@@ -76,7 +77,11 @@ export const buildLiteralIndex = (
     // literal node; '$S' matches a single-quoted one. Run both, dedupe by node.
     const stringMatches: AstGrepMatch[] = [];
     for (const pattern of ['"$S"', "'$S'"]) {
-      stringMatches.push(...runAstGrep(binary, ["run", "--pattern", pattern, "--lang", lang, "--json=compact", ...langFiles], cwd));
+      // Chunk like the outline path so Windows cmd.exe shims never truncate the
+      // argv of large per-language file lists.
+      for (const chunk of chunkPaths(langFiles)) {
+        stringMatches.push(...runAstGrep(binary, ["run", "--pattern", pattern, "--lang", lang, "--json=compact", ...chunk], cwd));
+      }
     }
     // Dedupe string matches by (file, line, column) since the two patterns can
     // overlap on some grammars.
@@ -92,7 +97,10 @@ export const buildLiteralIndex = (
     // Flow-style YAML on one line: a multi-line argv entry does not survive the
     // Windows cmd shim that wraps the ast-grep binary.
     const commentRule = "{id: c, language: " + lang + ", rule: {kind: comment}}";
-    const commentMatches = runAstGrep(binary, ["scan", "--inline-rules", commentRule, "--json=compact", ...langFiles], cwd);
+    const commentMatches: AstGrepMatch[] = [];
+    for (const chunk of chunkPaths(langFiles)) {
+      commentMatches.push(...runAstGrep(binary, ["scan", "--inline-rules", commentRule, "--json=compact", ...chunk], cwd));
+    }
     for (const m of commentMatches) {
       const line1 = m.range.start.line + 1;
       entries.push({ file: m.file, line: line1, kind: "comment", text: m.text, enclosing: enclosing(index, m.file, line1) });
