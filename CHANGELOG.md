@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.31.1-ultra.11 - 2026-08-07
+
+- init: `/fabric init` copies legacy `.pi` context files to their root-level siblings instead of only reporting the migration.
+- prewalk: session-scoped arms survive settled tasks, so the gate stays armed for the whole session; the continuation reminder re-injects only after a mutation attempt, keeping read-only turns quiet.
+- config: hand-edits to either `fabric.json` take effect on the next prompt via an mtime watch; no `/fabric` settings touch or restart needed.
+- codemap: cgc search tokenizes multi-word queries and searches classes; `source` honors the `name:file` qualifier; scoped hotspots and search exclude vendored paths; the AST skeleton renders files by aggregate PageRank so token budgets keep load-bearing modules; truncated output carries a visible marker.
+- refactor: one shared `isRecord` guard replaces ten per-module copies; the fabric_exec render surface moves to `fabric-exec-render.ts` (createFabricExecTool complexity 255 → 49); `FabricExecutionService.execute` splits into guest and settle phases (complexity 241 → 42). No behavior change.
+
 ## 0.31.1-ultra.10 - 2026-08-07
 
 - runtime: add a distinct `budget_exhausted` terminal status threaded through the worker, agent manager, lifecycle events, activity ledger, evidence classification, and dashboards so budget exhaustion is never collapsed into timed_out; failure records preserve observed progress.
