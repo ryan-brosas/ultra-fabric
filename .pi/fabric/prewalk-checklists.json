@@ -1,5 +1,49 @@
 [
   {
+    "task": "can we make our prewalk checklist UX better like when we are over doing the task we should clear the list on the screen? '/tmp/localterm-paste/48ff91bd-9c51-4bd5-ad9a-9245ef9bafa0/pasted-1786136187058-1eaae72e.png'",
+    "checklist": {
+      "items": [
+        {
+          "task": "Add a pure checklistWidgetView helper in src/prewalk/checklist-progress.ts that returns {status, lines} while items remain pending and null once every item is done (or the list is empty), with RED-first tests in tests/prewalk-progress.test.ts",
+          "validation": "new tests fail before the helper exists, pass after; existing progress tests stay green"
+        },
+        {
+          "task": "Use the helper in the src/index.ts message handler so a completed checklist tears down the fabric-prewalk-progress widget and status exactly like the idle branch, instead of retaining struck-through rows",
+          "validation": "tsc, fresh build, full vitest suite, knip, package smoke all green; git diff --check clean"
+        }
+      ],
+      "readyAt": 1786136281108,
+      "easy": true,
+      "doneIndexes": [
+        0,
+        1
+      ]
+    },
+    "recordedAt": 1786136608726
+  },
+  {
+    "task": "commit, push and publish it please",
+    "checklist": {
+      "items": [
+        {
+          "task": "Mark 0.31.1-ultra.17: bump package.json, add the CHANGELOG section, update both README install pins, commit exactly those three files as chore(release): mark 0.31.1-ultra.17",
+          "validation": "git show --stat HEAD lists only package.json, CHANGELOG.md, README.md; grep finds ultra.17 in all three"
+        },
+        {
+          "task": "Tag and push per the release skill: annotated tag v0.31.1-ultra.17, push main, push the tag by explicit ref (never --follow-tags)",
+          "validation": "git push origin main and git push origin refs/tags/v0.31.1-ultra.17 succeed; the npm registry dist-tags show next: 0.31.1-ultra.17 once CI publishes"
+        }
+      ],
+      "readyAt": 1786135802314,
+      "easy": true,
+      "doneIndexes": [
+        0,
+        1
+      ]
+    },
+    "recordedAt": 1786136120526
+  },
+  {
     "task": "yes this is all good but make it default, always",
     "checklist": {
       "items": [
@@ -435,68 +479,5 @@
       "readyAt": 1786098697096
     },
     "recordedAt": 1786099730424
-  },
-  {
-    "task": "did we apply that lesson?",
-    "checklist": {
-      "items": [
-        {
-          "task": "Locate the existing runtime test files for quickjs and node-process (tests/ directory; find how they drive executeGuestProgram/sandbox runs) and write RED tests for a session carry namespace: an injected carry snapshot is visible as a plain global object in guest code; guest mutations to carry come back in the run result envelope; functions/undefined values are dropped by JSON serialization; a circular or oversized (>256000 serialized chars) carry is not returned and the run still succeeds.",
-          "validation": "RED observed: current runtimes expose no carry global and no carry field in results; new tests fail on both runtime paths."
-        },
-        {
-          "task": "Implement runtime support. QuickJS (src/runtime/quickjs-runtime.ts): inject options.carry via the same jsonHandle path as π at setup; after successful evaluation extract JSON.stringify(globalThis.carry) via context.evalCode with the size cap; skip extraction on timeout/abort. Node child (src/runtime/node-process-child-source.ts): add carry to the sandbox from message.carry and include bounded jsonCompatible(sandbox.carry) in both the success and runtime_error result envelopes; thread the field through src/runtime/node-process-runtime.ts message and result types.",
-          "validation": "Runtime RED tests turn GREEN on both runtimes; no other runtime tests regress."
-        },
-        {
-          "task": "Plumb the session store: a bounded per-session carry store (Map keyed by sessionId, serialized-size cap 256000 chars, evict oldest sessions beyond 8) owned by FabricState or a small pure module in src/runtime or src/; fabric-exec-tool.ts reads the snapshot for context.sessionManager.getSessionId() before execute and persists the returned carry after; execution-service.ts forwards options.carry into the sandbox runtime and surfaces result.carry. Clear the store on session_start in src/index.ts next to pendingHandoffs.clear().",
-          "validation": "Unit tests for the store (cap, eviction, per-session isolation) pass; an execution-service-level test proves carry round-trips through execute(); wiring compiles with tsc."
-        },
-        {
-          "task": "Type and document the surface: declare const carry: Record<string, unknown> in src/runtime/guest-types.ts with a doc comment stating persistence scope (per Pi session, JSON-serializable values only, not updated on timeout/abort), and add a short section to the fabric-exec skill reference or docs describing carry with a two-call example.",
-          "validation": "Type-checker accepts guest programs using carry (type-checker test or transpile path covers the declaration); docs/skill mention exists; knip stays clean."
-        },
-        {
-          "task": "Live headless proof with the rebuilt dist: isolated PI_CODING_AGENT_DIR (makora model, pattern from /tmp/prewalk-isolated), one pi -p run whose prompt makes two sequential fabric_exec calls — first sets carry.token = 'alpha-42', second returns carry.token — and the final answer contains alpha-42.",
-          "validation": "Transcript shows two fabric_exec calls and the final output contains alpha-42; session store did not leak across the isolated session boundary."
-        },
-        {
-          "task": "Consistency sweep: schema enforce mode and consult workers must not gain unintended carry access (workers spawn fresh Pi children, unaffected; verify no carry leakage through the worker request path), and compaction/handoff paths ignore carry safely.",
-          "validation": "grep-based sweep plus targeted assertions where cheap; no worker request contains carry; enforce-mode test suite stays green."
-        },
-        {
-          "task": "Run the staged repository gate: typecheck, build, full vitest, knip, smoke:package, then git diff --check and git status --short --branch.",
-          "validation": "All five stages exit 0; only intended files dirty (two runtimes, child source, execution-service, fabric-exec-tool, fabric-state or new store module, guest-types, tests, one doc/skill file)."
-        }
-      ],
-      "readyAt": 1786097832202
-    },
-    "recordedAt": 1786098207645
-  },
-  {
-    "task": "can we go deep on making our stuff better like fabric_exec we did cloned stuff earlier look on cgc stuff",
-    "checklist": {
-      "items": [
-        {
-          "task": "Truncated read-modify-write guard in src/providers/pi-tools-provider.ts: when a pi.read result carries the core truncation marker ('[Showing lines A-B of N (...). Use offset=... to continue.]'), record the resolved path in a per-run set; reject a later pi.write full-overwrite to that path in the same run, and reject any pi.write whose content itself contains a truncation-marker line. Error message steers to pi.edit or offset reads. RED tests first in the pi-tools provider test file (find it; extend, do not create a parallel file).",
-          "validation": "RED observed: write after truncated read currently succeeds (data loss); after fix both guard paths throw with the guidance message, pi.edit on the same path still works, and a normal untruncated read-then-write stays allowed."
-        },
-        {
-          "task": "Pathological scalar-array elision in formatFabricValue (src/ui/structured.ts): when an array exceeds a bounded threshold (e.g. 100 items) and items are short scalars, render head and tail samples plus one '(N items elided)' line instead of every item, preserving JSON format mode behavior and hoisted-section logic. RED test reproduces the 10k numeric-string-keys dump shrinking from tens of KB to under 1 KB.",
-          "validation": "RED observed: current output renders every item; after fix the elided rendering appears, small arrays are untouched, and existing structured/format tests stay green."
-        },
-        {
-          "task": "Sweep both changes for consistency: bash truncation details path in normalizeResult stays intact, write-preview and lease paths unaffected, and docs mention the write guard in the appropriate doc (docs/configuration.md or docs/quality.md, one short paragraph).",
-          "validation": "grep shows no other write path bypasses the guard (captured-tools override path included or explicitly documented as out of scope); docs updated."
-        },
-        {
-          "task": "Run the staged repository gate: typecheck, build, full vitest, knip, smoke:package, then git diff --check and git status --short --branch.",
-          "validation": "All five stages exit 0; only intended files dirty (pi-tools-provider, structured.ts, their test files, one doc)."
-        }
-      ],
-      "readyAt": 1786096844053,
-      "easy": true
-    },
-    "recordedAt": 1786097434238
   }
 ]
