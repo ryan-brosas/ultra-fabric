@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.31.1-ultra.16 - 2026-08-08
+
+- prewalk: the executor now receives an explicit [DONE:n] emission contract in the continuation and reminder prompts, numbered by original checklist position, so completed items strike through in the progress widget in the same turn they finish; the widget re-reads live status after marking and tears down exactly once when the prewalk settles instead of leaving stale rows on the dashboard.
+- prewalk: the research arm spends the retrieval budget in full passes and grounds unfamiliar algorithms with an aligned arXiv paper plus an aligned repository clone under sources/.
+- codemap: buildAllEdges moves from symbols.ts into build.ts so the symbol index no longer imports the call extractor.
+- docs: AGENTS.md records the .cgcignore removal and full-tree indexing decision.
+
 ## 0.31.1-ultra.15 - 2026-08-07
 
 - codemap: search now serves the grep-replacement query classes from AST-typed indexes — regex content patterns against the literal index, YAML/JSON config keys as typed literals, declaration queries with an unfiltered fallback for const-arrows and type aliases, and exact-name ties preferring the exported definition.
