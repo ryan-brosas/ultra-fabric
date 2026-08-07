@@ -20,3 +20,19 @@ export const checklistProgress = (checklist: FabricPrewalkChecklist): { done: nu
   done: checklist.doneIndexes?.length ?? 0,
   total: checklist.items.length,
 });
+
+// ANSI SGR sequences used by the widget renderer. Kept as constants so tests
+// pin the exact escape bytes and the TUI strips them when styling is disabled.
+const SGR_STRIKE_DIM = "\u001b[9;2m";
+const SGR_RESET = "\u001b[0m";
+
+// Widget lines for the prewalk progress widget: completed items show the [x]
+// marker with the task struck through and dimmed, pending items stay plain
+// "[ ] task". Pure and ASCII-escape based, matching the theme.fg style other
+// fabric widgets use; callers render the array as widget lines.
+export const checklistWidgetLines = (checklist: FabricPrewalkChecklist): string[] => {
+  const done = new Set(checklist.doneIndexes ?? []);
+  return checklist.items.map((item, index) =>
+    done.has(index) ? "[x] " + SGR_STRIKE_DIM + item.task + SGR_RESET : "[ ] " + item.task,
+  );
+};

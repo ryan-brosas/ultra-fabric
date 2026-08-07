@@ -18,7 +18,7 @@ import {
 } from "./prewalk/continuation.js";
 import { restorePrewalkModel } from "./prewalk/model.js";
 import { prewalkChecklistReminder } from "./prewalk/continuation.js";
-import { checklistProgress, extractDoneMarkers } from "./prewalk/checklist-progress.js";
+import { checklistProgress, checklistWidgetLines, extractDoneMarkers } from "./prewalk/checklist-progress.js";
 
 // Concatenated text of the most recent assistant message in the branch, so
 // [DONE:n] progress markers in the executor's last turn reach the controller.
@@ -643,12 +643,9 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
               "fabric-prewalk-progress",
               `checklist ${progress.done}/${progress.total}`,
             );
-            const done = new Set(checklist.checklist.doneIndexes ?? []);
             context.ui.setWidget(
               "fabric-prewalk-progress",
-              checklist.checklist.items.map((item, index) =>
-                done.has(index) ? "[[0mDONE] " + item.task : "[ ] " + item.task,
-              ),
+              checklistWidgetLines(checklist.checklist),
             );
           }
         }

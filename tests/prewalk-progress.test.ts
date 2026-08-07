@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractDoneMarkers, checklistProgress } from "../src/prewalk/checklist-progress.js";
+import { extractDoneMarkers, checklistProgress, checklistWidgetLines } from "../src/prewalk/checklist-progress.js";
 import { prewalkChecklistReminder } from "../src/prewalk/continuation.js";
 import { PrewalkController } from "../src/prewalk/controller.js";
 
@@ -29,6 +29,26 @@ describe("checklistProgress", () => {
   it("counts done and total", () => {
     expect(checklistProgress(checklist([0, 2]))).toEqual({ done: 2, total: 5 });
     expect(checklistProgress(checklist())).toEqual({ done: 0, total: 5 });
+  });
+});
+
+describe("checklistWidgetLines", () => {
+  it("crosses out done items with strikethrough and keeps the [x] marker", () => {
+    const lines = checklistWidgetLines(checklist([0, 2]));
+    expect(lines).toHaveLength(5);
+    expect(lines[0]).toBe("[x] \u001b[9;2mStep 1\u001b[0m");
+    expect(lines[2]).toBe("[x] \u001b[9;2mStep 3\u001b[0m");
+  });
+
+  it("renders pending items as plain [ ] lines with no escapes", () => {
+    const lines = checklistWidgetLines(checklist([0]));
+    expect(lines[1]).toBe("[ ] Step 2");
+    expect(lines[1]).not.toContain("\u001b");
+  });
+
+  it("renders all items pending when nothing is done", () => {
+    const lines = checklistWidgetLines(checklist());
+    expect(lines).toEqual(items.map((item) => "[ ] " + item.task));
   });
 });
 
