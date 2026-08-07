@@ -1,5 +1,346 @@
 [
   {
+    "task": "I still see clutter on on our pi... also prewalk checklist isn't crossing out done task.... I thought we fuycking implemented that",
+    "checklist": {
+      "items": [
+        {
+          "task": "RED: extend tests/prewalk-progress.test.ts (or continuation tests) to assert prewalkChecklistReminder keeps original 1-based item numbers for open items and includes an explicit [DONE:n] emission instruction",
+          "validation": "npx vitest run tests/prewalk-progress.test.ts fails on the new assertions before the implementation change"
+        },
+        {
+          "task": "GREEN: in src/prewalk/continuation.ts, change prewalkChecklistReminder to number open items by original position (index+1, not openIndex+1) and append one sentence instructing the executor to emit [DONE:n] in turn text when item n completes",
+          "validation": "the new reminder tests pass; existing continuation/handoff tests still pass"
+        },
+        {
+          "task": "Add the same [DONE:n] emission instruction to the post-acceptance executor prompts in src/prewalk/handoff.ts (PREWALK_CONTINUE_PROMPT and the checklist-accepted handoff text), with a matching assertion in tests/prewalk-handoff.test.ts",
+          "validation": "npx vitest run tests/prewalk-handoff.test.ts passes with the new prompt assertion"
+        },
+        {
+          "task": "Fix src/index.ts progress block: after markChecklistDone, re-read state.prewalk.status() before computing checklistProgress and checklistWidgetLines so the freshly marked items render struck-through in the same turn",
+          "validation": "code review of the block plus vitest run of any index/progress wiring tests; strikethrough bytes \\u001b[9;2m appear for a marked item when driven through the transform"
+        },
+        {
+          "task": "Fix clutter: unconditionally clear the fabric-prewalk-progress widget and status in src/index.ts when prewalk state is idle or has no live checklist (setWidget/setStatus teardown), not only inside the lastAssistantText branch",
+          "validation": "focused test or manual trace showing the widget keys are cleared when checklist settles; no stale rows persist after retirement"
+        },
+        {
+          "task": "Rebuild and gate in stages (pnpm run check outruns the 120s tool budget): typecheck, build, full vitest, knip, smoke; keep the unrelated in-tree handoff.ts research-enrichment diff intact and out of scope",
+          "validation": "all five gate stages pass; git diff --check clean; only the planned files changed beyond the pre-existing working-tree edits"
+        },
+        {
+          "task": "Live proof: after dist rebuild note that the running pi session needs a restart to load the new extension; verify via a fresh prewalk that [DONE:n] markers strike items through and the widget clears on settle",
+          "validation": "runtime evidence per the prewalk evidence locations shows doneIndexes populated and widget teardown observed"
+        }
+      ],
+      "readyAt": 1786115588276,
+      "doneIndexes": [
+        1
+      ]
+    },
+    "recordedAt": 1786116358266
+  },
+  {
+    "task": "can we look on our cgc or code graph mcp to look for gaps, dead code and well stuff that we can improve",
+    "checklist": {
+      "items": [
+        {
+          "task": "Break the symbols.ts/calls.ts cycle: remove the calls.js import and buildAllEdges from src/codemap/symbols.ts, export buildInheritanceEdges, and re-home buildAllEdges in src/codemap/build.ts importing edge builders from symbols.js and extractCallEdges from calls.js.",
+          "validation": "grep shows no calls.js import in symbols.ts; knip --cycles reports zero circular dependencies."
+        },
+        {
+          "task": "Update the buildAllEdges import sites: src callers plus tests/codemap-disclose.test.ts, codemap-polyglot.test.ts, codemap-cascade.test.ts now import from build.js; adjust the disclose test's entity key buildAllEdges:src/codemap/symbols.ts to build.ts.",
+          "validation": "grep finds no remaining buildAllEdges import from symbols.js; codemap test modules pass."
+        },
+        {
+          "task": "Run typecheck and the full codemap test suite, then git diff --check and git status.",
+          "validation": "tsc exit 0; all codemap tests pass; diff check clean with only the named files changed."
+        }
+      ],
+      "readyAt": 1786113580560,
+      "easy": true
+    },
+    "recordedAt": 1786113924081
+  },
+  {
+    "task": "can fix token optimization on this as well? like there is no dripping? maximizing all token... like every drop look for arxiv article and do clone github repo that is aligned with it....",
+    "checklist": {
+      "items": [
+        {
+          "task": "Add a RESEARCH_ENRICHMENT guidance block in src/prewalk/handoff.ts and join it into researchArmedPrompt: spend the research budget in full deep passes (no dripping small queries), and for unfamiliar algorithms or external techniques, find an aligned arXiv paper and clone the aligned GitHub repo into sources/ instead of fetching isolated files.",
+          "validation": "researchArmedPrompt output contains the enrichment text; trivial and continuation prompts do not; existing prompt tests still pass."
+        },
+        {
+          "task": "Add a focused regression test in the existing prewalk handoff test module asserting the research prompt includes the full-budget and arxiv/sources-clone guidance, observing RED first.",
+          "validation": "New test fails before the prompt change and passes after; run the whole handoff test module, not just the new case."
+        },
+        {
+          "task": "Run typecheck plus the prewalk test suite, then git diff --check and git status --short --branch.",
+          "validation": "All checks pass with only src/prewalk/handoff.ts and the test module changed."
+        }
+      ],
+      "readyAt": 1786112618376,
+      "easy": true
+    },
+    "recordedAt": 1786113161586
+  },
+  {
+    "task": "did we fix token optimization on this as well? like there is no dripping? maximizing all token... like every drop",
+    "checklist": {
+      "items": [
+        {
+          "task": "Verify release preconditions: tree state (3 commits ahead), the .pi/fabric.json diff disposition, remote sync, npm dist-tags, and that 0.31.1-ultra.15 is absent from the registry.",
+          "validation": "git status/rev-list recorded; registry shows next=0.31.1-ultra.14 and no ultra.15; the fabric.json change is classified as commit-or-exclude with its exact diff."
+        },
+        {
+          "task": "Run the full repository gate and hygiene checks before touching release metadata.",
+          "validation": "pnpm run check green (all stages), git diff --check clean."
+        },
+        {
+          "task": "Mark the release: bump package.json to 0.31.1-ultra.15, add the dated changelog section covering the three commits, and update both README install pins.",
+          "validation": "package.json version, changelog top section, and exactly two README pins agree on 0.31.1-ultra.15."
+        },
+        {
+          "task": "Commit chore(release): mark 0.31.1-ultra.15 with exactly the three release files, then create the annotated tag v0.31.1-ultra.15.",
+          "validation": "Commit contains only package.json, CHANGELOG.md, README.md; tag exists and peels to that commit; prewalk runtime memory stays uncommitted."
+        },
+        {
+          "task": "Push main, then push the tag by explicit ref (never --follow-tags), and monitor the Publish and Test workflow runs to conclusion.",
+          "validation": "origin/main equals local main; Publish npm prerelease concludes success; Test conclusions recorded including the windows job that the argv-chunking fix targets."
+        },
+        {
+          "task": "Verify publication and update the local plugin: npm next dist-tag, trusted-publisher provenance, GitHub Release presence, then pi install npm:ultra-fabric@0.31.1-ultra.15.",
+          "validation": "next=0.31.1-ultra.15 with trustedPublisher id github, GitHub Release v0.31.1-ultra.15 exists, and pi list reports npm:ultra-fabric@0.31.1-ultra.15."
+        }
+      ],
+      "readyAt": 1786111849069
+    },
+    "recordedAt": 1786112416356
+  },
+  {
+    "task": "can we buff our codemap (AST) and make it our default... almost replace grep than using grep look for stuff inspo on arxiv + github repo",
+    "checklist": {
+      "items": [
+        {
+          "task": "Finish the in-flight Windows argv-chunking fix: add chunkPaths regression tests (boundary packing, order preservation, oversized single path) plus the bounded init-probe change already in tree, and commit it as its own upstream-shaped fix.",
+          "validation": "tests cover chunkPaths edges and pass; commit contains only src/codemap/{outline,literals,calls}.ts, src/commands/fabric.ts, and the new test; tree afterwards holds only buff work."
+        },
+        {
+          "task": "Serve the regex query class: route regex-classified queries over literal texts (strings + comments, AST-node indexed) in addition to symbol names, merging with provenance and bounded limits.",
+          "validation": "RED test first: a content regex like \"retire.*oversized\" returns literal hits with file:line; symbol-name regexes keep current behavior; no file-content scanning added."
+        },
+        {
+          "task": "Add a refs operation (semnav find_callers shape, LocAgent invoke edges): for a name or name:file key, return precise call sites and import sites with file:line and enclosing symbol, from the existing ast-grep call-site extraction before aggregation.",
+          "validation": "RED test first: refs on a known function returns its real call sites with correct lines and excludes the definition itself; output bounded by maxTokens."
+        },
+        {
+          "task": "Extend literal indexing to YAML config (ast-grep --lang yaml verified live) so config-key queries resolve; JSON via inline-rule kind match if a probe succeeds, otherwise document the exclusion.",
+          "validation": "A query for a real key in .pi/fabric.json or a YAML fixture returns a typed literal hit with file:line, or the JSON exclusion is recorded with the failing probe."
+        },
+        {
+          "task": "Flip steering to codemap-first: rewrite the tool description and promptGuidelines (grep only as empty-result fallback), update the AGENTS.md navigation line, and align prewalk handoff guidance if it names grep.",
+          "validation": "Guidelines no longer reserve strings/comments/config for grep; AGENTS.md navigation rule names codemap first; grep framed as fallback when codemap returns nothing."
+        },
+        {
+          "task": "Measure and gate: replay the mined grep corpus through route() reporting served fraction before/after, rerun benchmark:codemap:grep for no regression, run the full repository gate, and commit the buff.",
+          "validation": "Served fraction rises materially with the regex+refs+config classes counted; symbol benchmark stays MRR 1.00; pnpm run check green; conventional commits with docs/code-map-research.md updated."
+        }
+      ],
+      "readyAt": 1786109445717
+    },
+    "recordedAt": 1786111459329
+  },
+  {
+    "task": "'/tmp/localterm-paste/ff835a38-be49-4a5f-a766-a813d4b91062/pasted-1786108680846-4fc9cca3.png' can we improve this UI for checklist can we have something like crossing it out for better quality of life?",
+    "checklist": {
+      "items": [
+        {
+          "task": "Confirm from the screenshot and src/index.ts:646-652 how the prewalk checklist widget renders items, including the stray ANSI reset embedded in the [DONE] branch.",
+          "validation": "The exact current render expression and the accidental \\u001b[0m inside \"[DONE]\" are recorded; the ANSI pass-through of string widgets is confirmed from pi docs or theme.fg usage."
+        },
+        {
+          "task": "Add a pure checklistWidgetLines(checklist) renderer to src/prewalk/checklist-progress.ts producing \"[x] \" + strikethrough+dim task for done items and plain \"[ ] \" lines for pending.",
+          "validation": "Function stays pure with no I/O; done lines equal \"[x] \\u001b[9;2m<task>\\u001b[0m\" and pending lines equal \"[ ] <task>\"."
+        },
+        {
+          "task": "Write RED tests in tests/prewalk-progress.test.ts covering done strikethrough, pending plain lines, and the all-pending shape before implementing.",
+          "validation": "Vitest shows the new describe failing before the implementation exists and passing after."
+        },
+        {
+          "task": "Replace the inline map in src/index.ts with checklistWidgetLines, removing the \"[\\u001b[0mDONE] \" string.",
+          "validation": "src/index.ts imports checklistWidgetLines from checklist-progress.js and no \"[DONE] \" widget literal remains anywhere in src/."
+        },
+        {
+          "task": "Run the focused prewalk-progress tests plus typecheck, then the full repository gate in stages.",
+          "validation": "tests/prewalk-progress.test.ts passes, tsc --noEmit is clean, and the staged pnpm check equivalents (typecheck, build, test, knip, smoke) all pass."
+        },
+        {
+          "task": "Commit the widget improvement on main as an upstream-shaped UI fix, excluding .pi/fabric/prewalk-checklists.json.",
+          "validation": "One conventional commit contains only checklist-progress.ts, index.ts, and the test; git status shows only the runtime checklist memory left dirty."
+        }
+      ],
+      "readyAt": 1786108814267
+    },
+    "recordedAt": 1786109164028
+  },
+  {
+    "task": "update our plugin? also I don't see any releases update... also test is failing",
+    "checklist": {
+      "items": [
+        {
+          "task": "Diagnose the tag-triggered Publish npm prerelease and Test workflow runs for commit 5a31df0 using GitHub API logs, then identify why npm ultra.14 and the GitHub Release are absent.",
+          "validation": "Record both run conclusions, failing job/step names, and exact error excerpts; confirm origin/main and the tag still point to the intended release commit."
+        },
+        {
+          "task": "Inspect the locally installed npm:ultra-fabric version and Pi package update command from the complete packages documentation, without updating until npm publication succeeds.",
+          "validation": "Report current installed version/path and the documented update command; no local package mutation occurs before the registry exposes ultra.14."
+        },
+        {
+          "task": "Implement the smallest release/test fix in source and workflow, with focused regressions, preserving the published release metadata and excluding .pi/fabric/prewalk-checklists.json runtime memory.",
+          "validation": "Focused failing tests reproduce each workflow failure before the fix and pass afterward; no dependency or lockfile change unless the failure proves it necessary."
+        },
+        {
+          "task": "Run pnpm run check, git diff --check, and git status --short --branch; commit and push the repair on main.",
+          "validation": "All repository gates pass, the repair commit contains only intended source/workflow/tests, and origin/main equals local main."
+        },
+        {
+          "task": "Retag v0.31.1-ultra.14 to the repair commit only if the registry confirms the version was never published, then push the explicit tag ref and monitor both workflows.",
+          "validation": "Tag movement is limited to the unpublished ultra.14 tag, Publish npm prerelease and Test conclude success, and a GitHub Release exists for v0.31.1-ultra.14."
+        },
+        {
+          "task": "Verify npm next and trusted-publisher provenance, then update the locally installed Ultra Fabric plugin to 0.31.1-ultra.14 and confirm Pi resolves that version.",
+          "validation": "npm next equals 0.31.1-ultra.14, _npmUser.trustedPublisher.id is github, package update completes successfully, and pi list reports npm:ultra-fabric@0.31.1-ultra.14."
+        }
+      ],
+      "readyAt": 1786107921829
+    },
+    "recordedAt": 1786108561456
+  },
+  {
+    "task": "so what else do we need other stuff to be implemented?",
+    "checklist": {
+      "items": [
+        {
+          "task": "Re-verify the complete dirty working tree on main and partition it into coherent commits: context QoS/message-ceiling behavior, prewalk wording regression, release automation, generated prewalk checklist memory, and the final release metadata.",
+          "validation": "git diff --check is clean; pnpm run check passes from Main; every dirty path is explicitly assigned or intentionally excluded, with no secrets or generated dist staged."
+        },
+        {
+          "task": "Commit the tested context engineering implementation and docs from src/context, src/compaction, config/settings, focused tests, docs/compaction.md, and docs/ultra-fabric.md.",
+          "validation": "The commit contains only the context-surge and 800-message prevention files; focused QoS/threshold/config tests remain green."
+        },
+        {
+          "task": "Commit the prewalk delegation wording fix and its focused regression separately, excluding .pi/fabric/prewalk-checklists.json because it is runtime memory rather than release source.",
+          "validation": "The commit contains only src/prewalk/handoff.ts and tests/prewalk-delegation.test.ts; the focused prewalk test passes."
+        },
+        {
+          "task": "Commit the release workflow hardening, release-note generator, release skill guidance, and their tests as a separate release-infrastructure commit.",
+          "validation": "The commit contains only .github/workflows/release.yml, .pi/skills/release/SKILL.md, scripts/release-notes.mjs, tests/release-notes.test.ts, and tests/release-workflow.test.ts; focused release tests pass."
+        },
+        {
+          "task": "Prepare prerelease 0.31.1-ultra.14 by changing exactly package.json, CHANGELOG.md, and both README.md install pins, then commit chore(release): mark 0.31.1-ultra.14 and create annotated tag v0.31.1-ultra.14.",
+          "validation": "Package version, changelog heading/date, README pins, and tag name/message agree exactly; registry confirms ultra.14 is absent before publication."
+        },
+        {
+          "task": "Push main, push only refs/tags/v0.31.1-ultra.14, monitor the GitHub release workflow, and verify npm next plus trusted publisher provenance.",
+          "validation": "origin/main equals local main; the workflow concludes success; npm dist-tag next equals 0.31.1-ultra.14 and _npmUser.trustedPublisher.id is github."
+        }
+      ],
+      "readyAt": 1786107485309
+    },
+    "recordedAt": 1786107775152
+  },
+  {
+    "task": "what happened? did we implement?",
+    "checklist": {
+      "items": [
+        {
+          "task": "Add a focused RED regression in tests/compaction-threshold.test.ts that builds 699- and 700-message active contexts at low token occupancy and proves only the configured message boundary triggers context.compact().",
+          "validation": "The narrow test initially fails because FabricConfig has no messageThreshold and compactAtConfiguredThreshold currently checks token occupancy only."
+        },
+        {
+          "task": "Extend FabricCompactionConfig in src/config.ts with a bounded messageThreshold, defaulting below the provider 800-message cap with safety room for injected/system messages, and parse older configs through the default without migration breakage.",
+          "validation": "Config tests prove default, custom value, lower/upper bounds, and existing .pi/fabric.json compatibility; no dependency is added."
+        },
+        {
+          "task": "Update src/compaction/threshold.ts to count context.sessionManager.buildSessionContext().messages and compact when either message count reaches messageThreshold or token occupancy reaches the existing per-model/global threshold.",
+          "validation": "Direct tests prove 699 messages do not compact, 700 messages do compact at 10% tokens, token thresholds still behave unchanged, null token telemetry cannot suppress a message-count trigger, and compaction failure remains bounded/non-throwing."
+        },
+        {
+          "task": "Expose the new threshold in src/ui/settings.ts and document the 800-message provider failure, proactive safety margin, exact active-context counting, and manual recovery command in docs/compaction.md and docs/ultra-fabric.md.",
+          "validation": "The setting name and default match source; docs distinguish proactive prevention from upstream 413 overflow classification and state that current failed sessions should run /compact once before retrying."
+        },
+        {
+          "task": "Assess and record the upstream-shaped pi-ai classifier gap: 0.84.1 overflow patterns do not match chat_history_too_large, payload_too_large, message_limit, or the 800-message text. Avoid dependency patching unless repository policy and tests prove it is required after proactive prevention.",
+          "validation": "Evidence cites node_modules/@earendil-works/pi-ai/dist/utils/overflow.js and explains why token-pressure compaction did not auto-recover this 413; no node_modules or lockfile mutation occurs."
+        },
+        {
+          "task": "Run the focused threshold/config/settings tests, context certification, then pnpm run check, git diff --check, and git status --short --branch, preserving unrelated dirty release/prewalk work.",
+          "validation": "All checks pass, dist is generated only by build, the direct 700-message probe compacts before provider dispatch, and the final report separates this change from pre-existing working-tree modifications."
+        }
+      ],
+      "readyAt": 1786106846590
+    },
+    "recordedAt": 1786107322007
+  },
+  {
+    "task": "There is a context surge when we are stuff... from 2% then just exploded to 79.5% can we look on our cgc, fix and enforce better context engineering practices wheter we need to put this on documents or .md so we aren't\n going to explode or something",
+    "checklist": {
+      "items": [
+        {
+          "task": "Reproduce and classify the surge without mutation: inspect the active session trace and Context QoS reports, then force-refresh the ultra-fabric code graph and trace the request path through src/index.ts, src/context/qos.ts, src/context/handoff-retirement.ts, src/compaction/hook.ts, and src/execution-service.ts. Separate transcript growth, tool-result growth, repeated prewalk injection, and provider-reported token-estimate effects.",
+          "validation": "Record a compact evidence table with before/after token or character counts and file:line locators. The chosen root cause must explain the observed jump from roughly 2% to 79.5%, or be explicitly labeled unconfirmed if the session telemetry is unavailable."
+        },
+        {
+          "task": "Use the project graph and the read-only CGC inspiration graph to compare Ultra Context QoS with the documented pi-vcc precedents, focusing on proactive pressure thresholds, deterministic preservation, bounded outputs, and no-op behavior below threshold. Inspect only bounded symbol windows and return locators rather than source dumps.",
+          "validation": "Document which invariants already exist, which gap permits the surge, and why any adopted behavior stays independently implemented and within docs/adr/0001-fork-boundary.md."
+        },
+        {
+          "task": "Write focused failing tests first around the confirmed gap in tests/context-qos.test.ts and/or tests/context-handoff-retirement.test.ts, plus the nearest execution or compaction integration test. Cover one-shot oversized fabric_exec output, repeated equivalent reads, recent-turn protection, evidence/error/mutation preservation, malformed or non-text results, and no-op behavior below the configured boundary.",
+          "validation": "Run the narrow test files and observe RED for the intended missing behavior without changing existing protected-message expectations."
+        },
+        {
+          "task": "Implement the smallest host-owned enforcement in src/context/qos.ts and its actual request hook, extending src/context/handoff-retirement.ts or src/compaction/hook.ts only if the traced path proves necessary. Prefer deterministic retirement or bounded projection with typed markers over model-generated summaries, preserve tool call/result pairing, and avoid new dependencies.",
+          "validation": "The focused tests turn GREEN, direct probes show a large stale result is reduced before the next model request, and recent turns, errors, writes, gates, traces, and evidence remain byte-exact."
+        },
+        {
+          "task": "Add or adjust typed configuration in src/config.ts and its migration/default/schema tests only if enforcement needs an operator threshold. Keep defaults safe and backward compatible, bound every numeric value, and ensure automatic policy promotion remains disabled.",
+          "validation": "Config parsing tests prove valid defaults, boundary clamping or rejection, migration compatibility, disabled/no-op behavior where applicable, and no accidental enabling of autoScout or policy promotion."
+        },
+        {
+          "task": "Update docs/compaction.md and the relevant context-engineering section of docs/ultra-fabric.md with operational practices: AST/CGC-first navigation, bounded reads and tool returns, structured evidence locators, fresh-context delegation under pressure, and the exact enforcement/protection guarantees. Update AGENTS.md only if a durable contributor rule is missing rather than duplicating architecture documentation.",
+          "validation": "Docs name the real config and marker fields, distinguish runtime enforcement from human guidance, explain edge cases and observability, and contain no claim unsupported by source or tests."
+        },
+        {
+          "task": "Run proof in increasing scope: focused context tests, the context certification or smallest relevant benchmark/probe, then the repository handoff gates pnpm run check, git diff --check, and git status --short --branch. Inspect any failure rather than rerunning unchanged.",
+          "validation": "Report measured before/after context size for the reproduction, all focused and repository checks pass, public symbols/config registrations are confirmed, generated dist is produced only by the build, and the final diff contains no unrelated changes."
+        }
+      ],
+      "readyAt": 1786105322087
+    },
+    "recordedAt": 1786106461728
+  },
+  {
+    "task": "restarted",
+    "checklist": {
+      "items": [
+        {
+          "task": "Extend .github/workflows/release.yml after npm publication to generate a detailed GitHub Release from the matching CHANGELOG section, including an install command, compare link, npm/package links, and GitHub's generated commit notes; use only checked-in scripts and GitHub CLI/API with least-privilege contents:write.",
+          "validation": "Workflow YAML is syntactically valid; tag/version and changelog extraction are deterministic; release creation is idempotent for reruns."
+        },
+        {
+          "task": "Add a small tested Node script under scripts/ that extracts exactly the current version section from CHANGELOG.md and emits release title/body files without network or model calls; add focused tests for first section, missing version, and stopping before the next heading.",
+          "validation": "New focused tests observe RED then GREEN and script CLI produces a detailed body for 0.31.1-ultra.13."
+        },
+        {
+          "task": "Document the automated GitHub Release behavior in the release skill and verify the repository gate.",
+          "validation": "Release skill names generated artifacts and rerun behavior; pnpm run check, git diff --check, and status pass."
+        }
+      ],
+      "readyAt": 1786103805258,
+      "easy": true
+    },
+    "recordedAt": 1786104348299
+  },
+  {
     "task": "what did we do?",
     "checklist": {
       "items": [
@@ -149,349 +490,5 @@
       "easy": true
     },
     "recordedAt": 1786092911804
-  },
-  {
-    "task": "also can we look on ultra-fabric to make it work to the latest version of pi... it is kind of breaking the tui or something so can we adjust it to the latest version",
-    "checklist": {
-      "items": [
-        {
-          "task": "Adapt to Pi 0.84.1: fix the ProviderHeaders null-value break in src/compaction/openai-native.ts (filter null header values), plus any further typecheck fallout from the 0.83->0.84.1 devDep bump already applied to package.json/lockfile.",
-          "validation": "pnpm exec tsc --noEmit exits 0 against @earendil-works/*@0.84.1."
-        },
-        {
-          "task": "Run the full staged gate (build, vitest, knip, smoke:package) to surface runtime/TUI behavior drift beyond types; fix any failures minimally in upstream-shaped style.",
-          "validation": "All stages exit 0; any TUI-related test failures fixed and named in the summary."
-        },
-        {
-          "task": "Probe TUI surface compatibility directly: run the render-heavy suites (fabric-ui, ui-transcript, core-tool-render, fovea render) and the packed-extension smoke against the 0.84.1 host API.",
-          "validation": "Render suites green; smoke passes; summary states what 0.84 changed and what was adjusted."
-        }
-      ],
-      "readyAt": 1786091633655,
-      "easy": true
-    },
-    "recordedAt": 1786091928973
-  },
-  {
-    "task": "restarted are we loading the updated one?",
-    "checklist": {
-      "items": [
-        {
-          "task": "RED tests for a global compaction threshold: config normalization accepts compaction.threshold (bounded 0.5-0.95, default 0.85), and configuredCompactionThreshold in src/compaction/threshold.ts falls back to it for any model without a per-model thresholds entry, with the per-model entry still winning. Extend the existing threshold/config test files.",
-          "validation": "New tests fail against current code (thresholds miss returns undefined today), demonstrating the auto-compact hole for claude-bridge/claude-fable-5."
-        },
-        {
-          "task": "Implement the knob: add threshold to FabricCompactionConfig with default 0.85 in DEFAULT_FABRIC_CONFIG and normalizeFabricConfig (boundedFloat 0.5-0.95); make compactAtConfiguredThreshold use per-model ?? global; surface the value in the /fabric settings compaction section summary.",
-          "validation": "RED tests GREEN; settings section renders the default threshold; a model absent from thresholds now compacts at 0.85 in the unit test."
-        },
-        {
-          "task": "RED tests for checklist progress: a pure parser in src/prewalk (extract [DONE:n] markers from assistant text, 1-based indexes bounded by item count, idempotent) and PrewalkController.markChecklistDone(sessionId, indexes) that records completed item indexes on the live checklist state without mutating items.",
-          "validation": "Parser tests cover [DONE:1], multiple markers, out-of-range, duplicates; controller test shows completion survives status() reads and resets on cancel/new checklist."
-        },
-        {
-          "task": "Wire progress into the loop: observe assistant turns at the existing settle/continuation observation point in src/index.ts (same place continuation settlement reads the branch), feed markers to the controller, and render ui.setStatus 'checklist n/m' plus a setWidget list with completed items struck (adopting prime-agent plan-mode's widget semantics, ASCII only).",
-          "validation": "Integration-style test at the controller boundary: after marking items 1 and 3 of 5, status text contains 3/5-style progress and the widget lines mark them done."
-        },
-        {
-          "task": "Token-optimize the continuation reminder: prewalkChecklistReminder (src/prewalk/continuation.ts) omits completed items, rendering only open ones plus a one-line 'n of m done' header, so long workflows stop re-sending finished steps every turn.",
-          "validation": "RED test: with items 1-2 of 5 done, the reminder contains items 3-5 only and the done-count header; with none done, output matches current shape."
-        },
-        {
-          "task": "Run the staged repository gate: typecheck, build, full vitest, knip, smoke:package, then git diff --check and git status.",
-          "validation": "All five stages exit 0; only intended files dirty."
-        },
-        {
-          "task": "Live proof: with the new build, confirm compactAtConfiguredThreshold picks the 0.85 default for claude-bridge/claude-fable-5 via a unit-level probe, and exercise a checklist with [DONE:n] markers showing the widget/status progress path end to end in tests.",
-          "validation": "Probe shows a defined threshold for an unlisted model; the progress test suite passes; summary reports where compaction will now trigger (0.85 of context window) for the operator's Main model."
-        }
-      ],
-      "readyAt": 1786090593710
-    },
-    "recordedAt": 1786091445176
-  },
-  {
-    "task": "can you test... we restarted already",
-    "checklist": {
-      "items": [
-        {
-          "task": "Mark 0.31.1-ultra.11: bump package.json, add the CHANGELOG section, update both README install pins, commit exactly those three files as chore(release): mark 0.31.1-ultra.11.",
-          "validation": "git show --stat HEAD lists only package.json, CHANGELOG.md, README.md."
-        },
-        {
-          "task": "Run the staged gate (typecheck, build, vitest, knip, smoke:package) before tagging.",
-          "validation": "All five stages exit 0."
-        },
-        {
-          "task": "Create annotated tag v0.31.1-ultra.11 and push: git push origin main, then git push origin refs/tags/v0.31.1-ultra.11 (never --follow-tags).",
-          "validation": "Both pushes succeed; GitHub Actions publish triggers on the tag."
-        },
-        {
-          "task": "Verify the npm publish: dist-tags show next = 0.31.1-ultra.11 via the registry query from the release skill.",
-          "validation": "curl registry dist-tags returns 0.31.1-ultra.11 under next."
-        }
-      ],
-      "readyAt": 1786089021345,
-      "easy": true
-    },
-    "recordedAt": 1786089478876
-  },
-  {
-    "task": "liar... I still don't see any src sources on it",
-    "checklist": {
-      "items": [
-        {
-          "task": "Consolidate the record guard: add an exported isRecord to src/util.ts (generic signature usable as both Record<string,unknown> and JsonRecord guard) with a small unit test written RED first (object/null/array/primitive cases).",
-          "validation": "New test file (or extension of an existing util test) passes; the guard behaves identically to the 8 duplicated bodies: typeof value === 'object' && value !== null && !Array.isArray(value)."
-        },
-        {
-          "task": "Replace the 10 identical/JsonRecord isRecord copies (compaction/hook.ts:505, compaction/instructions.ts:68, compaction/openai-native.ts:32, compaction/trace-events.ts:28, compaction/branch-details.ts:73, compaction/openai-native-replay.ts:27, core/direct-tool-approval.ts:19, core/tool-ownership.ts:37, audit/trace.ts:638, audit/details.ts:136) with imports from src/util.ts. Leave the domain guards in workflows/durable.ts:249 and outcomes/store.ts:120 untouched. fabric-state.ts isPlainObject may also delegate if the body is identical.",
-          "validation": "grep shows zero remaining duplicate isRecord definitions outside the two domain guards; pnpm vitest run stays green; knip reports no new unused exports."
-        },
-        {
-          "task": "Extract the render layer from src/fabric-exec-tool.ts into src/fabric-exec-render.ts: move renderResult and the pure render/preview helpers out of the createFabricExecTool closure, passing their closure captures (theme access, codePreviewSettings, expand state) as explicit parameters. Pure move, no behavior change.",
-          "validation": "Render-related suites (fabric-ui, ui-transcript, core-tool-render, type-error-guidance) pass unchanged; fabric-exec-tool.ts drops materially in line count; cgc re-measure shows createFabricExecTool complexity well below 255."
-        },
-        {
-          "task": "Split FabricExecutionService.execute (src/execution-service.ts:421) into named private phase methods on the class: admission/timeout resolution, run-context creation, guest execution, and settlement/audit. Straight mechanical extraction — same order, same error paths, no new abstractions beyond the method boundaries.",
-          "validation": "tests/execution-service.test.ts and tests/audit-trace.test.ts pass unchanged; execute's cyclomatic complexity re-measures under 100; no public API change."
-        },
-        {
-          "task": "Bounded dead-code verification sample: source-verify the 33 no-caller candidates in src/fabric-state.ts against real usage (reference passing, host callbacks, tests). Delete only symbols proven unused by both grep and knip; record the false-positive rate in the final summary instead of touching the other 768 candidates.",
-          "validation": "Each deletion has zero grep hits outside its own definition; knip stays clean; full vitest run green."
-        },
-        {
-          "task": "Run the staged repository gate: pnpm run typecheck, pnpm run build, pnpm vitest run, pnpm run lint:dead, pnpm run smoke:package, then git diff --check and git status --short --branch.",
-          "validation": "All five stages exit 0; status shows only the refactor files (and the pre-existing dirty runtime state left uncommitted)."
-        },
-        {
-          "task": "Refresh the graph and prove the bloat dropped: cgc update ., then re-run the scoped complexity query for createFabricExecTool and execute and the duplicate-name query for isRecord.",
-          "validation": "Both functions report materially lower complexity than 255/241; isRecord no longer appears in the >3-files duplicate list."
-        }
-      ],
-      "readyAt": 1786081641015
-    },
-    "recordedAt": 1786087814756
-  },
-  {
-    "task": "on cgc or mcp graph we did cgcignore something that we shouldn't can we reingest or ingest the part so we can know what we are on it now? and develop this with guide not on blind",
-    "checklist": {
-      "items": [
-        {
-          "task": "Update the stale init assertion in tests/fabric-command.test.ts to the new copy contract: message says 'copied' and root project.md is created with the legacy .pi content.",
-          "validation": "pnpm vitest run tests/fabric-command.test.ts passes."
-        },
-        {
-          "task": "Run the remaining staged gates: full vitest suite, knip, package smoke.",
-          "validation": "All three exit 0 with no new dead-code findings."
-        },
-        {
-          "task": "Run git diff --check and git status --short --branch; confirm only intended source/test changes are dirty.",
-          "validation": "No whitespace errors; status lists only the files touched by this slice plus pre-existing runtime state."
-        }
-      ],
-      "readyAt": 1786078948877,
-      "easy": true
-    },
-    "recordedAt": 1786079318919
-  },
-  {
-    "task": "can we commit everything, push and publish so we can move to install not local install or whatever",
-    "checklist": {
-      "items": [
-        {
-          "task": "Review git status/diff, stage all modified files (including the deleted tests/codemap-heat-render.test.ts), and commit as one conventional commit reflecting the mixed feat/refactor scope",
-          "validation": "git status --short --branch shows a clean tree on main; git log -1 shows the new commit"
-        },
-        {
-          "task": "Run the repository gate in stages (typecheck, build, tests, knip, package smoke) since pnpm run check exceeds the 120s tool budget",
-          "validation": "Every stage exits 0; tests all pass with no new failures"
-        },
-        {
-          "task": "Load .pi/skills/release/SKILL.md and follow it: bump prerelease version, push main and the release tag, publish to npm",
-          "validation": "npm view <pkg> version returns the new version; git push succeeded for branch and tag"
-        },
-        {
-          "task": "Confirm the published package installs globally so Ryan can switch off the local install",
-          "validation": "Global install of the new version succeeds and the installed entry point loads (smoke: binary/extension resolves from the global path)"
-        }
-      ],
-      "readyAt": 1786075315712,
-      "easy": true
-    },
-    "recordedAt": 1786076091359
-  },
-  {
-    "task": "cotninue again for cleaning stuff on project making sure our all of our code smell is clean and high quality....  I think the agent utilization is not good it's still stuck on 0 token, please design this like opencode agent behavior feel free to look on arxiv docs, clone github repo that can help on this initiative",
-    "checklist": {
-      "items": [
-        {
-          "task": "RED: in tests/prewalk-scout-brief.test.ts add a scoutBridge describe — a fake ScoutAgentSurface whose wait() resolves an AgentRunRecord-shaped object ({ status: 'completed', text: 'src/a.ts — does X', model, usage }) must yield runner result 'src/a.ts — does X'; add cases for value fallback (structured result, no text) and a timed_out record with non-empty partial text still returning that text. Run the file and observe RED (current bridge maps only the nonexistent .result field).",
-          "validation": "vitest run tests/prewalk-scout-brief.test.ts shows the new scoutBridge tests failing while existing tests pass."
-        },
-        {
-          "task": "GREEN: fix scoutBridge in src/prewalk/scout-brief.ts to map the wait record's text (preferred, non-empty) then value into ScoutRunResult.result, keeping model/usage passthrough. Do not change the ScoutRunner seam shape.",
-          "validation": "vitest run tests/prewalk-scout-brief.test.ts fully green."
-        },
-        {
-          "task": "Config knobs: add optional scoutTimeoutMs and scoutMaxTokens to FabricPrewalkConfig in src/config.ts with validation (timeout clamped to MIN_AGENT_TIMEOUT_MS..MAX_AGENT_TIMEOUT_MS, tokens positive safe integer); thread them through runScoutBrief (new options parameter with raised defaults 180000ms / 4096 tokens replacing the 60000/512 consts) and pass prewalk config values at both call sites in src/prewalk/arm.ts plus the scoutBridge construction sites (src/index.ts:286,308 and src/commands/fabric.ts:171 only if they need the config surface). Update the existing runScoutBrief test that pins maxTokens 512 to the new default.",
-          "validation": "config normalize tests cover both knobs (valid, clamped, rejected shapes); runScoutBrief test asserts the new defaults; tsc --noEmit clean."
-        },
-        {
-          "task": "Settings/completeness: if tests/config-completeness.test.ts requires every prewalk config key to appear in the /fabric settings UI (src/ui/settings.ts), add scoutTimeoutMs and scoutMaxTokens entries there mirroring neighbouring prewalk toggles; otherwise record why not needed.",
-          "validation": "vitest run tests/config-completeness.test.ts green."
-        },
-        {
-          "task": "RED then GREEN: manager timeout/stop must preserve observed progress. In src/agents/one-shot-manager.ts, when the deadline or stop path falls back to failedRecord (lines ~1009, ~1059-1063, stop()), merge the latest non-terminal record's usage, turns, toolCalls, and text (from readRecord(statusFile) or managed.latestRecord) instead of zeroing them; keep status/error semantics unchanged. Add a test (tests/agent-manager.test.ts pattern, fake worker fixture that writes a non-terminal record with usage then hangs) asserting the timed_out result retains usage and partial text.",
-          "validation": "New manager test green; existing agent-manager, agents-provider, and worker-e2e tests stay green."
-        },
-        {
-          "task": "Utilization visibility check: with the fixes applied, confirm the budget ledger still records scout spend under prewalk:scout (existing ledger test) and that a timed-out scout run's status.json now carries non-zero usage via the merged record path; note in the run receipt that dashboard activity-entity wiring for host-spawned scouts is a separate follow-up if still 0.",
-          "validation": "vitest run tests/prewalk-scout-brief.test.ts green including the ledger test; manual node read of a fabricated run status confirms merged usage fields."
-        },
-        {
-          "task": "Full repository gate: pnpm exec tsc --noEmit, pnpm run build, pnpm run test, pnpm exec knip --no-gitignore, pnpm run smoke:package (stages separate to respect the 120s tool budget), then git diff --check and git status --short --branch. sources/opencode stays untracked reference material (verify .gitignore/.cgcignore cover sources/).",
-          "validation": "All stages exit 0; 180+ test files pass; diff check clean; git status shows only intended source/test/config changes with sources/opencode ignored."
-        }
-      ],
-      "readyAt": 1786071685736
-    },
-    "recordedAt": 1786072254292
-  },
-  {
-    "task": "let's continue looking for dead code, slop code and stuff that we can better",
-    "checklist": {
-      "items": [
-        {
-          "task": "Fix the broken import in tests/compaction-qa.test.ts: CompactionEvent lives in ../src/compaction/normalize.js (types.ts does not exist); merge it into the existing normalize import on line 3 and drop line 6.",
-          "validation": "`pnpm exec tsc --noEmit` passes and `pnpm exec knip --no-gitignore` no longer reports the unresolved import."
-        },
-        {
-          "task": "Delete dead types: remove FabricProjectMeshOmissionRow (src/ui/topology.ts:109) and FabricProjectMeshDisplayRow (src/ui/topology.ts:135) entirely — DisplayRow is referenced nowhere and OmissionRow only feeds it; remove the whole type re-export line at src/ui/word-diff/emphasis.ts:9 — no file imports types from emphasis.js.",
-          "validation": "grep confirms zero remaining references to FabricProjectMeshDisplayRow, FabricProjectMeshOmissionRow, and no `export type {` line in emphasis.ts; typecheck passes."
-        },
-        {
-          "task": "Add \"ignoreExportsUsedInFile\": true to knip.json. This resolves besselI (src/codemap/heat.ts:76, used at :112 and by tests/codemap-fovea-bridge.ts), OutlineRange (src/codemap/outline.ts:3), and FabricProjectMeshRow (src/ui/topology.ts) — all are referenced by exported interfaces so un-exporting them would break .d.ts declaration emit; the export keyword is required.",
-          "validation": "`pnpm run lint:dead` exits 0 with no findings."
-        },
-        {
-          "task": "Run the repository gate: pnpm run check stages (typecheck, build, tests, knip, package smoke) plus git diff --check and git status --short --branch.",
-          "validation": "All five check stages green (run stages separately if the 120s tool budget is hit); no whitespace errors; only the intended files modified."
-        }
-      ],
-      "readyAt": 1786069139566,
-      "easy": true
-    },
-    "recordedAt": 1786070175791
-  },
-  {
-    "task": "can we test it out",
-    "checklist": {
-      "items": [
-        {
-          "task": "Confirm what the inspo cgc graph holds: `cgc stats` and repo listing; identify registered context names (expect inspo) and check whether references resolve there. Record which inspo repos are queryable as contexts.",
-          "validation": "Output captured; at least one named context usable for mode cgc queries in this session."
-        },
-        {
-          "task": "Reindex the ultra-fabric self-graph with a forced full index (per AGENTS.md, watcher has no inherit resolution), since the last 8+ commits landed after the stat snapshot, and verify `.cgcignore` keeps sources/ and bench/ out.",
-          "validation": "Post-index stats show ultra-fabric file count near expected (~430 sources, not 13k+ vendored); a fresh cross-file call query resolves."
-        },
-        {
-          "task": "Live-test mode cgc through the codemap tool in this session: run skeleton/search/explore with a bare context name (e.g. pi-mono or omniroute) against the inspo graph; confirm reads stay read-only and results route correctly.",
-          "validation": "Tool returns bounded, routed results with a CGC source marker, not a fallback to the project graph; at least one explore evidence pack contains skeleton+routed symbols."
-        },
-        {
-          "task": "Live-test commit df1ef9e's fix: call mode cgc with a path-prefix context (e.g. /home/ryanj/work/inspo/pi-mono) and a bare name, and confirm the tool normalizes instead of passing the path as --context.",
-          "validation": "Path-prefix input does not surface CGC's --context error and returns the same repo's graph as the bare-name call; grep tests/codemap-cgc.test.ts to confirm the regression case is covered — add one focused test only if missing."
-        },
-        {
-          "task": "Exercise the auto-scout visibility path from fd06c4e: trigger one prewalk observation on Main and confirm the automatic scout spawn fires and is visible in the session (not silently dropped).",
-          "validation": "Scout spawn event appears in session output for a recon-shaped observation; no manual agent call needed for the observation itself."
-        },
-        {
-          "task": "Probe cgc failure surfaces: one call against an unknown context name and (if cheap) with falkordb unreachable; confirm the error is distinct and actionable, not a silent project-graph fallback.",
-          "validation": "Both failures produce explicit, distinguishable error messages identifying cgc/context as the problem."
-        },
-        {
-          "task": "Run the repo gate exactly: `pnpm run check`, `git diff --check`, `git status --short --branch`; commit any test additions under a conventional fix(test) or test(codemap) scope only if step 4/5/6 found a gap.",
-          "validation": "check passes green end-to-end; diff is clean of whitespace errors; any commit is minimal and lane-classified (upstream-shaped vs Ultra-native) per docs/adr/0001."
-        }
-      ],
-      "readyAt": 1786057665779
-    },
-    "recordedAt": 1786058631286
-  },
-  {
-    "task": "let's buff it up add a cgc mode on to get inspo data from directly welll code..... and also algorithm to get sufficient data like explore github repo with efficient test and such",
-    "checklist": {
-      "items": [
-        {
-          "task": "Recon the CGC CLI contract on this machine before writing the runner: capture exact `cgc query --help` flags, whether `query` supports `--json`, the `context` list/switch commands, and a real `cgc query \"<cheap cypher>\" --json` output shape against the existing `work` context. Record the concrete cypher templates for symbol lookup, callers/callees, and test-file discovery that CGC's schema supports (node labels like Function/Class/File, relationships like CALLS/IMPORTS/DEFINES).",
-          "validation": "A short recon note names the exact flags, confirms --json on query, and lists 3-4 working cypher query templates proven against the live falkordb-remote `work` graph, with one sample JSON record shape pasted."
-        },
-        {
-          "task": "Add a pure, testable CGC runner module `src/codemap/cgc.ts`: an injectable `CgcRunner = (args: string[]) => string` seam defaulting to `execFileSync(\"cgc\", args, { encoding: utf8, timeout })`; helpers `cgcQuery(cypher, {context})`, `cgcReport(path)`, `cgcListRepos()`; a discriminated-union result `CgcResult = { ok: true, text } | { ok: false, kind: 'unavailable' | 'timeout' | 'error', message }` so a missing cgc binary, a dead DB, or a timeout never throws into the tool. No mutation of CGC state (read-only: query/report/list only).",
-          "validation": "Unit tests with an injected fake runner prove: missing binary -> unavailable; nonzero exit -> error with stderr tail; timeout -> timeout; valid output -> ok text. No real cgc call in tests."
-        },
-        {
-          "task": "Add config `codemap.cgc` (default off, opt-in) with `context` (string, default the CGC `work` context) and `timeoutMs` (default 30s) to src/config.ts DEFAULT_FABRIC_CONFIG + normalizeFabricConfig + the FabricCodemapConfig type, mirroring how prewalk flags were threaded. Add config tests: default off, explicit on, context/timeoutMs round-trip.",
-          "validation": "tests/config.test.ts asserts default-off, explicit enable, and context/timeoutMs normalization; pnpm vitest run tests/config.test.ts green."
-        },
-        {
-          "task": "Extend `createCodemapTool`/`codemapOperation` with `mode?: \"ast\"|\"cgc\"` (default ast) plus optional `context`. When mode===\"cgc\", the search/skeleton/expand/source operations dispatch to the CGC runner (search->cypher symbol lookup, skeleton->report/stats summary, expand->callers/callees cypher, source->cypher + file range) scoped to the resolved CGC context, each bounded by maxTokens via the existing truncateToTokens. ast mode is byte-for-byte unchanged. Wire the runner through CodemapToolDeps so tests inject a fake.",
-          "validation": "tests for the tool prove: ast mode untouched; mode cgc with a fake runner returns bounded CGC text for search/skeleton/expand/source; mode cgc with an unavailable runner returns a clean unavailable note, not a throw; truncation still applies."
-        },
-        {
-          "task": "Add the `explore` operation (the sufficiency algorithm): bounded pipeline = LOC/skeleton -> CGC route search for the task query -> hotspot/report god-nodes -> test-as-spec discovery (CGC query for *_test/Test files that CALL/IMPORT the matched seam, falling back to our cochange cascade on the target repo's git log) -> return a compact evidence pack of file:line locators + test pointers, capped by maxTokens. explore auto-selects CGC when mode===\"cgc\", else uses the ast graph for the same stages.",
-          "validation": "tests with a fake runner + fake ast graph prove explore returns a staged evidence pack, names the seam tests, stays under maxTokens, and degrades cleanly when CGC is unavailable (falls back to ast stages)."
-        },
-        {
-          "task": "Register and document: confirm the tool schema gains mode/context/explore in the Type.Union and the description/promptGuidelines mention the cgc mode and explore recipe. Update docs (docs/agents.md or a codemap doc) with the CGC mode contract: separate falkordb-remote `work` context, read-only, opt-in, and the explicit note that inspo reference repos are queried through CGC and are never merged into the project graph (AGENTS.md namespace invariant). README gets one line under Code map.",
-          "validation": "Grep shows mode/cgc/explore in the tool description and promptGuidelines; docs state the separate-context + read-only + never-merge invariant; README line present."
-        },
-        {
-          "task": "Run the full verification gate and sweep every codemap call site (tool.ts consumers, any test importing codemapOperation/createCodemapTool, docs/code-map-research.md) for the changed surface.",
-          "validation": "pnpm run check passes (typecheck, build, all tests, knip, package smoke); git diff --check clean; focused codemap + config suites green."
-        },
-        {
-          "task": "Commit in logical conventional commits (feat(codemap): cgc mode + explore recipe; docs).",
-          "validation": "git log shows the commit(s); git status clean; each commit contains only its own files."
-        }
-      ],
-      "readyAt": 1786048474284
-    },
-    "recordedAt": 1786050168740
-  },
-  {
-    "task": "can we make sure supervisor always active please",
-    "checklist": {
-      "items": [
-        {
-          "task": "Confirm the current watchdog and DeepSWE runner remain healthy before changing monitoring.",
-          "validation": "Runner and watchdog PIDs are alive and bounded status JSON is fresh."
-        },
-        {
-          "task": "Add a test-first mesh heartbeat publisher for the DeepSWE watchdog.",
-          "validation": "RED test proves a heartbeat is a valid bounded mesh event addressed to the supervisor topic without credentials or solution content."
-        },
-        {
-          "task": "Wire the five-minute watchdog to publish each status heartbeat.",
-          "validation": "Every poll updates status/history and publishes one coalescible bench.deepswe.heartbeat mesh event using the supported MeshStore path."
-        },
-        {
-          "task": "Respawn the supervisor with the heartbeat topic subscription.",
-          "validation": "New persistent supervisor has topic bench.deepswe.heartbeat, native non-recursive events only, triggerTurn enabled, and the requested OmniRoute model."
-        },
-        {
-          "task": "Prove end-to-end activation.",
-          "validation": "Publish one real heartbeat and observe supervisor activation/message count or lastRunId advance, then return to idle with action silent while healthy."
-        },
-        {
-          "task": "Verify monitoring remains bounded and durable.",
-          "validation": "Watchdog and runner remain alive; no recursive turn_end subscriptions; focused tests, pnpm run check, git diff --check, and status pass."
-        }
-      ],
-      "readyAt": 1786024779100
-    },
-    "recordedAt": 1786025218835
   }
 ]
