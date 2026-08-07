@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.31.1-ultra.14 - 2026-08-07
+
+- compaction: retire oversized old successful retirable-tool results (fabric_exec, codemap, read, grep, find, ls) above a configured ceiling with typed markers, so a single huge unique result cannot inflate context until compaction; recent turns, errors, mutations, evidence, and non-text content stay exact.
+- compaction: proactive message-count ceiling (default 700) compacts before dispatch when the active context reaches it, so a long message-dense session is not rejected by a provider 800-message history cap; independent of token-occupancy thresholds and configurable in /fabric settings.
+- prewalk: armed-prompt delegation guidance now states the configured consult worker ceiling instead of a stale zero-worker default.
+- ci: publish workflow creates a detailed GitHub Release from the changelog section via scripts/release-notes.mjs (idempotent create/edit).
+
 ## 0.31.1-ultra.13 - 2026-08-07
 
 - exec: add a bounded per-session `carry` namespace so JSON-safe guest state survives across sequential `fabric_exec` calls in both QuickJS and node-process runtimes.
