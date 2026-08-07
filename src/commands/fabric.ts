@@ -4,16 +4,12 @@ import type { CapturedToolCatalog } from "../capture/catalog.js";
 import type { FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import type { FabricState } from "../fabric-state.js";
 import { armPrewalk } from "../prewalk/arm.js";
-import { scoutBridge, buildScoutBrief, type ScoutRunner, type ScoutAgentSurface } from "../prewalk/scout-brief.js";
+import { scoutBridge, type ScoutRunner } from "../prewalk/scout-brief.js";
 import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
 import { openFabricSettings } from "../ui/settings.js";
-import { planInit, applyInitPlan, type InitAnswers } from "../init/scaffold.js";
-import { interpretDetection, type DetectedContext } from "../init/detect.js";
-import { CURRENT_FABRIC_CONFIG_VERSION } from "../config-migrations.js";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 
 interface FabricCommandDeps {
   state: FabricState;
@@ -785,222 +781,37 @@ const runStatus = (deps: FabricCommandDeps, context: ExtensionContext): void => 
       );
 };
 
-// /fabric init: non-destructive root-level context scaffold. Skips existing
-// files, reports legacy .pi context as a migration notice, never overwrites.
-const readJson = <T>(file: string): T | null => {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8")) as T;
-  } catch {
-    return null;
-  }
-};
+// /fabric init: visible repository workflow. The command never writes files
+// itself. It queues a displayed follow-up message for Main that inspects the
+// repository, proposes only grounded context changes, and reports the receipt.
+const INIT_WORKFLOW_MESSAGE_TYPE = "pi-fabric-init-workflow";
 
-// Gather environment probes with best-effort effects: lockfiles, manifests,
-// the MCP tool cache, installed extension names, and identity (gh then git).
-const detectProject = (cwd: string): DetectedContext | null => {
-  const lockfiles = ["pnpm-lock.yaml", "bun.lock", "bun.lockb", "yarn.lock", "package-lock.json"]
-    .filter((name) => fs.existsSync(path.join(cwd, name)));
-  const manifests = ["tsconfig.json", "Cargo.toml", "go.mod", "pyproject.toml", "pom.xml", "package.json"]
-    .filter((name) => fs.existsSync(path.join(cwd, name)));
-  const packageJson = readJson<{ packageManager?: string; scripts?: Record<string, string> }>(path.join(cwd, "package.json"));
-  const home = process.env.HOME ?? "";
-  const cache = readJson<{ servers?: Record<string, { tools?: unknown[] }> }>(path.join(home, ".pi", "agent", "mcp-cache.json"));
-  const mcpServers = cache?.servers
-    ? Object.entries(cache.servers).map(([name, meta]) => ({
-        name,
-        toolCount: Array.isArray(meta?.tools) ? meta.tools.length : 0,
-      }))
-    : [];
-  let extensions: string[] = [];
-  try {
-    extensions = fs
-      .readdirSync(path.join(home, ".pi", "agent", "extensions"))
-      .filter((f) => f.endsWith(".json"))
-      .map((f) => f.replace(/\.json$/, ""));
-  } catch {
-    /* extensions dir unavailable */
-  }
-  let gh: string | null = null;
-  let git: string | null = null;
-  // Identity detection is best-effort and must never stall /fabric init: bound
-  // each probe so a hanging gh/git invocation (for example an unauthenticated
-  // gh api retry on CI) cannot block the command for seconds. Prompts are
-  // disabled so a non-interactive runner fails fast instead of waiting.
-  const PROBE_TIMEOUT_MS = 2_000;
-  const probeEnv = { ...process.env, GH_PROMPT_DISABLED: "1", GIT_TERMINAL_PROMPT: "0" };
-  try {
-    gh = execFileSync("gh", ["api", "user", "--jq", ".login"], { cwd, encoding: "utf8", timeout: PROBE_TIMEOUT_MS, env: probeEnv, stdio: ["pipe", "pipe", "pipe"] }).trim() || null;
-  } catch {
-    /* gh unavailable or unauthenticated */
-  }
-  if (!gh) {
-    try {
-      git = execFileSync("git", ["config", "user.name"], { cwd, encoding: "utf8", timeout: PROBE_TIMEOUT_MS, env: probeEnv, stdio: ["pipe", "pipe", "pipe"] }).trim() || null;
-    } catch {
-      /* no git identity */
-    }
-  }
-  return interpretDetection({ lockfiles, packageJson, manifests, mcpServers, extensions, identity: { gh, git } });
-};
+const initWorkflowPrompt = (cwd: string): string => [
+  `Initialize Fabric for the repository at ${cwd}.`,
+  "Do not run a blind scaffold. Inspect the repository before proposing changes: read AGENTS.md, CLAUDE.md, or README instructions first, then check which of project.md, roadmap.md, tech-stack.md, user.md, .pi/fabric.json, and .pi/agents/*.md exist and which this project actually needs.",
+  "Preserve every existing file. Propose consequential overwrites or migrations to the user before touching them.",
+  "Implement only grounded changes and verify each created, updated, or migrated file (for example: config parses, markdown links resolve, the intended context is present).",
+  "Report the final receipt: created, updated, skipped, and validated artifacts, with the check that proves each.",
+].join("\n");
 
-// A greenfield checkout (no detected stack, no AGENTS.md) gets a short
-// interactive intake so the scaffold starts from the user's own framing.
-const askGreenfield = async (context: ExtensionContext): Promise<InitAnswers | null> => {
-  const ask = context.ui.input?.bind(context.ui);
-  if (typeof ask !== "function") return null;
-  const name = await ask("fabric init \u2014 project name", "my-project");
-  if (name === undefined) return null;
-  const purpose = await ask("What is this project? (one or two sentences)", "");
-  const pick = context.ui.select?.bind(context.ui);
-  const users =
-    typeof pick === "function"
-      ? await pick("Who primarily uses this project?", ["End users", "Developers", "Operators / SRE", "Both / unsure"])
-      : undefined;
-  const success =
-    typeof pick === "function"
-      ? await pick("What does success look like first?", ["Stability", "Features / speed", "Performance", "Security"])
-      : undefined;
-  return {
-    ...(name.trim() ? { name: name.trim() } : {}),
-    ...(purpose?.trim() ? { purpose: purpose.trim() } : {}),
-    ...(users ? { users } : {}),
-    ...(success?.trim() ? { success: success.trim() } : {}),
-  };
-};
-
-const DEEP_MAX_TOKENS = 65_536;
-const DEEP_TIMEOUT_MS = 180_000;
-
-// Default deep pass: one bounded explorer run maps the codebase so the
-// architecture placeholders in freshly created context files carry real
-// findings. Degrades to a skip note when agents are unavailable.
-const deepAnalyze = async (state: FabricState, cwd: string): Promise<string | null> => {
-  const runner = scoutBridge(state.agents as unknown as ScoutAgentSurface | undefined);
-  if (!runner) return null;
-  const task =
-    "Read-only repository analysis. Do not edit any file. Map this codebase: up to 12 lines, " +
-    "each line a directory or key file with a one-line responsibility note. End with a 2-line " +
-    "summary of the main components, entry points, and how they relate.";
-  try {
-    const run = await runner({ task, role: "explorer", maxTokens: DEEP_MAX_TOKENS, timeoutMs: DEEP_TIMEOUT_MS });
-    return buildScoutBrief(run);
-  } catch {
-    return null;
-  }
-};
-
-const patchPlaceholder = (abs: string, placeholder: string, replacement: string): void => {
-  try {
-    const content = fs.readFileSync(abs, "utf8");
-    if (!content.includes(placeholder)) return;
-    fs.writeFileSync(abs, content.replace(placeholder, replacement));
-  } catch {
-    /* file vanished between plan and patch */
-  }
-};
-
-const runInit = async (state: FabricState, context: ExtensionContext): Promise<void> => {
-  const cwd = context.cwd;
-  const probePaths = [
-    "AGENTS.md",
-    "project.md",
-    "roadmap.md",
-    "tech-stack.md",
-    "user.md",
-    ".pi/fabric.json",
-    ".pi/agents/scout.md",
-    ".pi/agents/explorer.md",
-    ".pi/project.md",
-    ".pi/roadmap.md",
-    ".pi/tech-stack.md",
-    ".pi/user.md",
-  ];
-  const existing = new Set(probePaths.filter((p) => fs.existsSync(path.join(cwd, p))));
-  const detected = detectProject(cwd);
-  // packageManager falls back to "npm" with zero evidence, so languages
-  // (driven by real manifests) are the greenfield signal.
-  const greenfield = !existing.has("AGENTS.md") && (detected === null || detected.languages.length === 0);
-  const answers = greenfield ? await askGreenfield(context) : null;
-  // tech-stack.md is regenerable detection output: offer a refresh when the
-  // file already exists so stale stacks get re-derived on demand.
-  const regen = new Set<string>();
-  if (existing.has("tech-stack.md") && typeof context.ui.confirm === "function") {
-    const refresh = await context.ui.confirm(
-      "fabric init — refresh tech-stack.md?",
-      "tech-stack.md already exists. Overwrite it with freshly detected values?",
-    );
-    if (refresh) {
-      existing.delete("tech-stack.md");
-      regen.add("tech-stack.md");
-    }
-  }
-  const plan = planInit(existing, CURRENT_FABRIC_CONFIG_VERSION, detected, answers, { overwrite: regen });
-  const pick = context.ui.select?.bind(context.ui);
-  if (typeof pick === "function") {
-    const toWrite =
-      plan.files.filter((f) => f.action === "create").length +
-      plan.files.filter((f) => f.action === "defer" && f.copyFrom).length;
-    const choice = await pick("fabric init — write " + toWrite + " files?", ["Write all", "Cancel"]);
-    if (choice === "Cancel") {
-      context.ui.notify("fabric init cancelled — nothing written", "warning");
-      return;
-    }
-  }
-  const applied = applyInitPlan(plan, {
-    exists: (p) => fs.existsSync(path.join(cwd, p)),
-    read: (p) => {
-      try {
-        return fs.readFileSync(path.join(cwd, p), "utf8");
-      } catch {
-        return null;
-      }
+const runInit = (pi: ExtensionAPI, context: ExtensionContext): void => {
+  pi.sendMessage(
+    {
+      customType: INIT_WORKFLOW_MESSAGE_TYPE,
+      content: initWorkflowPrompt(context.cwd),
+      display: true,
+      details: {
+        cwd: context.cwd,
+        command: "/fabric init",
+        mode: "workflow",
+      },
     },
-    write: (p, content) => {
-      const abs = path.join(cwd, p);
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      fs.writeFileSync(abs, content);
-    },
-  });
-  const createdSet = new Set<string>([...applied.created, ...applied.copied]);
-  let deepNote = "deep analysis: skipped (no codebase detected or agents unavailable)";
-  if (detected !== null && detected.languages.length > 0) {
-    const brief = await deepAnalyze(state, cwd);
-    if (brief) {
-      if (createdSet.has("project.md")) {
-        patchPlaceholder(
-          path.join(cwd, "project.md"),
-          "<The main components, how they relate, and where the seams are. Name directories and entry points.>",
-          brief,
-        );
-      }
-      if (createdSet.has("AGENTS.md")) {
-        patchPlaceholder(path.join(cwd, "AGENTS.md"), "<Where the important code lives and how the pieces relate.>", brief);
-      }
-      deepNote = "deep analysis: done (explorer brief written into project.md / AGENTS.md)";
-    }
-  }
-  const detectedBits = [
-    detected?.packageManager,
-    ...(detected?.languages ?? []),
-    detected?.mcpServers && detected.mcpServers.length > 0 ? detected.mcpServers.length + " MCP servers" : null,
-    detected?.identity ? "@" + detected.identity.name : null,
-  ].filter(Boolean);
-  const summary = detectedBits.length > 0 ? "detected: " + detectedBits.join(" \u00b7 ") : "detected: (nothing found)";
-  const askLine = detected?.identity
-    ? []
-    : ["user.md identity is a placeholder — run `gh auth status` or tell me your GitHub handle to fill it"];
-  context.ui.notify([
-    "fabric init",
-    "created: " + (applied.created.length > 0 ? applied.created.join(", ") : "(none)"),
-    "skipped (already present): " + (applied.skipped.length > 0 ? applied.skipped.join(", ") : "(none)"),
-    "copied (legacy .pi to root): " + (applied.copied.length > 0 ? applied.copied.join(", ") : "(none)"),
-    ...(applied.deferred.length > 0 ? ["deferred (legacy .pi sibling unreadable): " + applied.deferred.join(", ")] : []),
-    summary,
-    deepNote,
-    ...askLine,
-    ...plan.migrations,
-    "Next: /fabric prewalk to arm before the first change, or start describing what you want to build.",
-  ].join("\n"));
+    { deliverAs: "followUp", triggerTurn: true },
+  );
+  context.ui.notify(
+    "Fabric init workflow queued — Main will inspect the repository and propose grounded context changes",
+    "info",
+  );
 };
 
 export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps): void {
@@ -1121,11 +932,17 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         .trim()
         .split(/\s+/)
         .filter(Boolean);
+      // /fabric init takes no arguments: trailing prose is rejected loudly
+      // instead of being silently ignored by the subcommand dispatch.
+      if (command === "init" && argumentsList.length > 0) {
+        context.ui.notify("Usage: /fabric init (no trailing text)", "warning");
+        return;
+      }
       const handlers: Record<string, () => Promise<void> | void> = {
         reload: () => runReload(deps, context),
         settings: () => openFabricSettings(context, { state, applyFabricMode, capturedTools }),
         prewalk: () => runPrewalk(pi, state, context, argumentsList, argumentsText.trim().slice(command.length).trim()),
-        init: () => runInit(state, context),
+        init: () => runInit(pi, context),
         dashboard: () => fabricUi.openDashboard(context),
         ui: () => fabricUi.openDashboard(context),
         providers: () => runProviders(state, context),

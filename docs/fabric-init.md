@@ -1,6 +1,12 @@
-# Fabric Init: Root-Level Context Scaffold
+# Fabric Init: Repository Context Workflow
 
-Research-backed design for \`/fabric init\`, placing project context at the root.
+Research-backed placement and content for Fabric project context. `/fabric init`
+is a visible repository workflow, not a silent scaffold: it queues a displayed
+follow-up message for Main that inspects the repository, proposes only grounded
+context changes, and reports created, updated, skipped, and validated artifacts.
+The command itself never writes files. The pure scaffold planner in
+`src/init/scaffold.ts` remains the tested reference for the templates and
+placement decisions below.
 
 ## 1. External research (ranked sources, fetched via mcp.exa.omniroute_web_search / omniroute_web_fetch)
 
