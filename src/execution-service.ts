@@ -26,6 +26,7 @@ import {
   type FabricRegistryActivityEvent,
 } from "./core/action-registry.js";
 import type { FabricPrewalkExecutionBoundary } from "./prewalk/controller.js";
+import { scanChecklistSafety } from "./prewalk/checklist.js";
 import {
   ApprovalController,
   FabricSessionApprovals,
@@ -109,10 +110,15 @@ const executionOutcomeFromTermination = (
   }
 };
 
+const GATE_EXPECTED_SHAPE = 'expected { gate: string (1-256 chars), passed: boolean, disposition: "advise" | "revise" | "abort", evidence: Array<{ kind, ref, digest? }> }';
+
 const fabricGateInput = (value: Record<string, unknown>): FabricGateInput => {
   const gate = typeof value.gate === "string" ? value.gate.trim() : "";
   if (!gate || gate.length > 256) {
-    throw new Error("Fabric gate name must be 1-256 characters");
+    const received = Object.keys(value).length > 0 ? Object.keys(value).join(", ") : "(empty object)";
+    throw new Error(
+      "workflow.gate requires gate: string (1-256 characters); received keys: " + received + ". " + GATE_EXPECTED_SHAPE,
+    );
   }
   if (typeof value.passed !== "boolean") {
     throw new Error(`Fabric gate ${gate} requires passed: boolean`);
@@ -1413,6 +1419,14 @@ export class FabricExecutionService {
                   }
                   const startedAt = Date.now();
                   const checklist = options.prewalk.registerChecklist(args);
+                  // Warn-only safety scan: unambiguous destructive patterns ride
+                  // the result so Main sees them before the executor starts;
+                  // acceptance and handoff are never blocked on them.
+                  const safetyWarnings = scanChecklistSafety(checklist);
+                  const checklistResult =
+                    safetyWarnings.length > 0
+                      ? { ...checklist, safetyWarnings }
+                      : checklist;
                   // The checklist is a configured Prewalk trigger ref, so it
                   // must be audited like any other host call for claim() to
                   // match it. traceAttempt records to the trace recorder only;
@@ -1428,7 +1442,7 @@ export class FabricExecutionService {
                     result: checklist,
                   });
                   setStage("invoke");
-                  return checklist;
+                  return checklistResult;
                 },
               );
 

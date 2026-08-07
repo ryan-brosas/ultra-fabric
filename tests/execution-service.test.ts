@@ -939,6 +939,32 @@ return "must-not-escape";
     ]);
   });
 
+  it("names the expected shape when a gate call is mis-shaped", async () => {
+    const registry = new ActionRegistry();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: `
+await workflow.gate({
+  passed: true,
+  disposition: "advise",
+  evidence: [{ kind: "command", ref: "cmd:lint" }],
+});
+return "unreachable";
+`,
+      signal: undefined,
+      parentToolCallId: "mishaped-gate",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      onPartial() {},
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("requires gate: string (1-256 characters)");
+    expect(result.error).toContain("passed");
+    expect(result.error).toContain("disposition");
+    expect(result.error).toContain("evidence");
+  });
+
   it("requires a revise gate to be resolved before successful settlement", async () => {
     const registry = new ActionRegistry();
     const config = structuredClone(DEFAULT_FABRIC_CONFIG);
@@ -1963,6 +1989,40 @@ return runConsult({
 
     // The audited checklist must be claimable, which is the whole point of
     // listing the ref in triggerRefs.
+    const claim = controller.claim(result.audits, "session-1", "handoff-1");
+    expect(claim?.mutation.ref).toBe("fabric.prewalk.checklist");
+  });
+
+  it("surfaces destructive-pattern warnings on the accepted checklist without rejecting it", async () => {
+    const registry = new ActionRegistry();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.fullCodeMode = false;
+    const controller = new PrewalkController();
+    controller.configureTriggers([], ["fabric.prewalk.checklist", "pi.edit"], []);
+    controller.arm({ model: "provider/executor", sessionId: "session-1" });
+    const boundary = controller.executionBoundary("session-1")!;
+    const service = new FabricExecutionService(registry, config);
+    const result = await service.execute({
+      code: `return await prewalk.checklist({
+  items: [
+    { task: "Rebase then run git reset --hard to drop the change", validation: "Check 1" },
+    ...Array.from({ length: 4 }, (_, index) => ({
+      task: "Change target " + (index + 2),
+      validation: "Run check " + (index + 2),
+    })),
+  ],
+});`,
+      signal: undefined,
+      parentToolCallId: "prewalk-checklist-warnings",
+      context: { cwd: process.cwd(), hasUI: false } as ExtensionContext,
+      prewalk: boundary,
+      onPartial() {},
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.value).toMatchObject({
+      safetyWarnings: [{ item: 1, pattern: "reset --hard" }],
+    });
     const claim = controller.claim(result.audits, "session-1", "handoff-1");
     expect(claim?.mutation.ref).toBe("fabric.prewalk.checklist");
   });

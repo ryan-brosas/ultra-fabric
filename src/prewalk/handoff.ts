@@ -69,6 +69,7 @@ const researchArmedPrompt = (model: string): string => [
   "Before any further mutation, commit to a deep, concrete remaining execution plan grounded in the context already gathered. Cover the target files or symbols, dependencies, edge cases, and proof.",
   PREWALK_RESEARCH_ENRICHMENT,
   "In that same reply, call prewalk.checklist({ items }) inside fabric_exec with 5-9 ordered items; every item needs a concrete task and specific validation. The host rejects mutation until the checklist is accepted.",
+  "Phrase every validation as observable evidence, goal-backward: a command that exits 0, a named test that passes, or a file:line that proves the claim — never intent like \"should work\". If the task needs two checks, list both.",
   "Easy escape: bounded mid-tier tasks may call prewalk.checklist({ easy: true, items }) with 2-4 items; the host still hands off but Main skips deep research.",
   "Trivial escape: if the task clearly fits in one or two small edits, call prewalk.checklist({ trivial: true }) inside fabric_exec instead and complete the task directly in this same turn; the host records the trivial disposition, skips the mutation boundary, and makes no model swap or handoff.",
   "After the checklist is accepted, stop. Do not make any mutation yourself. The host ends fabric_exec at the accepted checklist and switches this session to the executor model.",

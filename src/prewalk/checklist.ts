@@ -46,6 +46,35 @@ const checklistField = (
   return normalized;
 };
 
+export interface ChecklistSafetyWarning {
+  item: number; // 1-based item index
+  pattern: string;
+}
+
+// Warn-only destructive-pattern scan over checklist item text. Flags only
+// unambiguous commands that a plan should never carry; the host surfaces the
+// warnings to Main but never rejects the checklist on them.
+const SAFETY_PATTERNS: Array<{ pattern: string; test: RegExp }> = [
+  { pattern: "--no-verify", test: /--no-verify\b/i },
+  { pattern: "reset --hard", test: /git\s+reset\s+--hard\b/i },
+  { pattern: "clean -fd", test: /git\s+clean\s+-\S*f\S*/i },
+  { pattern: "force push", test: /--force(?!-with-lease)\b|\bpush\s+-f\b|force\s+push/i },
+{ pattern: "bare git add", test: /git\s+add\s+(-A|-all|\.)\s*(?=then\b|and\b|,|;|$)/i },
+];
+
+export const scanChecklistSafety = (checklist: FabricPrewalkChecklist): ChecklistSafetyWarning[] => {
+  const warnings: ChecklistSafetyWarning[] = [];
+  checklist.items.forEach((item, index) => {
+const text = item.task + "\n" + item.validation;
+    for (const { pattern, test } of SAFETY_PATTERNS) {
+      if (test.test(text)) {
+        warnings.push({ item: index + 1, pattern });
+      }
+    }
+  });
+  return warnings;
+};
+
 export const parsePrewalkChecklist = (
   input: unknown,
   readyAt = Date.now(),

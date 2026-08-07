@@ -5,6 +5,7 @@ import {
   MIN_EASY_PREWALK_CHECKLIST_ITEMS,
   MIN_PREWALK_CHECKLIST_ITEMS,
   parsePrewalkChecklist,
+  scanChecklistSafety,
 } from "../src/prewalk/checklist.js";
 
 const items = (count = MIN_PREWALK_CHECKLIST_ITEMS) =>
@@ -98,5 +99,57 @@ describe("parsePrewalkChecklist", () => {
     expect(() => parsePrewalkChecklist({ easy: false, items: items(4) })).toThrow(
       /between 5 and 9 items/,
     );
+  });
+});
+
+describe("scanChecklistSafety", () => {
+  const withTask = (task: string) => ({
+    items: [
+      { task, validation: "Run check 1" },
+      ...Array.from({ length: 4 }, (_, i) => ({ task: "Change " + (i + 2), validation: "Check " + (i + 2) })),
+    ],
+    readyAt: 0,
+  });
+
+  it("flags unambiguous destructive patterns with the 1-based item index", () => {
+    const cases: Array<[string, string]> = [
+      ["commit with git commit --no-verify to skip hooks", "--no-verify"],
+      ["run git reset --hard HEAD~1 to drop the change", "reset --hard"],
+      ["clean the tree with git clean -fd first", "clean -fd"],
+      ["git push --force origin main after rebase", "force push"],
+      ["stage everything with git add -A then commit", "bare git add"],
+      ["stage with git add . and commit", "bare git add"],
+    ];
+    for (const [task, expected] of cases) {
+      const warnings = scanChecklistSafety(withTask(task));
+      expect(warnings.length, task).toBeGreaterThanOrEqual(1);
+      expect(warnings[0]!.item).toBe(1);
+      expect(warnings[0]!.pattern).toBe(expected);
+    }
+  });
+
+  it("does not flag scoped staging or ordinary tasks", () => {
+    expect(scanChecklistSafety(withTask("stage with git add -A src tests docs then commit"))).toEqual([]);
+    expect(scanChecklistSafety(withTask("run the full gate and commit the three files"))).toEqual([]);
+  });
+
+  it("scans validations too and reports each offending item once per pattern", () => {
+    const checklist = {
+      items: [
+        { task: "Change 1", validation: "git reset --hard proves rollback" },
+        { task: "git clean -fd the tree", validation: "Check 2" },
+        ...Array.from({ length: 3 }, (_, i) => ({ task: "Change " + (i + 3), validation: "Check " + (i + 3) })),
+      ],
+      readyAt: 0,
+    };
+    const warnings = scanChecklistSafety(checklist);
+    expect(warnings).toEqual([
+      { item: 1, pattern: "reset --hard" },
+      { item: 2, pattern: "clean -fd" },
+    ]);
+  });
+
+  it("returns an empty array for a trivial empty checklist", () => {
+    expect(scanChecklistSafety({ items: [], readyAt: 0, trivial: true })).toEqual([]);
   });
 });

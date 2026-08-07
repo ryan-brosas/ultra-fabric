@@ -301,6 +301,11 @@ export class PrewalkController {
       return undefined;
     }
     if (status.sessionId !== sessionId || !status.checklist) return undefined;
+    // A fully completed plan stops re-injecting reminders: the widget already
+    // tears down and re-sending the list would only replay resolved work.
+    if ((status.checklist.doneIndexes?.length ?? 0) >= status.checklist.items.length) {
+      return undefined;
+    }
     if (status.handoffId !== this.#reminderHandoffId) {
       this.#reminderCount = 0;
       this.#reminderHandoffId = status.handoffId;

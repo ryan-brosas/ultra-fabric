@@ -140,6 +140,18 @@ describe("prewalk prompt isolation", () => {
     expect(handler).toContain("state.prewalk.settleTask");
   });
 
+  it("requires checklist validations to be observable evidence", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "prewalk", "handoff.ts"),
+      "utf8",
+    );
+    const start = source.indexOf("const researchArmedPrompt");
+    const end = source.indexOf("export const prewalkArmedPrompt", start);
+    const prompt = source.slice(start, end);
+    expect(prompt.toLowerCase()).toContain("observable evidence");
+    expect(prompt.toLowerCase()).toContain("file:line");
+  });
+
   it("keeps the research arm prompt free of delegation prose", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "src", "prewalk", "handoff.ts"),
