@@ -100,6 +100,30 @@ describe("PrewalkController", () => {
     expect(controller.claim([audit("schema.commit", true)], "session-1")).toBeUndefined();
   });
 
+  it("claims the handoff from an accepted checklist under built-in default triggers", () => {
+    // Headless deadlock regression: the armed prompt orders Main to stop at
+    // the accepted checklist, so checklist acceptance itself must be a
+    // claimable boundary without any repo-local triggerRefs override. All 29
+    // fabric-prewalk DeepSWE cells scored f2p=0 because the default trigger
+    // set omitted fabric.prewalk.checklist and the session ended at the plan.
+    const controller = new PrewalkController();
+    controller.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement",
+    });
+
+    const claim = controller.claim(
+      [audit("fabric.prewalk.checklist", true)],
+      "session-1",
+    );
+
+    expect(claim).toMatchObject({
+      mutation: { ref: "fabric.prewalk.checklist", success: true },
+    });
+    expect(controller.status()).toMatchObject({ state: "handing_off" });
+  });
+
   it("distinguishes workspace effects from state bookkeeping with the same write risk", () => {
     const controller = new PrewalkController();
     controller.arm({

@@ -30,11 +30,12 @@ const PREWALK_CONTINUE_PROMPT = [
 // continuation prompts when prewalk.delegateContext is enabled. Keeps
 // planning on Main's intent while spending worker context on retrieval.
 // Phrasing avoids "always" and "must delegate": delegation stays conditional,
-// never unconditional, so zero agents remains the default.
+// never unconditional, so an inline zero-agents posture remains reachable by
+// disabling delegateContext; consult admission itself is bounded, not zero.
 export const PREWALK_DELEGATE_DISCIPLINE = [
   "Plan on Main's intent; the executor implements and verifies.",
   "Offload context gathering: delegate recon and research to scout (fast reconnaissance) or explorer (bounded deep exploration), or to consult.run partition workers, and take back structured findings or evidence locators instead of whole files.",
-  "consult.run admits at most one call per fabric_exec and zero workers by default; a not_admitted result means continue inline. Delegation stays conditional, never unconditional.",
+  "consult.run admits at most one call per fabric_exec and up to the configured worker ceiling (3 by default), gated by justification, non-overlapping scopes, and the parent budget; a not_admitted result means continue inline. Delegation stays conditional, never unconditional.",
 ].join(" ");
 
 const withDelegation = (text: string, delegateContext?: boolean): string =>

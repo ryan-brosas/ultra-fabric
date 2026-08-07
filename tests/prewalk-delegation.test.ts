@@ -43,6 +43,17 @@ describe("prewalk delegateContext", () => {
     expect(on.toLowerCase()).not.toContain("must delegate");
   });
 
+  it("describes consult admission accurately: the discipline never claims zero workers while the default policy admits a bounded ceiling", () => {
+    // Regression: the discipline once told models "zero workers by default",
+    // which contradicts DEFAULT_FABRIC_CONFIG (consult.enabled + maxWorkers 3)
+    // and steered the model away from delegating entirely.
+    expect(PREWALK_DELEGATE_DISCIPLINE.toLowerCase()).not.toContain("zero worker");
+    expect(PREWALK_DELEGATE_DISCIPLINE).toContain("consult.run");
+    expect(DEFAULT_FABRIC_CONFIG.consult.enabled).toBe(true);
+    expect(DEFAULT_FABRIC_CONFIG.consult.maxWorkers).toBeGreaterThanOrEqual(1);
+    expect(DEFAULT_FABRIC_CONFIG.consult.maxWorkers).toBeLessThanOrEqual(3);
+  });
+
   it("injects the same discipline into the executor continuation prompt only when enabled", () => {
     const off = checklistContinuationPrompt(checklist());
     const on = checklistContinuationPrompt(checklist(), { delegateContext: true });

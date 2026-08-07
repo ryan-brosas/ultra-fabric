@@ -180,4 +180,41 @@ describe("Ultra Consult admission", () => {
       code: "worker_limit",
     });
   });
+
+  it("under default host limits, a justified compare is admitted and fan-out is bounded to the ceiling", () => {
+    // Regression: docs and the delegate discipline claimed "zero workers by
+    // default", but DEFAULT_FABRIC_CONFIG admits up to consult.maxWorkers (3).
+    // A justified two-worker compare must be admitted, and a four-worker
+    // request must stay rejected (worker_limit) so fan-out stays bounded.
+    const justified = admitConsult({
+      objective: "Compare two module designs",
+      decision: "Which boundary to adopt",
+      mode: "compare",
+      admission: {
+        justification: "structural_diversity",
+        independence: "Workers inspect separate modules",
+        couldChange: "The adopted boundary",
+      },
+      perspectives: [
+        { id: "a", question: "Inspect A", scope: ["src/a"], model: "p/m1" },
+        { id: "b", question: "Inspect B", scope: ["src/b"], model: "p/m2" },
+      ],
+    }, lowContext, limits);
+
+    expect(justified).toMatchObject({ kind: "admitted", mode: "compare" });
+    expect(justified.kind === "admitted" ? justified.request.perspectives.length : -1)
+      .toBeGreaterThanOrEqual(1);
+
+    const oversized = admitConsult({
+      ...base,
+      mode: "partition",
+      perspectives: [
+        { id: "one", question: "Inspect one", scope: ["src/one"] },
+        { id: "two", question: "Inspect two", scope: ["src/two"] },
+        { id: "three", question: "Inspect three", scope: ["src/three"] },
+        { id: "four", question: "Inspect four", scope: ["src/four"] },
+      ],
+    }, lowContext, limits);
+    expect(oversized).toMatchObject({ kind: "not_admitted", code: "worker_limit" });
+  });
 });

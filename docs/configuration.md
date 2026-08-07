@@ -62,7 +62,7 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
     "alwaysRearm": true,
     "triggerRisks": [],
     "triggerEffects": ["workspace"],
-    "triggerRefs": ["pi.edit", "pi.write", "schema.commit"]
+    "triggerRefs": ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"]
   },
   "agents": {
     "enabled": true,
@@ -154,7 +154,7 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
 
 ## Prewalk executor
 
-Prewalk trigger matching is host-owned. `prewalk.triggerEffects` defaults to `["workspace"]`; `prewalk.triggerRefs` preserves `pi.edit`, `pi.write`, and `schema.commit`. Optional `prewalk.triggerRisks` is broad and defaults empty because write-risk state bookkeeping is not necessarily a workspace mutation. A successful audit triggers when any configured set matches. Captured/external mutations participate when they declare `effect: "workspace"` or are named explicitly. Bash stays opaque unless explicitly named.
+Prewalk trigger matching is host-owned. `prewalk.triggerEffects` defaults to `["workspace"]`; `prewalk.triggerRefs` preserves `pi.edit`, `pi.write`, `schema.commit`, and `fabric.prewalk.checklist` (so checklist acceptance alone claims the handoff boundary). Optional `prewalk.triggerRisks` is broad and defaults empty because write-risk state bookkeeping is not necessarily a workspace mutation. A successful audit triggers when any configured set matches. Captured/external mutations participate when they declare `effect: "workspace"` or are named explicitly. Bash stays opaque unless explicitly named.
 
 `prewalk.model` is the optional Pi `provider/model` selected by `/fabric prewalk`. Prewalk runs one in-session path: the frontier model plans and submits a checklist, then the host hands the same Main session to the executor for implementation and verification, then restores the frontier model on settle.
 
@@ -360,7 +360,7 @@ See [agents & mesh](agents.md) for the runner and transport details.
 
 ## Ultra Consult
 
-`consult.run()` is enabled by default but host admission starts at zero workers. It is a core context-management primitive, not a permission bypass: every admitted child consumes the normal execution agent/token reservation, is fixed to the Pi runner, receives only read/grep/find/ls, has extensions and recursion disabled, and cannot mutate the workspace.
+`consult.run()` is enabled by default and admits up to `consult.maxWorkers` (3 by default) per call, gated by justification, non-overlapping scopes, and the parent agent budget. It is a core context-management primitive, not a permission bypass: every admitted child consumes the normal execution agent/token reservation, is fixed to the Pi runner, receives only read/grep/find/ls, has extensions and recursion disabled, and cannot mutate the workspace.
 
 - `enabled` — disables admission entirely when false.
 - `maxWorkers` — one-call worker ceiling, clamped to 1–3 and further limited by the parent execution's remaining agent budget.

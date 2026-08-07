@@ -22,6 +22,7 @@ const PREWALK_TRIGGER_REFS = new Set([
   "pi.edit",
   "pi.write",
   "schema.commit",
+  "fabric.prewalk.checklist",
 ]);
 
 export interface FabricPrewalkClaim {

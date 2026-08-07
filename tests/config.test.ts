@@ -139,6 +139,18 @@ describe("Fabric configuration", () => {
     expect(invalid.executor.runtime).toBe("quickjs");
   });
 
+  it("defaults the prewalk trigger set to include the checklist boundary", () => {
+    // Headless deadlock regression: the armed prompt orders Main to stop at
+    // the accepted checklist, so checklist acceptance must be claimable under
+    // the DEFAULT_FABRIC_CONFIG trigger refs, with no repo-local override.
+    expect(DEFAULT_FABRIC_CONFIG.prewalk.triggerRefs).toContain(
+      "fabric.prewalk.checklist",
+    );
+    expect(normalizeFabricConfig({}).prewalk.triggerRefs).toContain(
+      "fabric.prewalk.checklist",
+    );
+  });
+
   it("normalizes a dedicated prewalk executor model", () => {
     expect(
       normalizeFabricConfig({ prewalk: { model: "anthropic/executor" } }).prewalk,
@@ -146,21 +158,21 @@ describe("Fabric configuration", () => {
       model: "anthropic/executor",
       triggerRisks: [],
       triggerEffects: ["workspace"],
-      triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
+      triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
       arm: "task",
       delegateContext: true,
     });
     expect(normalizeFabricConfig({ prewalk: { model: "   " } }).prewalk).toEqual({
       triggerRisks: [],
       triggerEffects: ["workspace"],
-      triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
+      triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
       arm: "task",
       delegateContext: true,
     });
     expect(normalizeFabricConfig({ prewalk: { arm: "off" } }).prewalk).toEqual({
       triggerRisks: [],
       triggerEffects: ["workspace"],
-      triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
+      triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
       arm: "off",
       delegateContext: true,
     });
@@ -362,7 +374,7 @@ describe("Fabric configuration", () => {
     expect(DEFAULT_FABRIC_CONFIG.prewalk).toMatchObject({
       triggerRisks: [],
       triggerEffects: ["workspace"],
-      triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
+      triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
     });
   });
 
@@ -721,7 +733,7 @@ describe("Fabric configuration", () => {
     expect(loadFabricConfig(location).prewalk).toEqual({
       triggerRisks: [],
       triggerEffects: ["workspace"],
-      triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
+      triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
       arm: "task",
       delegateContext: true,
     });

@@ -352,7 +352,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
   prewalk: {
     triggerRisks: [],
     triggerEffects: ["workspace"],
-    triggerRefs: ["pi.edit", "pi.write", "schema.commit"],
+    triggerRefs: ["pi.edit", "pi.write", "schema.commit", "fabric.prewalk.checklist"],
     arm: "task",
     delegateContext: true,
     autoScout: false,
