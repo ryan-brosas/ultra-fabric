@@ -14,6 +14,7 @@ import {
   prewalkArmedMessageType,
   prewalkArmedPrompt,
   runFabricHandoffAtBoundary,
+  selectPrewalkExecutorModel,
   withTrajectoryRearmDirective,
 } from "../src/prewalk/handoff.js";
 
@@ -861,6 +862,74 @@ describe("research return policy", () => {
       returnModel: "anthropic/frontier",
       status: { state: "idle" },
     });
+  });
+});
+
+describe("selectPrewalkExecutorModel", () => {
+  const routes = [
+    "omniroute/opencode-go/deepseek-v4-flash",
+    "anthropic/fallback",
+    "openai/final-fallback",
+  ];
+
+  it("prefers the primary route and falls through to an available fallback", async () => {
+    const selection = await selectPrewalkExecutorModel(routes, {
+      requireModel: (candidate) => {
+        if (candidate !== routes[0]) throw new Error(`Prewalk model is unavailable: ${candidate}`);
+        return { provider: "omniroute", id: "opencode-go/deepseek-v4-flash" };
+      },
+      setModel: async () => true,
+    });
+
+    expect(selection).toEqual({ model: routes[0], fallback: false, skipped: [] });
+  });
+
+  it("falls through to the first available configured fallback", async () => {
+    const selection = await selectPrewalkExecutorModel(routes, {
+      requireModel: (candidate) => {
+        if (candidate === routes[0] || candidate === routes[1]) {
+          throw new Error(`Prewalk model is unavailable: ${candidate}`);
+        }
+        return { provider: "openai", id: "final-fallback" };
+      },
+      setModel: async () => true,
+    });
+
+    expect(selection).toEqual({
+      model: routes[2],
+      fallback: true,
+      skipped: [
+        `${routes[0]}: Prewalk model is unavailable: ${routes[0]}`,
+        `${routes[1]}: Prewalk model is unavailable: ${routes[1]}`,
+      ],
+    });
+  });
+
+  it("distinguishes unauthenticated routes from unavailable ones", async () => {
+    const selection = await selectPrewalkExecutorModel(routes, {
+      requireModel: (candidate) => ({ provider: candidate.split("/")[0], id: candidate.split("/")[1] }),
+      setModel: async (model) => (model as { provider: string }).provider === "openai",
+    });
+
+    expect(selection).toEqual({
+      model: routes[2],
+      fallback: true,
+      skipped: [`${routes[0]}: no authentication`, `${routes[1]}: no authentication`],
+    });
+  });
+
+  it("reports a typed terminal failure when every configured route is unavailable", async () => {
+    await expect(
+      selectPrewalkExecutorModel(routes, {
+        requireModel: (candidate) => {
+          throw new Error(`Prewalk model is unavailable: ${candidate}`);
+        },
+        setModel: async () => true,
+      }),
+    ).rejects.toThrow(
+      `No available prewalk executor from ${routes.length} configured route(s): ` +
+        routes.map((route) => `${route}: Prewalk model is unavailable: ${route}`).join("; "),
+    );
   });
 });
 

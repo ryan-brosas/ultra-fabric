@@ -316,6 +316,42 @@ const queuePrewalkContinuation = (
   );
 };
 
+// Ordered prewalk executor selection. Tries the primary route first, then the
+// configured fallbackModels in declared order. Each candidate must resolve in
+// the model registry (unavailable/auth failures are recorded per candidate);
+// a candidate that resolves but has no authentication is also skipped. When
+// every route fails the rejection is a typed terminal error the controller
+// surfaces as a blocked handoff. Gateway admission pressure (chat_admission_busy)
+// is not observable at pick time — it happens at chat time after the switch —
+// so admission recovery lives in the agent-run retry/backoff layers instead.
+export const selectPrewalkExecutorModel = async (
+  candidates: readonly string[],
+  deps: {
+    requireModel: (candidate: string) => unknown;
+    setModel: (model: unknown) => Promise<boolean>;
+    onAttempt?: (candidate: string) => void;
+  },
+): Promise<{ model: string; fallback: boolean; skipped: string[] }> => {
+  const skipped: string[] = [];
+  for (const candidate of candidates) {
+    deps.onAttempt?.(candidate);
+    let model: unknown;
+    try {
+      model = deps.requireModel(candidate);
+    } catch (error) {
+      skipped.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    if (await deps.setModel(model)) {
+      return { model: candidate, fallback: candidate !== candidates[0], skipped };
+    }
+    skipped.push(`${candidate}: no authentication`);
+  }
+  throw new Error(
+    `No available prewalk executor from ${candidates.length} configured route(s): ${skipped.join("; ")}`,
+  );
+};
+
 const runResearchPrewalk = async (
   extension: ExtensionAPI,
   pending: PendingFabricHandoff,
@@ -323,30 +359,16 @@ const runResearchPrewalk = async (
 ): Promise<Record<string, unknown>> => {
   const primaryModel = String(pending.args.model ?? "");
   const candidates = [...new Set([primaryModel, ...(pending.fallbackModels ?? [])])];
-  const failures: string[] = [];
-  let modelKey: string | undefined;
-  for (const candidate of candidates) {
-    context.ui.setStatus("fabric-prewalk", `switching Main → ${candidate}`);
-    try {
-      const model = requirePrewalkModel(candidate, context);
-      if (await extension.setModel(model)) {
-        modelKey = candidate;
-        if (pending.args.thinking) {
-          extension.setThinkingLevel(pending.args.thinking as import("../thinking.js").FabricThinking);
-        }
-        break;
-      }
-      failures.push(`${candidate}: no authentication`);
-    } catch (error) {
-      failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  const { model: modelKey, fallback } = await selectPrewalkExecutorModel(candidates, {
+    requireModel: (candidate) => requirePrewalkModel(candidate, context),
+    setModel: (model) =>
+      extension.setModel(model as Parameters<ExtensionAPI["setModel"]>[0]),
+    onAttempt: (candidate) =>
+      context.ui.setStatus("fabric-prewalk", `switching Main → ${candidate}`),
+  });
+  if (pending.args.thinking) {
+    extension.setThinkingLevel(pending.args.thinking as import("../thinking.js").FabricThinking);
   }
-  if (!modelKey) {
-    throw new Error(
-      `No available prewalk executor from ${candidates.length} configured route(s): ${failures.join("; ")}`,
-    );
-  }
-  const fallback = modelKey !== primaryModel;
   context.ui.notify(
     `Prewalk continuing Main in place with ${modelKey}${fallback ? " (fallback)" : ""}. Previous Main model will be restored after the task.`,
     "info",
