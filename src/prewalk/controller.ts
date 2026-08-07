@@ -318,6 +318,23 @@ export class PrewalkController {
     return structuredClone(status.checklist);
   }
 
+  // Record completed checklist items from [DONE:n] markers in the executor's
+  // turn text. Indexes are merged into the live checklist's doneIndexes
+  // (sorted, unique, bounded by item count); items stay untouched so the plan
+  // text survives. Returns false when the session has no live checklist.
+  markChecklistDone(sessionId: string, indexes: readonly number[]): boolean {
+    const status = this.#status;
+    if (status.state === "idle" || status.sessionId !== sessionId || !status.checklist) {
+      return false;
+    }
+    const checklist = status.checklist;
+    const bounded = indexes.filter((i) => Number.isInteger(i) && i >= 0 && i < checklist.items.length);
+    const merged = [...new Set([...(status.checklist.doneIndexes ?? []), ...bounded])].sort((a, b) => a - b);
+    if (merged.length === (status.checklist.doneIndexes?.length ?? 0)) return true;
+    status.checklist.doneIndexes = merged;
+    return true;
+  }
+
   setWriteScope(sessionId: string, paths: readonly string[]): void {
     if (!this.isArmed(sessionId)) return;
     this.#writeScopes.set(sessionId, new Set(paths));

@@ -18,6 +18,23 @@ import {
 } from "./prewalk/continuation.js";
 import { restorePrewalkModel } from "./prewalk/model.js";
 import { prewalkChecklistReminder } from "./prewalk/continuation.js";
+import { checklistProgress, extractDoneMarkers } from "./prewalk/checklist-progress.js";
+
+// Concatenated text of the most recent assistant message in the branch, so
+// [DONE:n] progress markers in the executor's last turn reach the controller.
+const lastAssistantTurnText = (messages: readonly unknown[]): string => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i] as { role?: unknown; content?: unknown };
+    if (message?.role !== "assistant") continue;
+    const parts = Array.isArray(message.content) ? message.content : [];
+    let text = "";
+    for (const part of parts as Array<{ type?: unknown; text?: unknown }>) {
+      if (part?.type === "text" && typeof part.text === "string") text += part.text;
+    }
+    return text;
+  }
+  return "";
+};
 import { autoArmPrewalk } from "./prewalk/arm.js";
 import { scoutBridge } from "./prewalk/scout-brief.js";
 import { prewalkRearmDefaults } from "./prewalk/rearm.js";
@@ -608,6 +625,33 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
         } as (typeof messages)[number],
       ];
       changed = true;
+    }
+    // Progress: [DONE:n] markers in the latest assistant turn mark checklist
+    // items complete; the widget and status keep the plan's progress visible
+    // between turns (prime-agent plan-mode style, ASCII only).
+    if (state.initialized) {
+      const lastAssistantText = lastAssistantTurnText(messages);
+      if (lastAssistantText) {
+        const checklist = state.prewalk.status();
+        if (checklist.state !== "idle" && checklist.checklist) {
+          const indexes = extractDoneMarkers(lastAssistantText, checklist.checklist.items.length);
+          if (indexes.length > 0) state.prewalk.markChecklistDone(sessionId, indexes);
+          const progress = checklistProgress(checklist.checklist);
+          if (progress.total > 0) {
+            context.ui.setStatus(
+              "fabric-prewalk-progress",
+              `checklist ${progress.done}/${progress.total}`,
+            );
+            const done = new Set(checklist.checklist.doneIndexes ?? []);
+            context.ui.setWidget(
+              "fabric-prewalk-progress",
+              checklist.checklist.items.map((item, index) =>
+                done.has(index) ? "[[0mDONE] " + item.task : "[ ] " + item.task,
+              ),
+            );
+          }
+        }
+      }
     }
     return changed ? { messages } : undefined;
   });

@@ -68,11 +68,14 @@ export const filterPrewalkContinuationMessages = <Message extends MessageWithRol
 // drifting executor without holding Main after the checklist is satisfied.
 export const prewalkChecklistReminder = (
   checklist: FabricPrewalkChecklist,
-): string => [
-  "Prewalk checklist still active. Keep working it; do not end the turn until every item and validation is complete.",
-  ...checklist.items.map(
-    (item, index) =>
-      `- ${index + 1}. ${item.task}\n  Validation: ${item.validation}`,
-  ),
-  "Before claiming completion: sweep every other call site for any pattern, signature, or check you changed; keep the diff minimal and confirm no out-of-scope behavior changed; run the full test module the change lives in, not just the test you expect to flip.",
-].join("\n");
+): string => {
+  const done = new Set(checklist.doneIndexes ?? []);
+  const open = checklist.items.filter((_, index) => !done.has(index));
+  return [
+    `Prewalk checklist still active (${done.size} of ${checklist.items.length} done). Keep working the remaining items; do not end the turn until every open item and validation is complete.`,
+    ...open.map(
+      (item, openIndex) => `- ${openIndex + 1}. ${item.task}\n  Validation: ${item.validation}`,
+    ),
+    "Before claiming completion: sweep every other call site for any pattern, signature, or check you changed; keep the diff minimal and confirm no out-of-scope behavior changed; run the full test module the change lives in, not just the test you expect to flip.",
+  ].join("\n");
+};

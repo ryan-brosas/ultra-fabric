@@ -14,6 +14,10 @@ interface FabricPrewalkChecklistItem {
 export interface FabricPrewalkChecklist {
   items: FabricPrewalkChecklistItem[];
   readyAt: number;
+  // 0-based indexes of items the executor marked complete via [DONE:n]
+  // markers in its turn text. Kept separate from items so the plan text
+  // stays intact; the reminder and progress widget read only this.
+  doneIndexes?: number[];
   // Trivial-path escape: a task that clearly fits in one or two small edits
   // records the trivial disposition through the same checklist call, so the
   // controller suppresses the mutation boundary and the executor handoff
