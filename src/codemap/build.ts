@@ -1,9 +1,23 @@
 import { pageRank, type RankEdge } from "./rank.js";
-import { buildSymbolIndex, buildAllEdges, buildNodeKeys, type SymbolIndex } from "./symbols.js";
+import { buildSymbolIndex, buildContainmentEdges, buildInheritanceEdges, buildNodeKeys, type SymbolIndex } from "./symbols.js";
+import { extractCallEdges } from "./calls.js";
 import { expandNeighborhood, buildBothAdjacency, type PrebuiltAdjacency } from "./search.js";
 import { findSourceFiles } from "./lang.js";
 import { runOutlineCached } from "./cache.js";
 import type { RenderNode } from "./render-heat.js";
+
+export const buildAllEdges = (
+  index: SymbolIndex,
+  root: string,
+  options: { maxDefiners?: number } = {},
+): RankEdge[] => {
+  const containment = buildContainmentEdges(index);
+  const inheritance = buildInheritanceEdges(index);
+  const callOpts: { cwd: string; maxDefiners?: number } = { cwd: root };
+  if (options.maxDefiners !== undefined) callOpts.maxDefiners = options.maxDefiners;
+  const calls = extractCallEdges(index, callOpts);
+  return [...containment, ...inheritance, ...calls];
+};
 
 
 // Query-anchored multi-hop retrieval: instead of a global PageRank over every

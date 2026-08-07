@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runOutline } from "../src/codemap/outline.js";
-import { buildSymbolIndex, buildAllEdges } from "../src/codemap/symbols.js";
+import { buildSymbolIndex } from "../src/codemap/symbols.js";
+import { buildAllEdges } from "../src/codemap/build.js";
 import { langForFile } from "../src/codemap/lang.js";
 
 const dir = join("/tmp", "codemap-polyglot");

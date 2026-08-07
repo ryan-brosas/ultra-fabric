@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runOutline, type OutlineFile } from "../src/codemap/outline.js";
-import { buildSymbolIndex, buildAllEdges } from "../src/codemap/symbols.js";
+import { buildSymbolIndex } from "../src/codemap/symbols.js";
+import { buildAllEdges } from "../src/codemap/build.js";
 import { expand, buildDisclosureGraph, minimalSkeleton, type DisclosureGraph } from "../src/codemap/disclose.js";
 import { renderFileSkeleton, renderSymbolSkeleton } from "../src/codemap/skeleton.js";
 
@@ -24,7 +25,7 @@ describe("expand direction", () => {
 
   it("upstream from extractCallEdges reveals its caller (buildAllEdges)", () => {
     const r = expand(graph, [extractCallEdgesKey], { direction: "upstream", depth: 1 });
-    expect(r.entities.some((e) => e.startsWith("buildAllEdges:src/codemap/symbols.ts"))).toBe(true);
+    expect(r.entities.some((e) => e.startsWith("buildAllEdges:src/codemap/build.ts"))).toBe(true);
   });
 });
 

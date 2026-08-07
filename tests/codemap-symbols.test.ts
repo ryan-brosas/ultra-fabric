@@ -4,8 +4,8 @@ import {
   enclosingSymbol,
   buildContainmentEdges,
   buildReferenceEdges,
-  buildAllEdges,
 } from "../src/codemap/symbols.js";
+import { buildAllEdges } from "../src/codemap/build.js";
 import { extractImportEdges } from "../src/codemap/imports.js";
 import { runOutline } from "../src/codemap/outline.js";
 import { computeEdgeWeight } from "../src/codemap/rank.js";

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runOutline } from "../src/codemap/outline.js";
-import { buildSymbolIndex, buildAllEdges } from "../src/codemap/symbols.js";
+import { buildSymbolIndex } from "../src/codemap/symbols.js";
+import { buildAllEdges } from "../src/codemap/build.js";
 import { predictFileCascade, predictSymbolCascade } from "../src/codemap/cascade.js";
 
 const root = process.cwd();

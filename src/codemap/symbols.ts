@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { OutlineFile, OutlineItem, OutlineMember } from "./outline.js";
 import { computeEdgeWeight, type RankEdge } from "./rank.js";
-import { extractCallEdges } from "./calls.js";
 
 export interface SymbolNode {
   name: string;
@@ -198,7 +197,7 @@ export const buildReferenceEdges = (
 const INHERITS_RE = /\bextends\s+([A-Za-z_$][\w$]*)/g;
 const IMPLEMENTS_RE = /\bimplements\s+([A-Za-z_$][\w$,\s]*)/g;
 
-const buildInheritanceEdges = (index: SymbolIndex): RankEdge[] => {
+export const buildInheritanceEdges = (index: SymbolIndex): RankEdge[] => {
   const defNames = new Set(index.byName.keys());
   const edges: RankEdge[] = [];
   for (const node of index.nodes) {
@@ -227,19 +226,6 @@ const buildInheritanceEdges = (index: SymbolIndex): RankEdge[] => {
     }
   }
   return edges;
-};
-
-export const buildAllEdges = (
-  index: SymbolIndex,
-  root: string,
-  options: { maxDefiners?: number } = {},
-): RankEdge[] => {
-  const containment = buildContainmentEdges(index);
-  const inheritance = buildInheritanceEdges(index);
-  const callOpts: { cwd: string; maxDefiners?: number } = { cwd: root };
-  if (options.maxDefiners !== undefined) callOpts.maxDefiners = options.maxDefiners;
-  const calls = extractCallEdges(index, callOpts);
-  return [...containment, ...inheritance, ...calls];
 };
 
 // Helper to get the unique node keys used in the graph (parent:file or name:file format)
