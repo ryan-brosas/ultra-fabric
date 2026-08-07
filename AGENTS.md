@@ -15,7 +15,7 @@ Detailed context lives in `.pi/project.md`, `.pi/roadmap.md`, and `.pi/tech-stac
 - Frame meaningful work in one or two sentences with concrete acceptance criteria. Ask only when a consequential boundary remains unclear.
 - Do not narrate routine tool calls or echo file contents. Keep explanations proportional to the work and avoid box-drawing characters.
 - Read scoped `AGENTS.md` or `CLAUDE.md`, configuration, and relevant context before asking intent questions. Check `sources/` early when present. Put needed upstream or mod clones there instead of fetching isolated files.
-- Prefer semantic or graph navigation before text search. Find all references before renames or signature changes. Use grep and find for strings, comments, configuration, or graph fallback.
+- Navigate with codemap first: search serves symbols, regex content patterns, and config keys; refs lists exact call sites; cascade predicts co-change. Use grep/find only when codemap returns nothing or raw file bytes are needed. Find all references before renames or signature changes.
 - For non-trivial work, use a compact plan that names files, order, tests, and live checks. Ask before an unrequested multi-file refactor or architecture decision.
 - Build the smallest working slice, run focused diagnostics after edits, then run the repository gate. Separate local proof from checks still needed on named servers or feature flags.
 - Use plain `fabric_exec` and zero agents for ordinary work. Get one-line user confirmation before an agent, actor, or advanced Fabric workflow unless the request already names it.

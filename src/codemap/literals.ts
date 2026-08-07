@@ -106,6 +106,36 @@ export const buildLiteralIndex = (
       entries.push({ file: m.file, line: line1, kind: "comment", text: m.text, enclosing: enclosing(index, m.file, line1) });
     }
   }
+  // Config files (YAML + JSON) join the literal index so config-key queries
+  // resolve without grep. langForFile does not map them (outline and the
+  // symbol graph skip non-AST-able kinds), so they are handled here directly.
+  const yamlFiles = files.filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
+  for (const chunk of chunkPaths(yamlFiles)) {
+    const kv = runAstGrep(binary, ["run", "--pattern", "$K: $V", "--lang", "yaml", "--json=compact", ...chunk], cwd);
+    const seen = new Set<string>();
+    for (const m of kv) {
+      const key = m.file + ":" + m.range.start.line + ":" + m.range.start.column;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const line1 = m.range.start.line + 1;
+      entries.push({ file: m.file, line: line1, kind: "string", text: m.text, enclosing: enclosing(index, m.file, line1) });
+    }
+  }
+  // JSON config files: index string nodes so config keys and values resolve.
+  // ast-grep's json grammar supports kind: string scans (verified live).
+  const jsonFiles = files.filter((f) => f.endsWith(".json"));
+  for (const chunk of chunkPaths(jsonFiles)) {
+    const jsonRule = "{id: s, language: json, rule: {kind: string}}";
+    const jsonMatches = runAstGrep(binary, ["scan", "--inline-rules", jsonRule, "--json=compact", ...chunk], cwd);
+    const seen = new Set<string>();
+    for (const m of jsonMatches) {
+      const key = m.file + ":" + m.range.start.line + ":" + m.range.start.column;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const line1 = m.range.start.line + 1;
+      entries.push({ file: m.file, line: line1, kind: "string", text: m.text, enclosing: enclosing(index, m.file, line1) });
+    }
+  }
   return entries;
 };
 
@@ -119,4 +149,25 @@ export const searchLiterals = (
   const limit = options.limit ?? 50;
   const filtered = options.kind ? index.filter((e) => e.kind === options.kind) : index;
   return filtered.filter((e) => e.text.includes(query)).slice(0, limit);
+};
+
+// Regex search over literal texts (strings and comments, AST-node indexed). This
+// serves the ~18% of real agent greps that are regex-shaped without reading file
+// content: the pattern runs against the extracted literal texts in memory, so a
+// content regex like "retire.*oversized" resolves with file:line provenance and
+// stays AST-typed. Invalid patterns return empty (callers tolerate the miss).
+export const searchLiteralsRegex = (
+  index: readonly LiteralEntry[],
+  pattern: string,
+  options: { kind?: LiteralKind; limit?: number } = {},
+): LiteralEntry[] => {
+  const limit = options.limit ?? 50;
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern);
+  } catch {
+    return [];
+  }
+  const filtered = options.kind ? index.filter((e) => e.kind === options.kind) : index;
+  return filtered.filter((e) => re.test(e.text)).slice(0, limit);
 };

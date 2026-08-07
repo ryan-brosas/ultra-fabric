@@ -30,15 +30,28 @@ export interface CallEdgeOptions {
   maxDefiners?: number;
 }
 
+// A precise call site: the caller file, 1-indexed line, the enclosing caller
+// symbol, the callee identifier as written, and the resolved definitions.
+// extractCallEdges aggregates these into invokes edges; refs surfaces them
+// per-symbol (semnav find_callers shape, LocAgent invoke edges).
+export interface CallSite {
+  file: string;
+  line: number; // 1-indexed
+  caller: string; // enclosing symbol name
+  callee: string; // last member segment as written at the site
+  defs: Array<{ name: string; file: string; line: number }>;
+  definerCount: number; // scoped definition count used for the maxDefiners gate
+}
+
 const lastSegment = (callee: string): string => {
   const parts = callee.split(".");
   return parts[parts.length - 1] ?? "";
 };
 
-export const extractCallEdges = (
+export const extractCallSites = (
   index: SymbolIndex,
   options: CallEdgeOptions = {},
-): RankEdge[] => {
+): CallSite[] => {
   const cwd = options.cwd ?? process.cwd();
   const binary = options.binary ?? "ast-grep";
   const maxDefiners = options.maxDefiners ?? 5;
@@ -75,7 +88,7 @@ export const extractCallEdges = (
     }
   }
 
-  const pairCounts = new Map<string, { from: string; to: string; ident: string; count: number; definerCount: number }>();
+  const sites: CallSite[] = [];
 
   for (const m of matches) {
     const calleeText = m.metaVariables?.single?.F?.text;
@@ -100,13 +113,36 @@ export const extractCallEdges = (
       const fromKey = enclosing.name + ":" + m.file;
       const toKey = def.name + ":" + def.file;
       if (fromKey === toKey) continue;
+      sites.push({
+        file: m.file,
+        line,
+        caller: enclosing.name,
+        callee: ident,
+        defs: defs.map((d) => ({ name: d.name, file: d.file, line: d.line })),
+        definerCount,
+      });
+      break; // one site record per call expression, first resolved def wins
+    }
+  }
+  return sites;
+};
+
+export const extractCallEdges = (
+  index: SymbolIndex,
+  options: CallEdgeOptions = {},
+): RankEdge[] => {
+  const pairCounts = new Map<string, { from: string; to: string; ident: string; count: number; definerCount: number }>();
+  for (const site of extractCallSites(index, options)) {
+    for (const def of site.defs) {
+      const fromKey = site.caller + ":" + site.file;
+      const toKey = def.name + ":" + def.file;
+      if (fromKey === toKey) continue;
       const pairKey = fromKey + "\0" + toKey;
       const existing = pairCounts.get(pairKey);
       if (existing) existing.count++;
-      else pairCounts.set(pairKey, { from: fromKey, to: toKey, ident, count: 1, definerCount });
+      else pairCounts.set(pairKey, { from: fromKey, to: toKey, ident: site.callee, count: 1, definerCount: site.definerCount });
     }
   }
-
   const edges: RankEdge[] = [];
   for (const { from, to, ident, count, definerCount } of pairCounts.values()) {
     edges.push({ from, to, weight: computeEdgeWeight(ident, count, false, false, definerCount), kind: "invokes" });

@@ -30,6 +30,12 @@ export const groupFilesByLang = (files: readonly string[]): Map<string, string[]
 
 export const SUPPORTED_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".py", ".rs", ".java"];
 
+// Config-file extensions discovered for the literal index only: YAML/JSON keys
+// and values resolve from AST nodes (not content scans) so config-key queries
+// are served by codemap search instead of grep. They never enter the symbol
+// graph (outline skips non-AST-able kinds per docs/code-map-research.md).
+export const CONFIG_EXTS = [".yaml", ".yml", ".json"];
+
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -56,5 +62,25 @@ export const findSourceFiles = (root: string, extensions?: readonly string[]): s
     }
   };
   for (const r of SOURCE_ROOTS) walk(r);
+  return found.sort();
+};
+
+// Discover root-level and .pi config files for the literal index (bounded: only
+// the first-party config surface, never node_modules or vendored clones).
+export const findConfigFiles = (root: string): string[] => {
+  const found: string[] = [];
+  const configRoots = [".", ".pi"];
+  for (const dir of configRoots) {
+    let entries;
+    try {
+      entries = readdirSync(join(root, dir), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (CONFIG_EXTS.some((ext) => entry.name.endsWith(ext))) found.push(dir === "." ? entry.name : dir + "/" + entry.name);
+    }
+  }
   return found.sort();
 };

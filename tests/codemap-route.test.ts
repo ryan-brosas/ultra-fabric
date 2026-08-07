@@ -56,6 +56,36 @@ describe("route", () => {
     expect(r.literals.length).toBe(0);
   });
 });
+describe("route regex over literals", () => {
+  it("matches a content regex against literal texts with file and line", () => {
+    const q = "[Cc]hunk.*outline path";
+    const r = route(q, indexes);
+    expect(r.category).toBe("regex");
+    const hit = r.literals.find((e) => e.file === "src/codemap/calls.ts" && e.text.includes("outline path"));
+    expect(hit).toBeDefined();
+    expect(hit!.line).toBeGreaterThan(0);
+  });
+
+  it("matches a regex against string literals, not only comments", () => {
+    const r = route("--json[=]compact", indexes);
+    expect(r.category).toBe("regex");
+    expect(r.literals.some((e) => e.kind === "string" && e.text.includes("--json=compact"))).toBe(true);
+  });
+
+  it("keeps symbol-name regexes on the symbol index", () => {
+    const r = route("CodeGraph|buildAllEdges", indexes);
+    expect(r.category).toBe("regex");
+    expect(r.source).toBe("symbol-index");
+    expect(r.symbols.some((n) => n.name === "CodeGraph" || n.name === "buildAllEdges")).toBe(true);
+  });
+
+  it("tolerates an invalid regex without throwing", () => {
+    const r = route("unclosed[", indexes);
+    expect(r.category).toBe("regex");
+    expect(Array.isArray(r.literals)).toBe(true);
+  });
+});
+
 describe("route phrase fallback", () => {
   it("retries the symbol index when a phrase matches no literal", () => {
     // classify() treats multi-word text as literal; the literal index is

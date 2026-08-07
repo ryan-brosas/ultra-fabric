@@ -4,9 +4,11 @@ import { buildCodeGraph, buildRenderNodes, type CodeGraph } from "./build.js";
 import { pageRank } from "./rank.js";
 import { buildLiteralIndex } from "./literals.js";
 import { route } from "./route.js";
+import { findConfigFiles } from "./lang.js";
 import { expand, buildDisclosureGraph, minimalSkeleton, type Direction } from "./disclose.js";
 import { predictFileCascade, predictSymbolCascade } from "./cascade.js";
 import { readSymbolSource } from "./source.js";
+import { extractCallSites } from "./calls.js";
 import { searchSymbols } from "./search.js";
 import {
   buildHeatCsr, chebyshevVectors, heatField, type Csr,
@@ -33,6 +35,7 @@ import {
 export type CodemapOperation =
   | "skeleton"
   | "search"
+  | "refs"
   | "focus"
   | "dwell"
   | "expand"
@@ -90,6 +93,7 @@ export interface CodeGraphBundle {
   graph: CodeGraph;
   disclosure: ReturnType<typeof buildDisclosureGraph>;
   literals: ReturnType<typeof buildLiteralIndex>;
+  callSites: ReturnType<typeof extractCallSites>;
 }
 
 const graphCache = new Map<string, CodeGraphBundle>();
@@ -98,9 +102,14 @@ export const getCodeGraph = (root: string): CodeGraphBundle => {
   const cached = graphCache.get(root);
   if (cached) return cached;
   const graph = buildCodeGraph({ root });
-  const literals = buildLiteralIndex(graph.files, graph.index, { cwd: root });
+  const configFiles = findConfigFiles(root);
+  const literals = buildLiteralIndex([...graph.files, ...configFiles], graph.index, { cwd: root });
   const disclosure = buildDisclosureGraph(graph.index, graph.edges, graph.outlineFiles);
-  const bundle: CodeGraphBundle = { graph, disclosure, literals };
+  // Call sites ride the same cached scan as the invokes edges (extractCallSites
+  // is the primitive extractCallEdges aggregates), so refs never re-runs the
+  // per-turn ast-grep pass.
+  const callSites = extractCallSites(graph.index, { cwd: root });
+  const bundle: CodeGraphBundle = { graph, disclosure, literals, callSites };
   graphCache.set(root, bundle);
   return bundle;
 };
@@ -399,7 +408,7 @@ export const codemapOperation = (
   const mode = args.mode ?? "ast";
   if (mode === "cgc") return cgcOperation(operation, args, opts, maxTokens);
   if (operation === "explore") return astExplore(args.query ?? "", root, maxTokens);
-  const { graph, disclosure, literals } = getCodeGraph(root);
+  const { graph, disclosure, literals, callSites } = getCodeGraph(root);
 
   if (operation === "skeleton") {
     const full = minimalSkeleton(disclosure, fileRankFromGraph(graph));
@@ -415,6 +424,37 @@ export const codemapOperation = (
     for (const l of r.literals) lines.push("  " + l.kind + " " + l.file + ":" + l.line + " " + l.text.slice(0, 80));
     const t = truncateToTokens(lines.join("\n"), maxTokens);
     return { operation: "search", text: t.text, tokens: t.tokens, entities: r.symbols.map((s) => s.name + ":" + s.file), truncated: t.truncated };
+  }
+
+  if (operation === "refs") {
+    const key = (args.entities ?? [])[0] ?? "";
+    if (!key) throw new Error("refs requires a name:file symbol key");
+    const sep = key.lastIndexOf(":");
+    const name = sep >= 0 ? key.slice(0, sep) : key;
+    const defFile = sep >= 0 ? key.slice(sep + 1) : "";
+    const defs = searchSymbols(graph.index, "^" + name + "$", { limit: 20 });
+    const def = defFile ? defs.find((n) => n.file === defFile) : defs[0];
+    if (!def) {
+      return { operation: "refs", text: "symbol not found: " + key, tokens: 0, entities: [], truncated: false };
+    }
+    const sites = callSites
+      .filter((s) => s.defs.some((d) => d.name === def.name && d.file === def.file))
+      .slice(0, 100);
+    const lines: string[] = [
+      "refs " + def.name + " (" + def.symbolType + ") " + def.file + ":" + def.line,
+      "call sites: " + sites.length,
+    ];
+    for (const s of sites) {
+      lines.push("  " + s.caller + " " + s.file + ":" + s.line + "  <- " + s.callee);
+    }
+    const t = truncateToTokens(lines.join("\n"), maxTokens);
+    return {
+      operation: "refs",
+      text: t.text,
+      tokens: t.tokens,
+      entities: sites.map((s) => s.caller + ":" + s.file),
+      truncated: t.truncated,
+    };
   }
 
   if (operation === "focus") {
@@ -528,18 +568,19 @@ export const createCodemapTool = (deps: CodemapToolDeps = {}): ToolDefinition<an
     name: "codemap",
     label: "Code Map",
     description:
-      "AST-compressed code map for incremental navigation. Operations: skeleton (minimal map), search (route a query to symbols/literals), focus (heat-diffuse query seeds through the graph), dwell (expand an active field and return the delta), expand (greedy neighborhood disclosure), cascade (predict co-change cascade from a seed file or symbol), source (return the AST range text of a name:file symbol key), explore (bounded staged evidence pack: skeleton, routed symbols, hotspots, test-as-spec pointers, source). mode cgc (opt-in) dispatches search/skeleton/expand/source/explore to the installed CodeGraphContext database - a separate read-only namespace for reference repos such as inspo clones, never merged into the project graph. Each response is bounded by maxTokens.",
-    promptSnippet: "AST code map: skeleton, search, focus, dwell, expand, cascade, source, explore; mode cgc for the CodeGraphContext reference graph",
+      "AST-compressed code map for incremental navigation - the default first tool for finding symbols, callers, and references. Operations: search (route a query to symbols/literals, including regex and config keys), refs (precise call sites + import sites for a name:file symbol with file:line), skeleton (minimal map), focus (heat-diffuse query seeds through the graph), dwell (expand an active field and return the delta), expand (greedy neighborhood disclosure), cascade (predict co-change cascade from a seed file or symbol), source (return the AST range text of a name:file symbol key), explore (bounded staged evidence pack: skeleton, routed symbols, hotspots, test-as-spec pointers, source). mode cgc (opt-in) dispatches search/skeleton/expand/source/explore to the installed CodeGraphContext database - a separate read-only namespace for reference repos such as inspo clones, never merged into the project graph. Each response is bounded by maxTokens.",
+    promptSnippet: "AST code map: search (symbols/literals/regex/config), refs (callers), skeleton, focus, dwell, expand, cascade, source, explore; mode cgc for the CodeGraphContext reference graph",
     promptGuidelines: [
-      "Use codemap for: symbol definitions, type signatures, function/class structure, call and import relationships, and dependency neighborhoods.",
+      "Use codemap search as the default for locating code: symbol definitions, type signatures, function/class structure, call and import relationships, dependency neighborhoods, regex content patterns, and config keys (YAML/JSON) are all served from AST-typed indexes.",
+      "Use codemap refs with a name:file key to list every real call site and import site with file:line before renaming or changing a signature.",
       "Call focus with a query to center the map on a task, then dwell to expand it without re-extracting.",
-      "Reserve grep for: literal text inside string literals, comments, configuration files, and patterns that are not valid identifiers or code symbols.",
+      "Fall back to grep only when codemap search returns nothing or the pattern must match raw file bytes (for example vendored content outside the indexed tree).",
       "Use explore with a task query for a bounded evidence pack (skeleton, routed symbols, hotspots, seam tests, source) instead of chaining many calls.",
       "Use mode cgc with a context path (e.g. /home/ryanj/work/inspo/<repo>) to query reference repos through the installed CodeGraphContext database; it is read-only and separate from the project graph.",
     ],
     parameters: Type.Object({
       operation: Type.Union([
-        Type.Literal("skeleton"), Type.Literal("search"), Type.Literal("focus"), Type.Literal("dwell"),
+        Type.Literal("skeleton"), Type.Literal("search"), Type.Literal("refs"), Type.Literal("focus"), Type.Literal("dwell"),
         Type.Literal("expand"), Type.Literal("cascade"), Type.Literal("source"), Type.Literal("explore"),
       ]),
       mode: Type.Optional(Type.Union([Type.Literal("ast"), Type.Literal("cgc")], {

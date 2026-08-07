@@ -11,6 +11,7 @@ export interface SymbolNode {
   symbolType: string;
   parent: string | undefined;
   signature: string;
+  isExported: boolean;
 }
 
 export interface SymbolIndex {
@@ -39,6 +40,7 @@ const toNode = (
   symbolType: item.symbolType,
   parent,
   signature: item.signature,
+  isExported: item.isExported,
 });
 
 const memberToNode = (
@@ -53,6 +55,7 @@ const memberToNode = (
   symbolType: member.symbolType,
   parent,
   signature: "",
+  isExported: false,
 });
 
 export const buildSymbolIndex = (

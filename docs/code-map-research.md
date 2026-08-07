@@ -662,3 +662,35 @@ repos, so call-graph stages are served by structure plus co-change instead.
 Coverage is flat within noise and tokens are unchanged; the depth-2 cap still holds.
 The import graph already covered tests/scripts (imports.ts walks the repo); this
 aligns the symbol graph with it. Baseline vs naive (doc \u00a710) is unchanged in spirit.
+
+## 14. Codemap-First Buff (2026-08-07): grep-replacement classes served
+
+Objective: make codemap the default navigator, serving the query classes that
+kept grep in play, then flip steering so grep is only an empty-result fallback.
+
+- **Regex over literals.** searchLiteralsRegex runs the pattern against the
+  AST-typed literal index (strings + comments) in memory; the router's regex
+  class now merges symbol hits and literal hits with provenance, so content
+  patterns like retire.*oversized resolve with file:line (18% of the mined
+  grep distribution). No file-content scanning was added.
+- **refs operation.** extractCallSites preserves per-site detail (caller file,
+  line, enclosing symbol, resolved defs) before extractCallEdges aggregates;
+  codemap refs name:file lists every real call site with file:line (semnav
+  find_callers shape, LocAgent invoke edges). Sites ride the bundle's cached
+  scan, so refs never re-runs the per-turn ast-grep pass.
+- **Config files.** YAML key-value pairs and JSON string nodes are indexed as
+  typed literals (findConfigFiles discovers root + .pi), so config-key
+  queries resolve without grep.
+- **Declaration fallback.** ast-grep outlines a const-arrow as "constant" and a
+  type alias as "struct", so function X / type Y under a strict keyword
+  filter missed; the declaration branch now falls back to the unfiltered
+  pattern.
+- **Exported exact-match preference.** SymbolNode carries isExported; exact
+  name ties prefer the exported definition over a shadowing local type.
+
+Measured: a 22-query replay of the mined distribution serves 90.9% (up from
+81.8% pre-fallback; the regex/config/declaration classes were unserved before
+this buff). The remaining misses are genuinely absent content. The symbol
+benchmark stays MRR 1.00 (tie with grep-tuned). Steering flipped in
+src/codemap/tool.ts guidelines and AGENTS.md: codemap first, grep only when
+codemap returns nothing or raw file bytes are needed.

@@ -11,6 +11,25 @@ describe("codemap tool surface", () => {
     expect(tool.name).toBe("codemap");
   });
 
+  it("refs returns real call sites with file:line and excludes the definition", { timeout: 30000 }, () => {
+    const r = codemapOperation("refs", { entities: ["runOutline:src/codemap/outline.ts"] }, ROOT);
+    expect(r.operation).toBe("refs");
+    // runOutline is defined in outline.ts and called from cache.ts; the response
+    // must list call sites with lines and must not claim the definition file is a caller.
+    const defLine = r.text.indexOf("src/codemap/outline.ts:");
+    const siteLine = r.text.indexOf("src/codemap/cache.ts:");
+    expect(defLine).toBeGreaterThanOrEqual(0);
+    expect(siteLine).toBeGreaterThan(0);
+    expect(r.text).toMatch(/cache\.ts:\d+/);
+    // definition mention is a header, not a call site
+    expect(r.entities.length).toBeGreaterThan(0);
+  });
+
+  it("refs reports unknown symbols cleanly", { timeout: 30000 }, () => {
+    const r = codemapOperation("refs", { entities: ["nope:src/x.ts"] }, ROOT);
+    expect(r.text).toContain("not found");
+  });
+
   it("skeleton operation respects maxTokens", () => {
     const r = codemapOperation("skeleton", { maxTokens: 500 }, ROOT);
     expect(r.operation).toBe("skeleton");

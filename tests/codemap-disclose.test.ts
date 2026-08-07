@@ -14,7 +14,10 @@ const extractCallEdgesKey = "extractCallEdges:src/codemap/calls.ts";
 
 describe("expand direction", () => {
   it("downstream from extractCallEdges reveals its callees (enclosingSymbol, computeEdgeWeight)", () => {
-    const r = expand(graph, [extractCallEdgesKey], { direction: "downstream", depth: 1 });
+    // extractCallEdges now aggregates extractCallSites, which resolves call
+    // sites through enclosingSymbol; computeEdgeWeight stays a direct callee.
+    // Depth 2 reaches both through the aggregation chain.
+    const r = expand(graph, [extractCallEdgesKey], { direction: "downstream", depth: 2 });
     expect(r.entities.some((e) => e.startsWith("enclosingSymbol:src/codemap/symbols.ts"))).toBe(true);
     expect(r.entities.some((e) => e.startsWith("computeEdgeWeight:src/codemap/rank.ts"))).toBe(true);
   });

@@ -1,7 +1,7 @@
 import type { SymbolIndex, SymbolNode } from "./symbols.js";
 import { searchSymbols } from "./search.js";
 import type { LiteralEntry } from "./literals.js";
-import { searchLiterals } from "./literals.js";
+import { searchLiterals, searchLiteralsRegex } from "./literals.js";
 import { extractQueryIdentifiers } from "./eval.js";
 
 // Query router: classify an incoming search string into symbol, declaration,
@@ -93,11 +93,28 @@ export const route = (query: string, indexes: RouteIndexes): RoutedResult => {
     const pattern = parts.slice(1).join(" ");
     const st = DECL_TO_TYPE.get(kw);
     symbols = searchSymbols(indexes.index, pattern, st ? { symbolType: st } : {});
+    // The keyword filter is aspirational: ast-grep outlines a const-arrow as
+    // "constant" and a type alias as "struct", so "function runOutline" or
+    // "type QueryCategory" would miss under a strict filter. Fall back to the
+    // unfiltered pattern when the typed search is empty so declaration queries
+    // still resolve (provenance stays symbol-index).
+    if (symbols.length === 0 && st) symbols = searchSymbols(indexes.index, pattern);
   } else if (category === "call") {
     symbols = searchSymbols(indexes.index, s.slice(0, -1));
   } else {
-    // symbol and regex both resolve via the symbol index
+    // symbol resolves via the symbol index
     symbols = searchSymbols(indexes.index, s);
+  }
+  // Regex-shaped queries additionally match literal texts (strings + comments,
+  // AST-node indexed) so content patterns like "retire.*oversized" resolve with
+  // file:line provenance instead of falling through to grep. Merge with the
+  // symbol hits; provenance stays literal-index when only literals matched.
+  let literals: LiteralEntry[] = [];
+  if (category === "regex") {
+    literals = searchLiteralsRegex(indexes.literals, s);
+    if (symbols.length === 0 && literals.length > 0) {
+      return { category, source: "literal-index", symbols: [], literals };
+    }
   }
   // Re-rank: exact-name matches before substring/pattern matches.
   // PageRank favors centrally-imported files, which can push a definition
@@ -109,7 +126,15 @@ export const route = (query: string, indexes: RouteIndexes): RoutedResult => {
     if (node.name === s) exact.push(node);
     else rest.push(node);
   }
-  exact.sort((a, b) => a.file.localeCompare(b.file));
+  // Exact-name ties (the same name defined in several files, e.g. a local type
+  // shadowing an exported one) prefer the exported definition, then the
+  // lexicographically earlier file for determinism.
+  exact.sort((a, b) => Number(b.isExported) - Number(a.isExported) || a.file.localeCompare(b.file));
   symbols = [...exact, ...rest];
+  // When both arms matched, keep the literal hits alongside the symbol hits so
+  // callers see content matches too; provenance names the primary index.
+  if (category === "regex" && literals.length > 0) {
+    return { category, source: "symbol-index", symbols, literals };
+  }
   return { category, source: "symbol-index", symbols, literals: [] };
 };
