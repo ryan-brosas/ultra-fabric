@@ -58,7 +58,7 @@ Do not mix an upstream refresh with behavior changes. Preserve the upstream MIT 
 
 - This repository indexes into its own graph named `ultra-fabric`. Never index or watch a shared ancestor (the operator's work root), because one watcher writes to exactly one graph and collapses every project into a single namespace where bare symbol names collide.
 - Reference clones belong in the operator inspiration library, never inside this checkout. They index into the separate `inspo` graph.
-- `.cgcignore` is load-bearing. It excludes `sources/` and `bench/`, which otherwise grow the index from 430 files to over 13000 and fill complexity results with vendored Go.
+- This checkout has no `.cgcignore` (removed in 25242fc per operator decision): the full tree including `sources/`, `bench/`, and `dist/` indexes into the `ultra-fabric` graph. Scope queries to `src/` or `tests/` when vendored Go or build output would drown results.
 - Watch what you author and index what you reference. A user service keeps this repository current on file events, while reference material is indexed deliberately on clone or pull.
 - The watcher runs without full inherit resolution to keep file events fast. Run a forced index before relying on cross-file structural queries.
 - Treat graph output as a locator and confirm it against source. Dead-code results over-report, because a function passed as a reference to map or filter creates no call edge.
