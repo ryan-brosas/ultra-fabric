@@ -4,11 +4,11 @@ import type { CapturedToolCatalog } from "../capture/catalog.js";
 import type { FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
 import type { FabricState } from "../fabric-state.js";
 import { armPrewalk } from "../prewalk/arm.js";
-import { scoutBridge, type ScoutRunner } from "../prewalk/scout-brief.js";
+import { scoutBridge, buildScoutBrief, type ScoutRunner, type ScoutAgentSurface } from "../prewalk/scout-brief.js";
 import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
 import { openFabricSettings } from "../ui/settings.js";
-import { planInit, applyInitPlan } from "../init/scaffold.js";
+import { planInit, applyInitPlan, type InitAnswers } from "../init/scaffold.js";
 import { interpretDetection, type DetectedContext } from "../init/detect.js";
 import { CURRENT_FABRIC_CONFIG_VERSION } from "../config-migrations.js";
 import fs from "node:fs";
@@ -843,7 +843,63 @@ const detectProject = (cwd: string): DetectedContext | null => {
   return interpretDetection({ lockfiles, packageJson, manifests, mcpServers, extensions, identity: { gh, git } });
 };
 
-const runInit = (context: ExtensionContext): void => {
+// A greenfield checkout (no detected stack, no AGENTS.md) gets a short
+// interactive intake so the scaffold starts from the user's own framing.
+const askGreenfield = async (context: ExtensionContext): Promise<InitAnswers | null> => {
+  const ask = context.ui.input?.bind(context.ui);
+  if (typeof ask !== "function") return null;
+  const name = await ask("fabric init \u2014 project name", "my-project");
+  if (name === undefined) return null;
+  const purpose = await ask("What is this project? (one or two sentences)", "");
+  const pick = context.ui.select?.bind(context.ui);
+  const users =
+    typeof pick === "function"
+      ? await pick("Who primarily uses this project?", ["End users", "Developers", "Operators / SRE", "Both / unsure"])
+      : undefined;
+  const success =
+    typeof pick === "function"
+      ? await pick("What does success look like first?", ["Stability", "Features / speed", "Performance", "Security"])
+      : undefined;
+  return {
+    ...(name.trim() ? { name: name.trim() } : {}),
+    ...(purpose?.trim() ? { purpose: purpose.trim() } : {}),
+    ...(users ? { users } : {}),
+    ...(success?.trim() ? { success: success.trim() } : {}),
+  };
+};
+
+const DEEP_MAX_TOKENS = 65_536;
+const DEEP_TIMEOUT_MS = 180_000;
+
+// Default deep pass: one bounded explorer run maps the codebase so the
+// architecture placeholders in freshly created context files carry real
+// findings. Degrades to a skip note when agents are unavailable.
+const deepAnalyze = async (state: FabricState, cwd: string): Promise<string | null> => {
+  const runner = scoutBridge(state.agents as unknown as ScoutAgentSurface | undefined);
+  if (!runner) return null;
+  const task =
+    "Read-only repository analysis. Do not edit any file. Map this codebase: up to 12 lines, " +
+    "each line a directory or key file with a one-line responsibility note. End with a 2-line " +
+    "summary of the main components, entry points, and how they relate.";
+  try {
+    const run = await runner({ task, role: "explorer", maxTokens: DEEP_MAX_TOKENS, timeoutMs: DEEP_TIMEOUT_MS });
+    return buildScoutBrief(run);
+  } catch {
+    return null;
+  }
+};
+
+const patchPlaceholder = (abs: string, placeholder: string, replacement: string): void => {
+  try {
+    const content = fs.readFileSync(abs, "utf8");
+    if (!content.includes(placeholder)) return;
+    fs.writeFileSync(abs, content.replace(placeholder, replacement));
+  } catch {
+    /* file vanished between plan and patch */
+  }
+};
+
+const runInit = async (state: FabricState, context: ExtensionContext): Promise<void> => {
   const cwd = context.cwd;
   const probePaths = [
     "AGENTS.md",
@@ -861,7 +917,35 @@ const runInit = (context: ExtensionContext): void => {
   ];
   const existing = new Set(probePaths.filter((p) => fs.existsSync(path.join(cwd, p))));
   const detected = detectProject(cwd);
-  const plan = planInit(existing, CURRENT_FABRIC_CONFIG_VERSION, detected);
+  // packageManager falls back to "npm" with zero evidence, so languages
+  // (driven by real manifests) are the greenfield signal.
+  const greenfield = !existing.has("AGENTS.md") && (detected === null || detected.languages.length === 0);
+  const answers = greenfield ? await askGreenfield(context) : null;
+  // tech-stack.md is regenerable detection output: offer a refresh when the
+  // file already exists so stale stacks get re-derived on demand.
+  const regen = new Set<string>();
+  if (existing.has("tech-stack.md") && typeof context.ui.confirm === "function") {
+    const refresh = await context.ui.confirm(
+      "fabric init — refresh tech-stack.md?",
+      "tech-stack.md already exists. Overwrite it with freshly detected values?",
+    );
+    if (refresh) {
+      existing.delete("tech-stack.md");
+      regen.add("tech-stack.md");
+    }
+  }
+  const plan = planInit(existing, CURRENT_FABRIC_CONFIG_VERSION, detected, answers, { overwrite: regen });
+  const pick = context.ui.select?.bind(context.ui);
+  if (typeof pick === "function") {
+    const toWrite =
+      plan.files.filter((f) => f.action === "create").length +
+      plan.files.filter((f) => f.action === "defer" && f.copyFrom).length;
+    const choice = await pick("fabric init — write " + toWrite + " files?", ["Write all", "Cancel"]);
+    if (choice === "Cancel") {
+      context.ui.notify("fabric init cancelled — nothing written", "warning");
+      return;
+    }
+  }
   const applied = applyInitPlan(plan, {
     exists: (p) => fs.existsSync(path.join(cwd, p)),
     read: (p) => {
@@ -877,6 +961,24 @@ const runInit = (context: ExtensionContext): void => {
       fs.writeFileSync(abs, content);
     },
   });
+  const createdSet = new Set<string>([...applied.created, ...applied.copied]);
+  let deepNote = "deep analysis: skipped (no codebase detected or agents unavailable)";
+  if (detected !== null && detected.languages.length > 0) {
+    const brief = await deepAnalyze(state, cwd);
+    if (brief) {
+      if (createdSet.has("project.md")) {
+        patchPlaceholder(
+          path.join(cwd, "project.md"),
+          "<The main components, how they relate, and where the seams are. Name directories and entry points.>",
+          brief,
+        );
+      }
+      if (createdSet.has("AGENTS.md")) {
+        patchPlaceholder(path.join(cwd, "AGENTS.md"), "<Where the important code lives and how the pieces relate.>", brief);
+      }
+      deepNote = "deep analysis: done (explorer brief written into project.md / AGENTS.md)";
+    }
+  }
   const detectedBits = [
     detected?.packageManager,
     ...(detected?.languages ?? []),
@@ -892,9 +994,12 @@ const runInit = (context: ExtensionContext): void => {
     "created: " + (applied.created.length > 0 ? applied.created.join(", ") : "(none)"),
     "skipped (already present): " + (applied.skipped.length > 0 ? applied.skipped.join(", ") : "(none)"),
     "copied (legacy .pi to root): " + (applied.copied.length > 0 ? applied.copied.join(", ") : "(none)"),
+    ...(applied.deferred.length > 0 ? ["deferred (legacy .pi sibling unreadable): " + applied.deferred.join(", ")] : []),
     summary,
+    deepNote,
     ...askLine,
     ...plan.migrations,
+    "Next: /fabric prewalk to arm before the first change, or start describing what you want to build.",
   ].join("\n"));
 };
 
@@ -1020,7 +1125,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         reload: () => runReload(deps, context),
         settings: () => openFabricSettings(context, { state, applyFabricMode, capturedTools }),
         prewalk: () => runPrewalk(pi, state, context, argumentsList, argumentsText.trim().slice(command.length).trim()),
-        init: () => runInit(context),
+        init: () => runInit(state, context),
         dashboard: () => fabricUi.openDashboard(context),
         ui: () => fabricUi.openDashboard(context),
         providers: () => runProviders(state, context),

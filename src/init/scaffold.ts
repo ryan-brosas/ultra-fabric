@@ -5,11 +5,12 @@
 // reads them there (role-profiles.ts:301-303, config loading). No I/O here.
 
 import type { DetectedContext } from "./detect.js";
+import { DEFAULT_FABRIC_CONFIG } from "../config.js";
 
 interface InitFile {
   path: string;
   content: string;
-  action: "create" | "skip" | "defer";
+  action: "create" | "skip" | "defer" | "overwrite";
   // When set, the file is created by copying an existing legacy .pi sibling
   // instead of writing the template, so a real project's context survives
   // the move to the root standard.
@@ -21,6 +22,13 @@ export interface InitPlan {
   migrations: string[];
 }
 
+export interface PlanInitOptions {
+  // Paths that must be rewritten from fresh content even though they exist on
+  // disk (regenerable detection output such as tech-stack.md, confirmed by the
+  // user). The apply guard otherwise skips every existing file.
+  overwrite?: ReadonlySet<string>;
+}
+
 const LEGACY_ROOT_PAIR: ReadonlyArray<{ legacy: string; root: string }> = [
   { legacy: ".pi/project.md", root: "project.md" },
   { legacy: ".pi/roadmap.md", root: "roadmap.md" },
@@ -30,7 +38,7 @@ const LEGACY_ROOT_PAIR: ReadonlyArray<{ legacy: string; root: string }> = [
 const LEGACY_CONTEXT = LEGACY_ROOT_PAIR.map((p) => p.legacy);
 
 const fabricJson = (configVersion: number): string =>
-  JSON.stringify({ configVersion, fullCodeMode: false }, null, 2) + "\n";
+  JSON.stringify({ configVersion, ...DEFAULT_FABRIC_CONFIG }, null, 2) + "\n";
 
 const commandLine = (value: string | undefined, label: string, placeholder: string): string =>
   value ? "- " + label + ": " + value : "- " + label + ": " + placeholder;
@@ -60,12 +68,61 @@ const lockfileNameFor = (pm: string): string => {
   }
 };
 
-const renderAgentsMd = (detected: DetectedContext | null): string =>
-  "# AGENTS.md\n\nOperating rules for AI agents working in this repository.\n\n## Rule 0: User authority\n\nThe user's latest explicit instruction controls intent and scope. When it conflicts with anything here, the user wins.\n\n## Project overview\n\n<One or two sentences: what this project is and what it does.>\n\n## Commands\n\n" +
+export interface InitAnswers {
+  name?: string;
+  purpose?: string;
+  users?: string;
+  success?: string;
+}
+
+const overviewBlock = (answers: InitAnswers | null): string => {
+  if (!answers?.purpose) return "<One or two sentences: what this project is and what it does.>";
+  return answers.name ? answers.name + " — " + answers.purpose : answers.purpose;
+};
+
+const stackBlock = (detected: DetectedContext | null): string => {
+  const lines = [
+    detected?.languages?.length ? "- Languages: " + detected.languages.join(", ") : null,
+    detected?.packageManager ? "- Package manager: " + detected.packageManager : null,
+  ].filter(Boolean);
+  return lines.length > 0 ? "\n\n## Stack\n\n" + lines.join("\n") : "";
+};
+
+const mcpBlock = (detected: DetectedContext | null): string => {
+  const servers = detected?.mcpServers ?? [];
+  if (servers.length === 0) return "";
+  return (
+    "\n\n## MCP servers\n\nDetected local MCP servers available to agents:\n\n" +
+    servers.map((s) => "- " + s.name + " (" + s.toolCount + " tools)").join("\n")
+  );
+};
+
+const renderAgentsMd = (detected: DetectedContext | null, answers: InitAnswers | null): string =>
+  "# AGENTS.md\n\nOperating rules for AI agents working in this repository.\n\n## Rule 0: User authority\n\nThe user's latest explicit instruction controls intent and scope. When it conflicts with anything here, the user wins.\n\n## Project overview\n\n" +
+  overviewBlock(answers) +
+  "\n\n## Commands\n\n" +
   commandsBlock(detected) +
+  stackBlock(detected) +
+  mcpBlock(detected) +
   "\n\n## Architecture & layout\n\n<Where the important code lives and how the pieces relate.>\n\n## Conventions\n\n- <naming, imports, commit style>\n\n## Destructive actions\n\n- Never delete a file or folder without explicit written permission, including files you created yourself.\n- Never run irreversible commands (git reset --hard, git clean -fd, rm -rf) unless the user states the exact command and accepts the consequences.\n- Prefer safer alternatives first (git status, git diff, backups).\n- Never stash, reset, restore, or overwrite other agents' concurrent working-tree changes; treat them as your own and build around them.\n\n## Code editing discipline\n\n- Revise existing files in place. New files are only for genuinely new functionality; no _v2 / _improved / _enhanced variants.\n- No script-based bulk rewrites of code. Make changes directly, or delegate many simple instances to parallel role agents.\n- Find all references before renaming or changing a signature.\n\n## Testing policy\n\nTests cover the happy path, edge cases (empty input, boundaries), and error conditions. Run the focused test module after a change, then the repository gate.\n\n## Research discipline\n\n- Check sources/ early for reference implementations and upstream code; clone to sources/ and read locally instead of fetching isolated files.\n- Verify claims against source or label them unconfirmed. Separate what you verified locally from what still needs confirmation on live servers.\n\n## Secrets\n\nNever put secrets (tokens, keys, passwords) in prompts, agent instructions, messages, logs, or committed files. Read them at runtime from environment variables or config. Never echo them.\n\n## Writing\n\n- One name per thing; active voice; short common words.\n- No marketing filler (seamless, robust, comprehensive) or stacked hedges (\"it is important to note that\").\n- Keep replies proportional: do not narrate tool calls or echo file contents.\n\n## Agent surfaces\n\nThis project runs on Ultra Fabric. Agents have first-party tooling:\n\n- /fabric prewalk plans before mutations; the checklist gates each slice.\n- codemap (skeleton / search / expand / cascade / source) is the AST code map — use it before grep for symbols, structure, and call graphs.\n- mcp.$search balances evidence queries across the configured MCP search tools (web, docs, repo-wiki).\n- Role agents: scout (external research), explorer (codebase cartography), worker, reviewer — delegate exploration breadth to them by default on their own context budget; prewalk ships delegateContext on and autoScout as explicit opt-in, so recon stays off Main.\n\nDurable project context:\n\n- project.md — purpose, scope, current milestone\n- roadmap.md — ordered milestones with status\n- tech-stack.md — languages, frameworks, tooling, versions\n- user.md — identity and preferences\n\n## Fabric behavior\n\nThis repository runs under Ultra Fabric, which closes the loop between the user's intent and implementation:\n\n- /fabric prewalk arms before the first mutation. Once armed, the first mutation is gated behind an accepted checklist. Research-mode checklists carry 5-9 validated items; easy escape takes 2-4 items for bounded tasks; a trivial escape takes 1-2 small edits in the same turn without a model swap.\n- After the checklist is accepted, the executor owns implementation through completion and re-arms per user message. A blocked handoff is retried with /fabric prewalk --retry.\n- Role agents (scout, explorer, worker, reviewer) resolve their model by precedence: the per-call request wins, then /fabric settings roleModels, then the profile pin. Delegate breadth to children — they spend their own context, but a child carries a fixed harness context per turn, so delegate whole questions, not micro-queries. For multi-file exploration or unknown terrain, fan out explorer or scout children in parallel with whole questions before reading files yourself, then synthesize their file:line findings.\n- prewalk.delegateContext defaults on and prewalk.autoScout is explicit opt-in: the plan-then-delegate discipline rides the armed and continuation prompts, and a cheap scout brief lands before planning only when autoScout is enabled. Learning and retirement levers (reuseChecklists, failureMemory, handoffRetirement) stay opt-in.\n- The checklist gates every mutation. Tests, the repository gate, and a receipt are part of completion.\n\n## Verification\n\nRun the repository gate before finishing a slice and report the result.\n";
 
-const PROJECT_MD = "# Project\n\n## Purpose\n\n<What this project is for and the outcome it exists to produce.>\n\n## Users and success\n\n<Who uses this, and what observable result means it is working for them.>\n\n## Boundaries and invariants\n\n- In scope: <what this project does>\n- Out of scope: <what it deliberately does not do>\n- Invariants: <rules that must always hold, e.g. supported runtime versions, data guarantees>\n\n## Architecture\n\n<The main components, how they relate, and where the seams are. Name directories and entry points.>\n\n## Agent utilization\n\n<How AI agents are expected to work here: which surfaces they use, what they may change, what needs confirmation first.>\n\n## Code-graph links\n\n<Indexed graph names, what is indexed vs excluded, and how to refresh the index.>\n\n## Source ownership\n\n- First-party: <paths this project owns>\n- Vendored or upstream: <paths mirrored from elsewhere, and the refresh procedure>\n- Generated: <paths never edited by hand, and the generator that produces them>\n\n## Tests and integrations\n\n<Test layout, what each layer covers, and which external systems the tests touch.>\n\n## Verification and operations\n\n<The gate to run before handoff, how releases happen, and how failures are diagnosed.>\n\n## Decisions, risks, and questions\n\n- Decision: <date> <decision> \u2014 <reason> \u2014 <alternatives considered>\n- Risk: <risk or constraint> \u2014 <mitigation or owner>\n- Open question: <what is still undecided and who decides it>\n";
+const usersBlock = (answers: InitAnswers | null): string => {
+  if (!answers?.users && !answers?.success) return "<Who uses this, and what observable result means it is working for them.>";
+  const lines = [
+    answers?.users ? "Primary users: " + answers.users : null,
+    answers?.success ? "Success priority: " + answers.success : null,
+  ].filter(Boolean);
+  return lines.join("\n");
+};
+
+const renderProjectMd = (answers: InitAnswers | null): string =>
+  "# Project" +
+  (answers?.name ? ": " + answers.name : "") +
+  "\n\n## Purpose\n\n" +
+  (answers?.purpose ?? "<What this project is for and the outcome it exists to produce.>") +
+  "\n\n## Users and success\n\n" +
+  usersBlock(answers) +
+  "\n\n## Boundaries and invariants\n\n- In scope: <what this project does>\n- Out of scope: <what it deliberately does not do>\n- Invariants: <rules that must always hold, e.g. supported runtime versions, data guarantees>\n\n## Architecture\n\n<The main components, how they relate, and where the seams are. Name directories and entry points.>\n\n## Agent utilization\n\n<How AI agents are expected to work here: which surfaces they use, what they may change, what needs confirmation first.>\n\n## Code-graph links\n\n<Indexed graph names, what is indexed vs excluded, and how to refresh the index.>\n\n## Source ownership\n\n- First-party: <paths this project owns>\n- Vendored or upstream: <paths mirrored from elsewhere, and the refresh procedure>\n- Generated: <paths never edited by hand, and the generator that produces them>\n\n## Tests and integrations\n\n<Test layout, what each layer covers, and which external systems the tests touch.>\n\n## Verification and operations\n\n<The gate to run before handoff, how releases happen, and how failures are diagnosed.>\n\n## Decisions, risks, and questions\n\n- Decision: <date> <decision> \u2014 <reason> \u2014 <alternatives considered>\n- Risk: <risk or constraint> \u2014 <mitigation or owner>\n- Open question: <what is still undecided and who decides it>\n";
 
 const ROADMAP_MD = "# Roadmap\n\n## Usage\n\nUpdate this file as work lands. Move a milestone to Done with its evidence, and mark anything deliberately shelved as Parked with the reason.\n\n## Milestones\n\n### 1. <milestone name>\n\n- Goal: <outcome>\n- Acceptance: <observable definition of done>\n- Status: <todo | in-progress | done>\n- Evidence: <test run, benchmark, or artifact proving it>\n\n### 2. <milestone name>\n\n- Goal: <outcome>\n- Acceptance: <observable definition of done>\n- Status: <todo | in-progress | done>\n- Evidence: <test run, benchmark, or artifact proving it>\n\n## Done\n\n- <milestone name> — <date> — <evidence>\n\n## Parked\n\n- <milestone name> — <reason>\n";
 
@@ -106,9 +163,15 @@ export const planInit = (
   existingPaths: ReadonlySet<string>,
   configVersion: number,
   detected: DetectedContext | null = null,
+  answers: InitAnswers | null = null,
+  options: PlanInitOptions = {},
 ): InitPlan => {
   const files: InitFile[] = [];
   const add = (path: string, content: string): void => {
+    if (options.overwrite?.has(path)) {
+      files.push({ path, content, action: "overwrite" });
+      return;
+    }
     if (existingPaths.has(path)) {
       files.push({ path, content, action: "skip" });
       return;
@@ -121,23 +184,23 @@ export const planInit = (
       ...(legacy ? { copyFrom: legacy.legacy } : {}),
     });
   };
-  add("AGENTS.md", renderAgentsMd(detected));
-  add("project.md", PROJECT_MD);
+  add("AGENTS.md", renderAgentsMd(detected, answers));
+  add("project.md", renderProjectMd(answers));
   add("roadmap.md", ROADMAP_MD);
   add("tech-stack.md", renderTechStackMd(detected));
   add("user.md", renderUserMd(detected?.identity ?? null));
   add(".pi/fabric.json", fabricJson(configVersion));
   add(".pi/agents/scout.md", SCOUT_MD);
   add(".pi/agents/explorer.md", EXPLORER_MD);
+  // The defer/copy case needs no notice: the plan encodes the copy and the
+  // apply result reports it, so a post-copy present-tense notice reads stale.
   const migrations = LEGACY_CONTEXT
-    .filter((p) => existingPaths.has(p))
-    .map((p) => {
+    .filter((p) => {
+      if (!existingPaths.has(p)) return false;
       const pair = LEGACY_ROOT_PAIR.find((x) => x.legacy === p);
-      if (pair && !existingPaths.has(pair.root)) {
-        return `legacy context ${p} exists — /fabric init copies its content to the root-level ${pair.root}`;
-      }
-      return `legacy context ${p} exists; the root-level sibling already exists (report only — nothing was changed)`;
-    });
+      return pair !== undefined && existingPaths.has(pair.root);
+    })
+    .map((p) => `legacy context ${p} exists; the root-level sibling already exists (report only — nothing was changed)`);
   return { files, migrations };
 };
 
@@ -177,6 +240,11 @@ export const applyInitPlan = (plan: InitPlan, io: InitIo): InitApplyResult => {
         }
       }
       deferred.push(f.path);
+      continue;
+    }
+    if (f.action === "overwrite") {
+      io.write(f.path, f.content);
+      created.push(f.path);
       continue;
     }
     if (f.action === "skip" || io.exists(f.path)) {

@@ -133,20 +133,23 @@ describe("planInit", () => {
     }
   });
 
-  it("fabric.json is valid JSON pinned to the current configVersion", () => {
+  it("fabric.json materializes the full default config pinned to the current configVersion", () => {
     const plan = planInit(new Set(), V);
-    const cfg = JSON.parse(plan.files.find((f) => f.path === ".pi/fabric.json")!.content) as { configVersion: number };
+    const raw = plan.files.find((f) => f.path === ".pi/fabric.json")!.content;
+    const cfg = JSON.parse(raw) as Record<string, unknown> & { configVersion: number };
     expect(cfg.configVersion).toBe(V);
+    expect(cfg.prewalk).toMatchObject({ arm: "task", delegateContext: true });
+    expect(cfg.agents).toMatchObject({ enabled: true });
+    expect(cfg.executor).toMatchObject({ runtime: "quickjs" });
+    expect(cfg.compaction).toBeDefined();
+    expect(raw).not.toContain("/home/");
   });
 
-  it("defers root creation when only the legacy .pi sibling exists", () => {
+  it("defers root creation without a migration notice when only the legacy .pi sibling exists", () => {
     const plan = planInit(new Set([".pi/project.md"]), V);
     const byPath = new Map(plan.files.map((f) => [f.path, f.action]));
     expect(byPath.get("project.md")).toBe("defer");
-    const migration = plan.migrations.find(
-      (m) => m.includes(".pi/project.md") && m.includes("root-level project.md"),
-    );
-    expect(migration).toBeDefined();
+    expect(plan.migrations).toHaveLength(0);
   });
 
   it("copies a deferred root file from its legacy .pi sibling when readable", () => {
@@ -193,5 +196,67 @@ describe("planInit", () => {
   it("emits no migration notices when no legacy .pi context exists", () => {
     const plan = planInit(new Set(), V);
     expect(plan.migrations).toHaveLength(0);
+  });
+
+  it("overwrites an existing file when the plan opts it in", () => {
+    const plan = planInit(new Set(["tech-stack.md"]), V, null, null, {
+      overwrite: new Set(["tech-stack.md"]),
+    });
+    const f = plan.files.find((x) => x.path === "tech-stack.md")!;
+    expect(f.action).toBe("overwrite");
+    const writes: string[] = [];
+    const applied = applyInitPlan(plan, {
+      exists: () => true,
+      read: () => null,
+      write: (p) => {
+        writes.push(p);
+      },
+    });
+    expect(applied.created).toContain("tech-stack.md");
+    expect(applied.skipped).not.toContain("tech-stack.md");
+    expect(writes).toContain("tech-stack.md");
+  });
+
+  it("writes detected MCP servers into AGENTS.md", () => {
+    const detected = {
+      packageManager: "pnpm",
+      commands: {},
+      languages: ["TypeScript"],
+      dependencies: [],
+      mcpServers: [{ name: "exa", toolCount: 4 }, { name: "custom-tools", toolCount: 2 }],
+      extensions: [],
+      identity: null,
+    };
+    const plan = planInit(new Set(), V, detected);
+    const agents = plan.files.find((f) => f.path === "AGENTS.md")!.content;
+    expect(agents).toContain("## MCP servers");
+    expect(agents).toContain("exa (4 tools)");
+    expect(agents).toContain("custom-tools (2 tools)");
+    expect(agents).toContain("TypeScript");
+    expect(agents).toContain("pnpm");
+  });
+
+  it("omits the MCP servers section when none are detected", () => {
+    const plan = planInit(new Set(), V);
+    const agents = plan.files.find((f) => f.path === "AGENTS.md")!.content;
+    expect(agents).not.toContain("## MCP servers");
+  });
+
+  it("threads user answers into AGENTS.md and project.md", () => {
+    const plan = planInit(new Set(), V, null, {
+      name: "acme-billing",
+      purpose: "Invoicing service for the Acme storefront",
+      users: "End users",
+      success: "Stability",
+    });
+    const agents = plan.files.find((f) => f.path === "AGENTS.md")!.content;
+    expect(agents).toContain("acme-billing");
+    expect(agents).toContain("Invoicing service for the Acme storefront");
+    expect(agents).not.toContain("<One or two sentences");
+    const project = plan.files.find((f) => f.path === "project.md")!.content;
+    expect(project).toContain("acme-billing");
+    expect(project).toContain("Invoicing service for the Acme storefront");
+    expect(project).toContain("Primary users: End users");
+    expect(project).toContain("Success priority: Stability");
   });
 });
