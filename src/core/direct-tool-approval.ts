@@ -6,6 +6,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { FabricConfig } from "../config.js";
 import type { ResolvedFabricAction } from "./action-registry.js";
+import { isRecord } from "../util.js";
 import {
   ApprovalController,
   FabricSessionApprovals,
@@ -16,8 +17,6 @@ import {
   type FabricAutoApprovalDecision,
 } from "./auto-approval-classifier.js";
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const addUsage = (left: Usage, right: Usage): Usage => ({
   input: left.input + right.input,

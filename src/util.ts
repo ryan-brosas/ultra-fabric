@@ -14,3 +14,9 @@ export const truncateMiddle = (value: string, maxChars: number): string => {
   const tail = Math.floor(available / 2);
   return `${value.slice(0, head)}${marker}${value.slice(value.length - tail)}`;
 };
+
+// The single record guard used across the codebase. The 10 per-module copies
+// of this body were consolidated here so a record-shaped value narrows the
+// same way everywhere (JsonRecord is structurally Record<string, unknown>).
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);

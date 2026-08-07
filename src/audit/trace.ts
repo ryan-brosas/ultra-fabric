@@ -1,4 +1,5 @@
 import { projectFabricAuditArgs, projectFabricAuditResult } from "./projection.js";
+import { isRecord } from "../util.js";
 
 export const FABRIC_EXECUTION_TRACE_KIND = "pi-fabric.execution" as const;
 export const FABRIC_EXECUTION_TRACE_VERSION = 1 as const;
@@ -635,8 +636,6 @@ export const executionOutcomeFromError = (
   return error === undefined ? "succeeded" : "failed";
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const hasOnlyKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
   Object.keys(value).every((key) => keys.includes(key));

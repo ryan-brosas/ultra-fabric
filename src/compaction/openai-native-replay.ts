@@ -4,6 +4,7 @@ import {
   type ExtensionContext,
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
+import { isRecord } from "../util.js";
 import {
   isOpenAINativeResponseItem,
   openAINativeModelKey,
@@ -24,8 +25,6 @@ interface ReplayState {
   explicitHistory: OpenAINativeResponseItem[];
 }
 
-const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const parseDetails = (value: unknown): OpenAINativeCompactionDetails | undefined => {
   if (!isRecord(value) || !isRecord(value.remoteCompaction)) return undefined;

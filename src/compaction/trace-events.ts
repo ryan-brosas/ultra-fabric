@@ -3,6 +3,7 @@ import {
   type FabricExecutionOutcomeV1,
   type FabricTraceJsonValue,
 } from "../audit/trace.js";
+import { isRecord } from "../util.js";
 
 export type FabricProjectionSource = "trace" | "legacy";
 
@@ -25,8 +26,6 @@ export interface FabricProjectionTrace {
   operations: FabricProjectionOperation[];
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isJsonValue = (value: unknown, ancestors = new Set<object>(), depth = 0): value is FabricTraceJsonValue => {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;

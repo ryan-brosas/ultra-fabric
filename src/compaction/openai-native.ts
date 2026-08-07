@@ -7,6 +7,7 @@ import {
   type SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
 import { calculateCost, type Message, type Usage } from "@earendil-works/pi-ai";
+import { isRecord } from "../util.js";
 
 const CODEX_INSTALLATION_ID = randomUUID();
 const RETAINED_USER_HISTORY_BYTES = 80_000;
@@ -29,8 +30,6 @@ export interface OpenAINativeCompactionDetails {
   usage?: Usage;
 }
 
-const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 export const isOpenAINativeResponseItem = (value: unknown): value is OpenAINativeResponseItem =>
   isRecord(value)

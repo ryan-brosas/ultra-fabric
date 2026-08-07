@@ -453,9 +453,13 @@ export class FabricExecutionService {
       maxTransitions: this.config.executor.maxRunTransitions,
       maxGateRevisions: this.config.executor.maxGateRevisions,
     });
-    let consultOutcome: FabricConsultOutcome | undefined;
-    let consultAttempted = false;
-    let consultSequence = 0;
+    // Shared mutable consult state: the guest phase mutates it in place so
+    // runDetails (closed over here) sees live values inside the guest run.
+    const consultState = {
+      outcome: undefined as FabricConsultOutcome | undefined,
+      attempted: false,
+      sequence: 0,
+    };
     const consultAdmissions = new Map<string, ConsultAdmissionDecision>();
     const consultWorkers = new Map<string, Map<string, ConsultWorkerInput>>();
     run.transitions.record("accepted", run.envelope.startedAt);
@@ -465,8 +469,145 @@ export class FabricExecutionService {
       gates: run.gates.list(),
       transitions: run.transitions.list(),
       budget: run.budget.snapshot(),
-      ...(consultOutcome ? { consult: { ...consultOutcome } } : {}),
+      ...(consultState.outcome ? { consult: { ...consultState.outcome } } : {}),
     });
+    const guest = await this.#executeGuestProgram({
+      options, run, startedAt, orchestrationTimeoutMs, effectiveTimeoutMs, consultAdmissions, consultWorkers, consultState, runDetails,
+    });
+    if ("result" in guest) return guest.result;
+    const { sandboxResult, traceRecorder, audits, phases, classifierUsages, prewalkBoundary, handoffRequest } = guest;
+    const stoppedAtPrewalkBoundary =
+      prewalkBoundary !== undefined && options.signal?.aborted !== true;
+    const runtimeOutcome = stoppedAtPrewalkBoundary
+      ? "succeeded"
+      : executionOutcomeFromTermination(sandboxResult.terminationReason);
+    let qualityWarning: string | undefined;
+    const qualityEligible =
+      runtimeOutcome === "succeeded" &&
+      !stoppedAtPrewalkBoundary &&
+      this.config.quality.mode !== "off" &&
+      run.gates.terminal() === undefined &&
+      run.gates.pending().length === 0;
+    if (qualityEligible) {
+      try {
+        const quality = await runQualityEnforcement({
+          cwd: options.context.cwd,
+          audits,
+          config: this.config.quality,
+        });
+        if (quality) {
+          const evidence: FabricEvidenceRef[] = [];
+          for (const execution of quality.executions) {
+            const ref = `quality:${execution.checkId}:${execution.outcome}`;
+            const entry: FabricEvidenceRef = { kind: "command", ref };
+            const recorded = run.evidence.record(entry);
+            if (!recorded.ok) {
+              throw new Error(`Fabric run evidence limit exhausted (${recorded.limit})`);
+            }
+            evidence.push(entry);
+          }
+          const passed = quality.evaluation.decision === "pass";
+          const gate = run.gates.record({
+            gate: "quality",
+            passed,
+            disposition: this.config.quality.mode === "enforce" ? "abort" : "advise",
+            evidence,
+            reason: quality.summary,
+          });
+          run.transitions.record(`gate:${gate.gate}:${gate.decision}`);
+          if (!passed && this.config.quality.mode === "audit") {
+            qualityWarning = `Quality warning: ${quality.summary}`;
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const summary = `quality infrastructure crashed: ${message.slice(0, 4_000)}`;
+        if (this.config.quality.mode === "enforce") {
+          const gate = run.gates.crash("quality", summary);
+          run.transitions.record(`gate:${gate.gate}:${gate.decision}`);
+        } else {
+          qualityWarning = `Quality warning: ${summary}`;
+          try {
+            const gate = run.gates.record({
+              gate: "quality",
+              passed: false,
+              disposition: "advise",
+              evidence: [],
+              reason: summary,
+            });
+            run.transitions.record(`gate:${gate.gate}:${gate.decision}`);
+          } catch (gateError) {
+            qualityWarning += ` (gate record failed: ${
+              gateError instanceof Error ? gateError.message : String(gateError)
+            })`;
+          }
+        }
+      }
+    }
+    const pendingRevisions = run.gates.pending();
+    const terminalGate = run.gates.terminal();
+    const terminalGateError = terminalGate
+      ? fabricGateFailureMessage(terminalGate)
+      : undefined;
+    const gateRevisionError =
+      !terminalGateError && runtimeOutcome === "succeeded" && pendingRevisions.length > 0
+        ? `Fabric gate revision required: ${pendingRevisions.join(", ")}`
+        : undefined;
+    const runOutcome = terminalGateError || gateRevisionError ? "failed" : runtimeOutcome;
+    const succeeded = runOutcome === "succeeded";
+    run.transitions.recordTerminal(succeeded ? "completed" : runOutcome);
+    run.settle(runOutcome);
+    const runError =
+      terminalGateError ??
+      gateRevisionError ??
+      (stoppedAtPrewalkBoundary ? undefined : sandboxResult.error);
+    this.activity?.finish(options.parentToolCallId, succeeded, runError);
+    return this.#recordOutcome({
+      success: succeeded,
+      value: terminalGateError || gateRevisionError || stoppedAtPrewalkBoundary
+        ? undefined
+        : sandboxResult.value,
+      logs: qualityWarning ? [...sandboxResult.logs, qualityWarning] : sandboxResult.logs,
+      audits,
+      phases,
+      trace: traceRecorder.seal(runOutcome, phases, runError),
+      elapsedMs: performance.now() - startedAt,
+      ...runDetails(),
+      ...(runError ? { error: runError } : {}),
+      ...(handoffRequest ? { handoffRequest } : {}),
+      ...(prewalkBoundary ? { prewalkBoundary } : {}),
+      ...(classifierUsages.length > 0
+        ? { usage: aggregateUsage(classifierUsages) }
+        : {}),
+    });
+  }
+
+  // Guest execution phase: admission, approvals, consult workers, and the sandbox
+  // run, extracted verbatim from execute() so the orchestration method reads as a
+  // straight line. Same order, same error paths; no behavior change.
+  async #executeGuestProgram(params: {
+    options: FabricExecutionOptions;
+    run: ReturnType<typeof createFabricRunContext>;
+    startedAt: number;
+    orchestrationTimeoutMs: number;
+    effectiveTimeoutMs: number;
+    consultAdmissions: Map<string, ConsultAdmissionDecision>;
+    consultWorkers: Map<string, Map<string, ConsultWorkerInput>>;
+    consultState: { outcome: FabricConsultOutcome | undefined; attempted: boolean; sequence: number };
+    runDetails: () => Record<string, unknown>;
+  }): Promise<
+    | { result: FabricExecutionResult }
+    | {
+        sandboxResult: FabricSandboxResult;
+        traceRecorder: FabricExecutionTraceRecorder;
+        audits: FabricCallAudit[];
+        phases: string[];
+        classifierUsages: Usage[];
+        prewalkBoundary: FabricExecutionResult["prewalkBoundary"];
+        handoffRequest: Record<string, unknown> | undefined;
+      }
+  > {
+    const { options, run, startedAt, orchestrationTimeoutMs, effectiveTimeoutMs, consultAdmissions, consultWorkers, consultState, runDetails } = params;
     const traceRecorder = new FabricExecutionTraceRecorder();
     this.activity?.start(options.parentToolCallId, options.display);
     const dependencies = await loadRuntimeDependencies();
@@ -480,17 +621,19 @@ export class FabricExecutionService {
       run.transitions.recordTerminal("failed");
       run.settle("failed");
       this.activity?.finish(options.parentToolCallId, false, "Type checking failed");
-      return this.#recordOutcome({
-        success: false,
-        value: undefined,
-        logs: [],
-        audits: [],
-        phases: [],
-        trace: traceRecorder.seal("failed", [], "Type checking failed"),
-        elapsedMs: performance.now() - startedAt,
-        typeErrors: checked.errors,
-        ...runDetails(),
-      });
+      return {
+        result: await this.#recordOutcome({
+          success: false,
+          value: undefined,
+          logs: [],
+          audits: [],
+          phases: [],
+          trace: traceRecorder.seal("failed", [], "Type checking failed"),
+          elapsedMs: performance.now() - startedAt,
+          typeErrors: checked.errors,
+          ...runDetails(),
+        }),
+      };
     }
 
     const prewalkAbort = options.prewalk ? new AbortController() : undefined;
@@ -1011,7 +1154,7 @@ export class FabricExecutionService {
                   const budget = run.budget.snapshot();
                   const context = consultContextSnapshot(options.context);
                   let decision: ConsultAdmissionDecision;
-                  if (consultAttempted) {
+                  if (consultState.attempted) {
                     decision = {
                       kind: "not_admitted",
                       code: "already_attempted",
@@ -1038,8 +1181,8 @@ export class FabricExecutionService {
                         }
                       : candidate;
                   }
-                  consultAttempted = true;
-                  const ticket = `consult-${++consultSequence}`;
+                  consultState.attempted = true;
+                  const ticket = `consult-${++consultState.sequence}`;
                   consultAdmissions.set(ticket, decision);
                   if (decision.kind === "admitted") {
                     consultWorkers.set(ticket, new Map());
@@ -1152,8 +1295,8 @@ export class FabricExecutionService {
                       consultWorkers.delete(ticket);
                     }
                   }
-                  if (ticket === "consult-1" || (!ticket && !consultOutcome)) {
-                    consultOutcome = consultOutcomeSummary(result);
+                  if (ticket === "consult-1" || (!ticket && !consultState.outcome)) {
+                    consultState.outcome = consultOutcomeSummary(result);
                   }
                   if (admission.kind === "admitted") {
                     const recorded = new Set<string>();
@@ -1365,110 +1508,8 @@ export class FabricExecutionService {
       await this.registry.endInvocation(options.parentToolCallId);
       flushEmit();
     }
-
-    const stoppedAtPrewalkBoundary =
-      prewalkBoundary !== undefined && options.signal?.aborted !== true;
-    const runtimeOutcome = stoppedAtPrewalkBoundary
-      ? "succeeded"
-      : executionOutcomeFromTermination(sandboxResult.terminationReason);
-    let qualityWarning: string | undefined;
-    const qualityEligible =
-      runtimeOutcome === "succeeded" &&
-      !stoppedAtPrewalkBoundary &&
-      this.config.quality.mode !== "off" &&
-      run.gates.terminal() === undefined &&
-      run.gates.pending().length === 0;
-    if (qualityEligible) {
-      try {
-        const quality = await runQualityEnforcement({
-          cwd: options.context.cwd,
-          audits,
-          config: this.config.quality,
-        });
-        if (quality) {
-          const evidence: FabricEvidenceRef[] = [];
-          for (const execution of quality.executions) {
-            const ref = `quality:${execution.checkId}:${execution.outcome}`;
-            const entry: FabricEvidenceRef = { kind: "command", ref };
-            const recorded = run.evidence.record(entry);
-            if (!recorded.ok) {
-              throw new Error(`Fabric run evidence limit exhausted (${recorded.limit})`);
-            }
-            evidence.push(entry);
-          }
-          const passed = quality.evaluation.decision === "pass";
-          const gate = run.gates.record({
-            gate: "quality",
-            passed,
-            disposition: this.config.quality.mode === "enforce" ? "abort" : "advise",
-            evidence,
-            reason: quality.summary,
-          });
-          run.transitions.record(`gate:${gate.gate}:${gate.decision}`);
-          if (!passed && this.config.quality.mode === "audit") {
-            qualityWarning = `Quality warning: ${quality.summary}`;
-          }
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const summary = `quality infrastructure crashed: ${message.slice(0, 4_000)}`;
-        if (this.config.quality.mode === "enforce") {
-          const gate = run.gates.crash("quality", summary);
-          run.transitions.record(`gate:${gate.gate}:${gate.decision}`);
-        } else {
-          qualityWarning = `Quality warning: ${summary}`;
-          try {
-            const gate = run.gates.record({
-              gate: "quality",
-              passed: false,
-              disposition: "advise",
-              evidence: [],
-              reason: summary,
-            });
-            run.transitions.record(`gate:${gate.gate}:${gate.decision}`);
-          } catch (gateError) {
-            qualityWarning += ` (gate record failed: ${
-              gateError instanceof Error ? gateError.message : String(gateError)
-            })`;
-          }
-        }
-      }
-    }
-    const pendingRevisions = run.gates.pending();
-    const terminalGate = run.gates.terminal();
-    const terminalGateError = terminalGate
-      ? fabricGateFailureMessage(terminalGate)
-      : undefined;
-    const gateRevisionError =
-      !terminalGateError && runtimeOutcome === "succeeded" && pendingRevisions.length > 0
-        ? `Fabric gate revision required: ${pendingRevisions.join(", ")}`
-        : undefined;
-    const runOutcome = terminalGateError || gateRevisionError ? "failed" : runtimeOutcome;
-    const succeeded = runOutcome === "succeeded";
-    run.transitions.recordTerminal(succeeded ? "completed" : runOutcome);
-    run.settle(runOutcome);
-    const runError =
-      terminalGateError ??
-      gateRevisionError ??
-      (stoppedAtPrewalkBoundary ? undefined : sandboxResult.error);
-    this.activity?.finish(options.parentToolCallId, succeeded, runError);
-    return this.#recordOutcome({
-      success: succeeded,
-      value: terminalGateError || gateRevisionError || stoppedAtPrewalkBoundary
-        ? undefined
-        : sandboxResult.value,
-      logs: qualityWarning ? [...sandboxResult.logs, qualityWarning] : sandboxResult.logs,
-      audits,
-      phases,
-      trace: traceRecorder.seal(runOutcome, phases, runError),
-      elapsedMs: performance.now() - startedAt,
-      ...runDetails(),
-      ...(runError ? { error: runError } : {}),
-      ...(handoffRequest ? { handoffRequest } : {}),
-      ...(prewalkBoundary ? { prewalkBoundary } : {}),
-      ...(classifierUsages.length > 0
-        ? { usage: aggregateUsage(classifierUsages) }
-        : {}),
-    });
+    return {
+      sandboxResult, traceRecorder, audits, phases, classifierUsages, prewalkBoundary, handoffRequest,
+    };
   }
 }

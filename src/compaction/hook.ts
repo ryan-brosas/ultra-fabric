@@ -12,6 +12,7 @@ import {
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { clipUtf8, MAX_SUMMARY_BYTES } from "./bounds.js";
+import { isRecord } from "../util.js";
 import { modelCompactionKey } from "./threshold.js";
 import {
   compactWithOpenAI,
@@ -502,8 +503,6 @@ export interface FabricCompactionDetailsV2 {
   timestamp: string;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 const isEntryRange = (value: unknown): boolean =>
   isRecord(value) && typeof value.first === "string" && typeof value.last === "string";

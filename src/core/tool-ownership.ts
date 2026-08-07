@@ -8,6 +8,7 @@ import type {
 import { readFabricExecutionTraceV1 } from "../audit/index.js";
 import { NESTED_TOOL_CALL_ID_PREFIX } from "./action-registry.js";
 import { PI_CORE_TOOL_NAME_SET } from "./pi-tools.js";
+import { isRecord } from "../util.js";
 
 export interface FabricToolOwnershipHost {
   getActiveTools(): string[];
@@ -34,8 +35,6 @@ export const ownsFabricToolSource = (
     path.resolve(tool.sourceInfo.path) === path.resolve(extensionEntryPath),
 );
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const finalFabricDetailsFailed = (details: unknown): boolean => {
   if (!isRecord(details)) return false;

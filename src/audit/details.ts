@@ -3,6 +3,7 @@ import {
   type FabricExecutionTraceOperationV1,
   type FabricExecutionTraceV1,
 } from "./trace.js";
+import { isRecord } from "../util.js";
 import type {
   FabricEvidenceRef,
   FabricGateResult,
@@ -133,8 +134,6 @@ export const createFabricPersistedExecutionDetails = (input: {
   return details;
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const legacyAudit = (value: unknown): FabricLegacyRenderAudit | undefined => {
   if (!isRecord(value) || typeof value.ref !== "string") return undefined;

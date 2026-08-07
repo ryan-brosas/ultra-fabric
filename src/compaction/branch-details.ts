@@ -2,6 +2,7 @@ import type {
   FabricExecutionOutcomeV1,
   FabricTraceJsonValue,
 } from "../audit/trace.js";
+import { isRecord } from "../util.js";
 
 export const FABRIC_BRANCH_SUMMARY_KIND = "pi-fabric.branch-summary" as const;
 export const FABRIC_BRANCH_SUMMARY_VERSION = 1 as const;
@@ -70,8 +71,6 @@ export interface FabricBranchSummaryDetailsV1 {
   };
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const hasOnlyKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
   Object.keys(value).every((key) => keys.includes(key));

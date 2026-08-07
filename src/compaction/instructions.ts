@@ -1,4 +1,5 @@
 import { canonicalizeText, utf8Bytes } from "./bounds.js";
+import { isRecord } from "../util.js";
 
 export const FABRIC_COMPACTION_REQUEST_PREFIX = "__pi_fabric_compact_request_v1__:";
 export const MAX_COMPACTION_INSTRUCTIONS_CHARS = 8 * 1024;
@@ -65,8 +66,6 @@ const rejection = (
   error: { code, message, sourceBytes },
 });
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 const hasPairedSurrogates = (value: string): boolean => {
   for (let index = 0; index < value.length; index++) {
