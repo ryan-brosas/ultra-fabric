@@ -48,6 +48,11 @@ describe("prewalk delegateContext", () => {
     // which contradicts DEFAULT_FABRIC_CONFIG (consult.enabled + maxWorkers 3)
     // and steered the model away from delegating entirely.
     expect(PREWALK_DELEGATE_DISCIPLINE.toLowerCase()).not.toContain("zero worker");
+    // Check the complete armed prompt too: a second support-role paragraph
+    // previously retained the stale contradiction after the shared discipline
+    // fragment was fixed.
+    expect(prewalkArmedPrompt("anthropic/executor", { delegateContext: true }).toLowerCase())
+      .not.toContain("zero worker");
     expect(PREWALK_DELEGATE_DISCIPLINE).toContain("consult.run");
     expect(DEFAULT_FABRIC_CONFIG.consult.enabled).toBe(true);
     expect(DEFAULT_FABRIC_CONFIG.consult.maxWorkers).toBeGreaterThanOrEqual(1);
