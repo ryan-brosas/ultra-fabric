@@ -174,7 +174,11 @@ const finish = (
   at: number,
   rearm?: FabricPrewalkRearmDefaults,
 ): FabricPrewalkStatus => {
-  const rearmOnSettle = rearm ? rearm.arm === "task" : status.arm === "task";
+  // Both "session" and "task" keep the gate armed after a settled task. A
+  // session-scoped arm must survive its first executor run so later tasks in
+  // the same session stay gated without an explicit /fabric prewalk; only
+  // "off" (explicit arming) drops to idle.
+  const rearmOnSettle = rearm ? rearm.arm !== "off" : status.arm !== "off";
   if (!rearmOnSettle) return { state: "idle" };
   const armed = toArmed(status, at, { preserveTask: false, attempt: 0 });
   return rearm ? applyRearm(armed, rearm) : armed;

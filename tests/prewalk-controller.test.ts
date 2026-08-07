@@ -265,6 +265,34 @@ describe("PrewalkController", () => {
     expect(controller.claimChecklistReminder("session-1")).toBeUndefined();
   });
 
+  it("refreshes the continuation reminder only after mutation activity", () => {
+    const controller = new PrewalkController();
+    controller.arm({ model: "anthropic/executor", sessionId: "session-1" });
+    controller.executionBoundary("session-1")!.registerChecklist({
+      items: Array.from({ length: 5 }, (_, index) => ({
+        task: "Change target " + (index + 1),
+        validation: "Run check " + (index + 1),
+      })),
+    });
+    const claim = controller.claim([audit("pi.edit", true)], "session-1", "handoff-1");
+    expect(claim).toBeDefined();
+    controller.completeHandoff();
+    controller.acceptContinuation("session-1", "handoff-1");
+
+    // The first claim of a fresh continuation hands over the checklist.
+    expect(controller.claimChecklistReminder("session-1")).toBeDefined();
+    // Read-only turns since the last injection stay quiet: no reminder.
+    expect(controller.claimChecklistReminder("session-1")).toBeUndefined();
+    // A trigger-matched mutation attempt counts as activity even while the
+    // continuation runs (the armed boundary is long past, so authorize only
+    // reports false rather than reserving anything).
+    const boundary = controller.executionBoundary("session-1")!;
+    expect(
+      boundary.authorize({ ref: "pi.write", risk: "write", effect: "workspace" }),
+    ).toBe(false);
+    expect(controller.claimChecklistReminder("session-1")).toBeDefined();
+  });
+
   // Controller-level contract: claim() matches any configured trigger ref.
   // The fabric.prewalk.checklist audit is produced by the execution service
   // (see tests/execution-service.test.ts "audits the accepted prewalk

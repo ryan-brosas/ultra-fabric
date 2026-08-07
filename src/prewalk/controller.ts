@@ -119,6 +119,10 @@ export class PrewalkController {
   #triggerRisks = new Set<FabricRisk>();
   #triggerEffects = new Set<FabricEffect>(["workspace"]);
   #researchMutationReserved = false;
+  // True when a trigger-matched mutation was attempted (or rejected) since the
+  // last continuation reminder injection. Read-only turns never set it, so the
+  // checklist refreshes only on turns where the executor actually worked.
+  #mutationSinceReminder = false;
   readonly #writeScopes = new Map<string, Set<string>>();
   // Handoffs whose returnModel has already been surrendered. A blocked task
   // persists across turns, so without this the restore would re-fire on every
@@ -164,7 +168,13 @@ export class PrewalkController {
   // and its validations. Only research reserves the mutation, because that
   // reservation ends fabric_exec at the first write.
   executionBoundary(sessionId: string): FabricPrewalkExecutionBoundary | undefined {
-    if (!this.isArmed(sessionId)) return undefined;
+    // Available for the whole active lifecycle (armed, continuing, verifying):
+    // authorize only reserves the first mutation while armed, but the boundary
+    // still observes trigger-matched mutation attempts so the continuation
+    // reminder refreshes on the turns where the executor actually worked.
+    if (this.#status.state === "idle" || this.#status.sessionId !== sessionId) {
+      return undefined;
+    }
     return {
       registerChecklist: (input) => {
         if (!this.isArmed(sessionId)) {
@@ -176,7 +186,15 @@ export class PrewalkController {
       },
       authorize: (action) => {
         const status = this.#researchStatus(sessionId);
-        if (!status || !this.#matchesTrigger(action)) return false;
+        if (!this.#matchesTrigger(action)) return false;
+        // Any trigger-matched mutation attempt counts as activity for the
+        // continuation reminder — accepted or rejected, and even after the
+        // armed boundary has long passed (the gate only reserves the first
+        // mutation; later turns keep working from the live checklist).
+        if (this.#status.state !== "idle" && this.#status.sessionId === sessionId) {
+          this.#mutationSinceReminder = true;
+        }
+        if (!status) return false;
         if (!status.checklist) {
           throw new Error(
             "Research Prewalk requires prewalk.checklist with 5-9 validated items before the first mutation",
@@ -285,7 +303,16 @@ export class PrewalkController {
     if (status.handoffId !== this.#reminderHandoffId) {
       this.#reminderCount = 0;
       this.#reminderHandoffId = status.handoffId;
+      // A fresh continuation hands over its checklist once; later injections
+      // wait for mutation activity so read-only turns stay quiet.
+      this.#mutationSinceReminder = true;
     }
+    // Only re-inject the full reminder when the executor attempted or was
+    // rejected on a mutation since the last injection. Read-only turns get
+    // no reminder, so a long quiet investigation does not look like a stuck
+    // prewalk and the reminder budget lasts for the work that needs it.
+    if (!this.#mutationSinceReminder) return undefined;
+    this.#mutationSinceReminder = false;
     if (this.#reminderCount >= PrewalkController.#REMINDER_LIMIT) return undefined;
     this.#reminderCount += 1;
     return structuredClone(status.checklist);

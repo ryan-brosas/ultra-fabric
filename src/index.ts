@@ -291,6 +291,9 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
   // forward host events without churning an explicitly selected active set.
   pi.on("input", async (event, context) => {
     if (!state.initialized) return;
+    // Hand-edited config takes effect on the next prompt: stat the two
+    // fabric.json files and reload when either changed on disk.
+    state.reloadConfigIfChanged(context);
     state.prewalk.observeTask(
       context.sessionManager.getSessionId(),
       event.text,

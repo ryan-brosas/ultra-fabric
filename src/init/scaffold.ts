@@ -10,6 +10,10 @@ interface InitFile {
   path: string;
   content: string;
   action: "create" | "skip" | "defer";
+  // When set, the file is created by copying an existing legacy .pi sibling
+  // instead of writing the template, so a real project's context survives
+  // the move to the root standard.
+  copyFrom?: string;
 }
 
 export interface InitPlan {
@@ -110,7 +114,12 @@ export const planInit = (
       return;
     }
     const legacy = LEGACY_ROOT_PAIR.find((p) => p.root === path && existingPaths.has(p.legacy));
-    files.push({ path, content, action: legacy ? "defer" : "create" });
+    files.push({
+      path,
+      content,
+      action: legacy ? "defer" : "create",
+      ...(legacy ? { copyFrom: legacy.legacy } : {}),
+    });
   };
   add("AGENTS.md", renderAgentsMd(detected));
   add("project.md", PROJECT_MD);
@@ -125,15 +134,16 @@ export const planInit = (
     .map((p) => {
       const pair = LEGACY_ROOT_PAIR.find((x) => x.legacy === p);
       if (pair && !existingPaths.has(pair.root)) {
-        return `legacy context ${p} exists and ${pair.root} does not — copy its content to the root-level ${pair.root} (report only — nothing was changed)`;
+        return `legacy context ${p} exists — /fabric init copies its content to the root-level ${pair.root}`;
       }
-      return `legacy context ${p} exists; consider moving its content to the root-level sibling (report only — nothing was changed)`;
+      return `legacy context ${p} exists; the root-level sibling already exists (report only — nothing was changed)`;
     });
   return { files, migrations };
 };
 
 export interface InitIo {
   exists: (path: string) => boolean;
+  read: (path: string) => string | null;
   write: (path: string, content: string) => void;
 }
 
@@ -143,14 +153,29 @@ export interface InitApplyResult {
   created: string[];
   skipped: string[];
   deferred: string[];
+  // Root files created by copying their legacy .pi sibling (reported apart
+  // from template-created files so the command can say what moved where).
+  copied: string[];
 }
 
 export const applyInitPlan = (plan: InitPlan, io: InitIo): InitApplyResult => {
   const created: string[] = [];
   const skipped: string[] = [];
   const deferred: string[] = [];
+  const copied: string[] = [];
   for (const f of plan.files) {
     if (f.action === "defer") {
+      // A deferred file with a legacy .pi sibling is created from that
+      // sibling's content: non-destructive (the root file is absent) and it
+      // preserves the project's real context instead of a template.
+      if (f.copyFrom) {
+        const legacyContent = io.read(f.copyFrom);
+        if (legacyContent !== null) {
+          io.write(f.path, legacyContent);
+          copied.push(f.path);
+          continue;
+        }
+      }
       deferred.push(f.path);
       continue;
     }
@@ -161,5 +186,5 @@ export const applyInitPlan = (plan: InitPlan, io: InitIo): InitApplyResult => {
     io.write(f.path, f.content);
     created.push(f.path);
   }
-  return { created, skipped, deferred };
+  return { created, skipped, deferred, copied };
 };

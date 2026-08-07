@@ -149,18 +149,35 @@ describe("planInit", () => {
     expect(migration).toBeDefined();
   });
 
-  it("applyInitPlan writes nothing for deferred files and reports them apart", () => {
+  it("copies a deferred root file from its legacy .pi sibling when readable", () => {
+    const plan = planInit(new Set([".pi/roadmap.md"]), V);
+    const writes: string[] = [];
+    const contents: string[] = [];
+    const applied = applyInitPlan(plan, {
+      exists: () => false,
+      read: (p) => (p === ".pi/roadmap.md" ? "# legacy roadmap\n" : null),
+      write: (p, content) => {
+        writes.push(p);
+        contents.push(content);
+      },
+    });
+    expect(applied.copied).toContain("roadmap.md");
+    expect(applied.created).not.toContain("roadmap.md");
+    expect(writes).toContain("roadmap.md");
+    expect(contents).toContain("# legacy roadmap\n");
+  });
+
+  it("keeps a deferred file unwritten when the legacy sibling cannot be read", () => {
     const plan = planInit(new Set([".pi/roadmap.md"]), V);
     const writes: string[] = [];
     const applied = applyInitPlan(plan, {
       exists: () => false,
+      read: () => null,
       write: (p) => {
         writes.push(p);
       },
     });
     expect(applied.deferred).toContain("roadmap.md");
-    expect(applied.created).not.toContain("roadmap.md");
-    expect(applied.skipped).not.toContain("roadmap.md");
     expect(writes).not.toContain("roadmap.md");
   });
 

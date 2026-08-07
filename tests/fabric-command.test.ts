@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CapturedToolCatalog } from "../src/capture/catalog.js";
@@ -548,7 +548,7 @@ describe("/fabric command", () => {
     expect(message).toContain("context QoS: on");
   });
 
-  it("init defers root context files and reports the migration guidance in notify", async () => {
+  it("init copies legacy .pi context to root and reports the copy in notify", async () => {
     const scratch = mkdtempSync(join(tmpdir(), "fabric-init-"));
     mkdirSync(join(scratch, ".pi"), { recursive: true });
     writeFileSync(join(scratch, ".pi", "project.md"), "# legacy project context\n");
@@ -571,12 +571,12 @@ describe("/fabric command", () => {
     });
     await handler!("init", context);
     const message = notify.mock.calls[0]![0] as string;
-    expect(message).toContain("deferred");
+    expect(message).toContain("copied");
     expect(message).toContain(".pi/project.md");
-    expect(message).toContain("copy its content to the root-level project.md");
+    expect(message).toContain("copies its content to the root-level project.md");
     const createdLine = message.split("\n").find((line) => line.startsWith("created:"));
     expect(createdLine).not.toContain("project.md");
-    expect(existsSync(join(scratch, "project.md"))).toBe(false);
+    expect(readFileSync(join(scratch, "project.md"), "utf8")).toBe("# legacy project context\n");
     rmSync(scratch, { recursive: true, force: true });
   });
 });

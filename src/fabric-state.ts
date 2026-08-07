@@ -1,6 +1,7 @@
 import { getAgentDir, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
+import { statSync } from "node:fs";
 import { FabricActivityStore } from "./activity/store.js";
 import { PersistentAgentRuntime } from "./agents/persistent/manager.js";
 import { AgentTemplateRegistry } from "./agents/persistent/template-registry.js";
@@ -209,6 +210,7 @@ export class FabricState {
   #compact: CompactController | undefined;
   #schema: SchemaController | undefined;
   #cwd: string | undefined;
+  #configMtimes: Map<string, number> | null = null;
   readonly #externalProviders = new Map<string, FabricProvider>();
   readonly activity = new FabricActivityStore();
   readonly prewalk = new PrewalkController();
@@ -692,11 +694,31 @@ export class FabricState {
     deepAssign(this.#config as unknown as Record<string, unknown>, next as unknown as Record<string, unknown>);
   }
 
+  // Before each prompt the input handler asks whether either fabric.json
+  // changed on disk; when it did, reloadConfig applies the new values so a
+  // hand-edit takes effect without a /fabric settings touch or a restart.
+  // Mtimes are cached on the state; the check is two stat calls per prompt.
+  reloadConfigIfChanged(context: ExtensionContext): boolean {
+    if (!this.#config || !this.#cwd) return false;
+    const paths = [
+      path.join(getAgentDir(), "fabric.json"),
+      path.join(this.#cwd, ".pi", "fabric.json"),
+    ];
+    const result = reloadConfigWhenChanged({
+      prev: this.#configMtimes,
+      paths,
+      reload: () => this.reloadConfig(context),
+    });
+    this.#configMtimes = result.next;
+    return result.reloaded;
+  }
+
   claimHandoff(
     execution: FabricExecutionResult,
     sessionId: string,
     resultFormat: FabricResultFormat,
     outerToolCallId: string,
+
   ): PendingFabricHandoff | undefined {
     const pending = claimFabricHandoff(this.prewalk, execution, sessionId, resultFormat);
     if (pending) {
@@ -985,4 +1007,45 @@ const deepAssign = (
       target[key] = value;
     }
   }
+};
+
+// Config watch: FabricState reloads the two fabric.json files when their
+// mtimes change so hand-edits take effect without a /fabric settings touch or
+// a restart. Pure helpers keep the decision testable without the host API.
+export const statConfigMtimes = (paths: readonly string[]): Map<string, number> => {
+  const mtimes = new Map<string, number>();
+  for (const file of paths) {
+    try {
+      mtimes.set(file, statSync(file).mtimeMs);
+    } catch {
+      // A missing file is stable until it appears; 0 never matches a real
+      // mtime, so its later creation is detected as a change.
+      mtimes.set(file, 0);
+    }
+  }
+  return mtimes;
+};
+
+export const configMtimesChanged = (
+  prev: Map<string, number>,
+  next: Map<string, number>,
+): boolean => {
+  if (prev.size !== next.size) return true;
+  for (const [file, mtime] of next) {
+    if (prev.get(file) !== mtime) return true;
+  }
+  return false;
+};
+
+export const reloadConfigWhenChanged = (options: {
+  prev: Map<string, number> | null;
+  paths: readonly string[];
+  reload: () => void;
+}): { reloaded: boolean; next: Map<string, number> } => {
+  const next = statConfigMtimes(options.paths);
+  if (!options.prev || !configMtimesChanged(options.prev, next)) {
+    return { reloaded: false, next };
+  }
+  options.reload();
+  return { reloaded: true, next };
 };

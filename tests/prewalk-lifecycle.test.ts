@@ -175,6 +175,33 @@ describe("reducePrewalkLifecycle", () => {
     });
   });
 
+  it("keeps a session-scoped arm alive across continuation settlement", () => {
+    const pending = reducePrewalkLifecycle(handingOff({ arm: "session" }), {
+      kind: "handoff_succeeded",
+      at: 20,
+      handoffId: "handoff-1",
+    });
+    const continuing = reducePrewalkLifecycle(pending, {
+      kind: "continuation_accepted",
+      sessionId: "session-1",
+      handoffId: "handoff-1",
+    });
+    expect(
+      reducePrewalkLifecycle(continuing, {
+        kind: "continuation_settled",
+        sessionId: "session-1",
+        at: 30,
+      }),
+    ).toEqual({
+      state: "armed",
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      armedAt: 30,
+      arm: "session",
+      attempt: 0,
+    });
+  });
+
   it("routes gated verification through one bounded revision", () => {
     const gated = arm({
       verificationMode: "gated",

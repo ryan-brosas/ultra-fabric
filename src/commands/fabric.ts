@@ -858,6 +858,13 @@ const runInit = (context: ExtensionContext): void => {
   const plan = planInit(existing, CURRENT_FABRIC_CONFIG_VERSION, detected);
   const applied = applyInitPlan(plan, {
     exists: (p) => fs.existsSync(path.join(cwd, p)),
+    read: (p) => {
+      try {
+        return fs.readFileSync(path.join(cwd, p), "utf8");
+      } catch {
+        return null;
+      }
+    },
     write: (p, content) => {
       const abs = path.join(cwd, p);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -878,7 +885,7 @@ const runInit = (context: ExtensionContext): void => {
     "fabric init",
     "created: " + (applied.created.length > 0 ? applied.created.join(", ") : "(none)"),
     "skipped (already present): " + (applied.skipped.length > 0 ? applied.skipped.join(", ") : "(none)"),
-    "deferred (copy from legacy .pi to root): " + (applied.deferred.length > 0 ? applied.deferred.join(", ") : "(none)"),
+    "copied (legacy .pi to root): " + (applied.copied.length > 0 ? applied.copied.join(", ") : "(none)"),
     summary,
     ...askLine,
     ...plan.migrations,

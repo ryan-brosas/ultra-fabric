@@ -274,7 +274,7 @@ const summaryFor = (id: string, config: FabricConfig): string => {
     case "mcp":
       return config.mcp.enabled ? "enabled" : "disabled";
     case "prewalk":
-      return `${config.prewalk.model || PREWALK_MODEL_UNSET_LABEL}${config.prewalk.verificationMode === "gated" ? ` · gated/${config.prewalk.maxPhaseRevisions ?? 2}` : ""}${config.prewalk.thinking ? ` · ${thinkingLabel(config.prewalk.thinking)}` : ""}${config.prewalk.arm === "task" ? " · repeat" : ""}`;
+      return `${config.prewalk.model || PREWALK_MODEL_UNSET_LABEL}${config.prewalk.verificationMode === "gated" ? ` · gated/${config.prewalk.maxPhaseRevisions ?? 2}` : ""}${config.prewalk.thinking ? ` · ${thinkingLabel(config.prewalk.thinking)}` : ""}${config.prewalk.arm === "task" ? " · repeat" : config.prewalk.arm === "session" ? " · session" : ""}`;
     case "agents":
       return `${config.agents.transport}${config.agents.fallbackModels.length > 0 ? ` · ${config.agents.fallbackModels.length} routes` : ""}${config.agents.allowQualityDowngrade ? " · downgrade" : ""}`;
     case "consult":
@@ -861,7 +861,7 @@ export const buildFabricSettingsItems = (
             config.prewalk.arm,
             {
               description:
-                "When the prewalk arms: off (explicit /fabric prewalk only), session (once at session start), or task (re-arm after every settled task).",
+                "When the prewalk arms: off (explicit /fabric prewalk only), session (armed for the whole session; re-arms after each settled task), or task (re-arm after every settled task).",
               values: ["off", "session", "task"],
             },
           ),
