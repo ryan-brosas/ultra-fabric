@@ -18,6 +18,27 @@ describe("codemap tool surface", () => {
     if (r.truncated) expect(r.text.length).toBeGreaterThan(0);
   });
 
+  it("marks truncated output visibly inside the budget", { timeout: 30000 }, () => {
+    const r = codemapOperation("skeleton", { maxTokens: 300 }, ROOT);
+    expect(r.truncated).toBe(true);
+    expect(r.text).toContain("truncated at 300 tokens");
+    expect(r.text.length).toBeLessThanOrEqual(300 * 4);
+  });
+
+  it("omits the truncation marker when output fits", { timeout: 30000 }, () => {
+    const r = codemapOperation("skeleton", { maxTokens: 200000 }, ROOT);
+    expect(r.truncated).toBe(false);
+    expect(r.text).not.toContain("truncated at");
+  });
+
+  it("spends the skeleton budget on high-rank src modules before scripts", { timeout: 30000 }, () => {
+    const r = codemapOperation("skeleton", { maxTokens: 2000 }, ROOT);
+    const srcAt = r.text.indexOf("src/");
+    expect(srcAt).toBeGreaterThanOrEqual(0);
+    const scriptsAt = r.text.indexOf("scripts/benchmark");
+    if (scriptsAt >= 0) expect(srcAt).toBeLessThan(scriptsAt);
+  });
+
   it("search operation respects maxTokens", () => {
     const r = codemapOperation("search", { query: "config", maxTokens: 500 }, ROOT);
     expect(r.operation).toBe("search");

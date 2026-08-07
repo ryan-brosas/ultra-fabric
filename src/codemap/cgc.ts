@@ -137,9 +137,32 @@ const scopeClause = (alias: string, context?: string): string =>
     ? ` AND ${alias}.path STARTS WITH ${JSON.stringify(context)}`
     : "";
 
+// Vendored and generated paths poison scoped results: a checkout that indexes
+// its reference clones and benchmark artifacts fills hotspot and search output
+// with minified bundle functions. Applied only when a path scope narrows the
+// query to one checkout; the unscoped global view stays unfiltered.
+const VENDOR_EXCLUSIONS = ["/sources/", "/bench/", "node_modules", ".min.js"] as const;
+const exclusionClause = (alias: string, context?: string): string =>
+  context && context.startsWith("/")
+    ? VENDOR_EXCLUSIONS.map((p) => ` AND NOT ${alias}.path CONTAINS ${JSON.stringify(p)}`).join("")
+    : "";
+
+// Multi-word queries are agent phrasing ("PrewalkController claimChecklistReminder"),
+// not literal names: no symbol contains the joined string, so each token must
+// match independently and any token hit qualifies.
+const tokenMatchClause = (alias: string, query: string): string => {
+  const tokens = query.split(/\s+/).filter(Boolean).slice(0, 6);
+  if (tokens.length <= 1) {
+    return `${alias}.name CONTAINS ${JSON.stringify(tokens[0] ?? query)}`;
+  }
+  return "(" + tokens.map((t) => `${alias}.name CONTAINS ${JSON.stringify(t)}`).join(" OR ") + ")";
+};
+
 export const cypher = {
   symbolSearch: (query: string, context?: string): string =>
-    `MATCH (f:Function) WHERE f.name CONTAINS ${JSON.stringify(query)}${scopeClause("f", context)} RETURN f.name, f.path, f.line_number, f.lang LIMIT 20`,
+    `MATCH (f:Function) WHERE ${tokenMatchClause("f", query)}${scopeClause("f", context)}${exclusionClause("f", context)} RETURN f.name, f.path, f.line_number, f.lang LIMIT 20`,
+  classSearch: (query: string, context?: string): string =>
+    `MATCH (c:Class) WHERE ${tokenMatchClause("c", query)}${scopeClause("c", context)}${exclusionClause("c", context)} RETURN c.name, c.path, c.line_number, c.lang LIMIT 10`,
   fileSearch: (query: string, context?: string): string =>
     `MATCH (f:File) WHERE f.path CONTAINS ${JSON.stringify(query)}${scopeClause("f", context)} RETURN f.path LIMIT 10`,
   functionCount: (context?: string): string =>
@@ -147,13 +170,13 @@ export const cypher = {
   fileCount: (context?: string): string =>
     `MATCH (f:File) WHERE 1 = 1${scopeClause("f", context)} RETURN count(*) AS c`,
   hotspots: (minComplexity: number, context?: string): string =>
-    `MATCH (f:Function) WHERE f.cyclomatic_complexity > ${minComplexity}${scopeClause("f", context)} RETURN f.name, f.path, f.line_number, f.cyclomatic_complexity ORDER BY f.cyclomatic_complexity DESC LIMIT 10`,
+    `MATCH (f:Function) WHERE f.cyclomatic_complexity > ${minComplexity}${scopeClause("f", context)}${exclusionClause("f", context)} RETURN f.name, f.path, f.line_number, f.cyclomatic_complexity ORDER BY f.cyclomatic_complexity DESC LIMIT 10`,
   importsOf: (filePath: string): string =>
     `MATCH (f:File)-[:IMPORTS]->(m:Module) WHERE f.path = ${JSON.stringify(filePath)} RETURN m.name LIMIT 20`,
   inheritsOf: (name: string, context?: string): string =>
     `MATCH (c:Class)-[:INHERITS]->(x) WHERE c.name = ${JSON.stringify(name)}${scopeClause("c", context)} RETURN x.name, x.path LIMIT 10`,
-  sourceOf: (name: string, context?: string): string =>
-    `MATCH (f:Function) WHERE f.name = ${JSON.stringify(name)}${scopeClause("f", context)} RETURN f.source, f.path, f.line_number LIMIT 1`,
+  sourceOf: (name: string, context?: string, file?: string): string =>
+    `MATCH (f:Function) WHERE f.name = ${JSON.stringify(name)}${file ? ` AND f.path CONTAINS ${JSON.stringify(file)}` : ""}${scopeClause("f", context)} RETURN f.source, f.path, f.line_number LIMIT 1`,
   testsIn: (context?: string): string =>
     `MATCH (f:File) WHERE (f.path CONTAINS "test" OR f.path CONTAINS "spec")${scopeClause("f", context)} RETURN f.path LIMIT 20`,
 };

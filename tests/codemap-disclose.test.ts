@@ -119,6 +119,31 @@ describe("member-level disclosure (G5)", () => {
   });
 });
 
+describe("minimalSkeleton ordering", () => {
+  it("renders higher-ranked files first so truncation keeps the head", () => {
+    const rank = new Map<string, number>();
+    for (const f of graph.files) rank.set(f.path, 0);
+    rank.set("src/codemap/build.ts", 10);
+    rank.set("src/codemap/calls.ts", 1);
+    const skel = minimalSkeleton(graph, rank);
+    const buildAt = skel.indexOf("src/codemap/build.ts");
+    const callsAt = skel.indexOf("src/codemap/calls.ts");
+    expect(buildAt).toBeGreaterThanOrEqual(0);
+    expect(callsAt).toBeGreaterThanOrEqual(0);
+    expect(buildAt).toBeLessThan(callsAt);
+  });
+
+  it("ties break deterministically on path", () => {
+    const flat = new Map<string, number>();
+    for (const f of graph.files) flat.set(f.path, 1);
+    const a = minimalSkeleton(graph, flat);
+    const b = minimalSkeleton(graph, flat);
+    expect(a).toBe(b);
+    const order = [...graph.files.map((f) => f.path)].sort();
+    expect(a.indexOf(order[0]!)).toBeLessThan(a.indexOf(order[order.length - 1]!));
+  });
+});
+
 describe("minimalSkeleton", () => {
   it("renders a compressed skeleton over the graph files", () => {
     const skel = minimalSkeleton(graph);

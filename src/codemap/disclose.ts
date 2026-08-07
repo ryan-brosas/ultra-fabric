@@ -113,6 +113,18 @@ export const expand = (
 };
 
 // Minimal repository skeleton: the compressed view an agent starts from before
-// any expansion.
-export const minimalSkeleton = (graph: DisclosureGraph): string =>
-  graph.files.map((f) => renderFileSkeleton(f)).join("\n\n");
+// any expansion. With a ranking, files render in descending importance so a
+// token-budget truncation keeps the most load-bearing modules and drops the
+// tail, instead of spending the budget on whatever sorts first.
+export const minimalSkeleton = (
+  graph: DisclosureGraph,
+  fileRank?: ReadonlyMap<string, number>,
+): string => {
+  const files = fileRank
+    ? [...graph.files].sort((a, b) => {
+        const d = (fileRank.get(b.path) ?? 0) - (fileRank.get(a.path) ?? 0);
+        return d !== 0 ? d : a.path.localeCompare(b.path);
+      })
+    : graph.files;
+  return files.map((f) => renderFileSkeleton(f)).join("\n\n");
+};

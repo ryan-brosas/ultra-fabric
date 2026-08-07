@@ -1,6 +1,7 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { buildCodeGraph, buildRenderNodes, type CodeGraph } from "./build.js";
+import { pageRank } from "./rank.js";
 import { buildLiteralIndex } from "./literals.js";
 import { route } from "./route.js";
 import { expand, buildDisclosureGraph, minimalSkeleton, type Direction } from "./disclose.js";
@@ -71,9 +72,12 @@ const tokenEstimate = (text: string): number => Math.ceil(text.length / 4);
 const truncateToTokens = (text: string, maxTokens: number): { text: string; tokens: number; truncated: boolean } => {
   const maxChars = maxTokens * 4;
   if (text.length <= maxChars) return { text, tokens: tokenEstimate(text), truncated: false };
-  const cut = text.slice(0, maxChars);
+  // The marker rides inside the budget so a cut view is visibly partial; a
+  // silent cut reads as a complete result and misleads scope decisions.
+  const marker = "… truncated at " + maxTokens + " tokens; refine scope or raise maxTokens";
+  const cut = text.slice(0, Math.max(0, maxChars - marker.length - 1));
   const lastNl = cut.lastIndexOf("\n");
-  const body = lastNl > 0 ? cut.slice(0, lastNl) : cut;
+  const body = (lastNl > 0 ? cut.slice(0, lastNl) : cut) + "\n" + marker;
   return { text: body, tokens: tokenEstimate(body), truncated: true };
 };
 
@@ -186,6 +190,13 @@ const cgcSearch = (query: string, cgc: CgcOptions, maxTokens: number): CodemapOp
     }),
   );
   lines.push(
+    ...cgcQueryLines(cgc, cypher.classSearch(query, cgc.context), (rec) => {
+      const name = rec["c.name"];
+      if (typeof name !== "string") return null;
+      return name + " (class, " + (rec["c.lang"] ?? "?") + ") " + (rec["c.path"] ?? "?") + ":" + (rec["c.line_number"] ?? "?");
+    }),
+  );
+  lines.push(
     ...cgcQueryLines(cgc, cypher.fileSearch(query, cgc.context), (rec) => {
       const p = rec["f.path"];
       return typeof p === "string" ? p : null;
@@ -247,13 +258,15 @@ const cgcExpand = (entities: readonly string[], cgc: CgcOptions, maxTokens: numb
 };
 
 const cgcSource = (entity: string, cgc: CgcOptions, maxTokens: number): CodemapOpResult => {
-  const name = entity.split(":")[0] ?? "";
+  const colon = entity.indexOf(":");
+  const name = colon >= 0 ? entity.slice(0, colon) : entity;
+  const fileQualifier = colon >= 0 ? entity.slice(colon + 1) : "";
   if (!name) {
     return { operation: "source", text: "source requires a name:file entity", tokens: 0, entities: [], truncated: false };
   }
-  const lines: string[] = ["[cgc source: " + name + "]"];
+  const lines: string[] = ["[cgc source: " + name + (fileQualifier ? " @ " + fileQualifier : "") + "]"];
   lines.push(
-    ...cgcQueryLines(cgc, cypher.sourceOf(name, cgc.context), (rec) => {
+    ...cgcQueryLines(cgc, cypher.sourceOf(name, cgc.context, fileQualifier || undefined), (rec) => {
       const s = rec["f.source"];
       return typeof s === "string" ? s : null;
     }),
@@ -299,10 +312,25 @@ const cgcExplore = (query: string, cgc: CgcOptions, maxTokens: number): CodemapO
   return { operation: "explore", text: t.text, tokens: t.tokens, entities: [], truncated: t.truncated };
 };
 
+// Aggregate symbol PageRank per file (node keys are name:file), so the
+// skeleton renders load-bearing modules first and budget truncation drops the
+// unreferenced tail. Graph-structural only: no file-content scoring.
+const fileRankFromGraph = (graph: CodeGraph): Map<string, number> => {
+  const scores = pageRank(graph.nodeKeys, graph.edges);
+  const byFile = new Map<string, number>();
+  for (const key of graph.nodeKeys) {
+    const colon = key.indexOf(":");
+    if (colon < 0) continue;
+    const file = key.slice(colon + 1);
+    byFile.set(file, (byFile.get(file) ?? 0) + (scores.get(key) ?? 0));
+  }
+  return byFile;
+};
+
 const astExplore = (query: string, root: string, maxTokens: number): CodemapOpResult => {
   const { graph, disclosure, literals } = getCodeGraph(root);
   const lines: string[] = ["[ast explore: " + query + "]", "## skeleton"];
-  lines.push(minimalSkeleton(disclosure));
+  lines.push(minimalSkeleton(disclosure, fileRankFromGraph(graph)));
   lines.push("## routed symbols");
   const r = route(query, { index: graph.index, literals });
   for (const s of r.symbols.slice(0, 12)) lines.push(s.name + " (" + s.symbolType + ") " + s.file + ":" + s.line);
@@ -374,7 +402,7 @@ export const codemapOperation = (
   const { graph, disclosure, literals } = getCodeGraph(root);
 
   if (operation === "skeleton") {
-    const full = minimalSkeleton(disclosure);
+    const full = minimalSkeleton(disclosure, fileRankFromGraph(graph));
     const t = truncateToTokens(full, maxTokens);
     return { operation, text: t.text, tokens: t.tokens, entities: [], truncated: t.truncated };
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   cgcQuery,
+  cypher,
   defaultCgcRunner,
   extractCgcJson,
   runCgc,
@@ -130,5 +131,56 @@ describe("cgcQuery", () => {
 describe("defaultCgcRunner", () => {
   it("is a function (host subprocess; never invoked in unit tests)", () => {
     expect(typeof defaultCgcRunner).toBe("function");
+  });
+});
+
+describe("cypher templates", () => {
+  it("tokenizes multi-word symbol searches so every token matches independently", () => {
+    const q = cypher.symbolSearch("PrewalkController claimChecklistReminder");
+    expect(q).toContain('"PrewalkController"');
+    expect(q).toContain('"claimChecklistReminder"');
+    expect(q).not.toContain('"PrewalkController claimChecklistReminder"');
+  });
+
+  it("keeps single-token symbol search shape", () => {
+    const q = cypher.symbolSearch("armPrewalk");
+    expect(q).toContain('f.name CONTAINS "armPrewalk"');
+  });
+
+  it("searches classes alongside functions", () => {
+    const q = cypher.classSearch("PrewalkController");
+    expect(q).toContain("Class");
+    expect(q).toContain('"PrewalkController"');
+  });
+
+  it("scopes sourceOf by file qualifier when provided", () => {
+    const q = cypher.sourceOf("execute", undefined, "src/execution-service.ts");
+    expect(q).toContain('f.name = "execute"');
+    expect(q).toContain('f.path CONTAINS "src/execution-service.ts"');
+  });
+
+  it("keeps name-only sourceOf unqualified", () => {
+    const q = cypher.sourceOf("execute");
+    expect(q).toContain('f.name = "execute"');
+    expect(q).not.toContain("f.path CONTAINS");
+  });
+
+  it("excludes vendored paths from hotspots when scoped by path prefix", () => {
+    const q = cypher.hotspots(20, "/repo/checkout");
+    expect(q).toContain('STARTS WITH "/repo/checkout"');
+    for (const noise of ["/sources/", "/bench/", "node_modules", ".min.js"]) {
+      expect(q).toContain(noise);
+    }
+  });
+
+  it("keeps unscoped hotspots free of exclusions", () => {
+    const q = cypher.hotspots(20);
+    expect(q).not.toContain("/bench/");
+  });
+
+  it("excludes vendored paths from scoped symbol search", () => {
+    const q = cypher.symbolSearch("execute", "/repo/checkout");
+    expect(q).toContain("/bench/");
+    expect(q).toContain("/sources/");
   });
 });
