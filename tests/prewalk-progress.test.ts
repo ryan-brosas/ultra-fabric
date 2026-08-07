@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { extractDoneMarkers, checklistProgress, checklistWidgetLines } from "../src/prewalk/checklist-progress.js";
+import {
+  extractDoneMarkers,
+  checklistProgress,
+  checklistWidgetLines,
+  checklistWidgetView,
+} from "../src/prewalk/checklist-progress.js";
 import { prewalkChecklistReminder } from "../src/prewalk/continuation.js";
 import { PrewalkController } from "../src/prewalk/controller.js";
 
@@ -49,6 +54,24 @@ describe("checklistWidgetLines", () => {
   it("renders all items pending when nothing is done", () => {
     const lines = checklistWidgetLines(checklist());
     expect(lines).toEqual(items.map((item) => "[ ] " + item.task));
+  });
+});
+
+describe("checklistWidgetView", () => {
+  it("returns a status and lines while items remain pending", () => {
+    const view = checklistWidgetView(checklist([0, 2]));
+    expect(view).not.toBeNull();
+    expect(view!.status).toBe("checklist 2/5");
+    expect(view!.lines).toHaveLength(5);
+    expect(view!.lines[0]).toBe("[x] [9;2mStep 1[0m");
+  });
+
+  it("returns null once every item is done", () => {
+    expect(checklistWidgetView(checklist([0, 1, 2, 3, 4]))).toBeNull();
+  });
+
+  it("returns null for an empty checklist", () => {
+    expect(checklistWidgetView({ items: [] } as never)).toBeNull();
   });
 });
 

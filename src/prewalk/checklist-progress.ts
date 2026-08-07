@@ -36,3 +36,21 @@ export const checklistWidgetLines = (checklist: FabricPrewalkChecklist): string[
     done.has(index) ? "[x] " + SGR_STRIKE_DIM + item.task + SGR_RESET : "[ ] " + item.task,
   );
 };
+
+export interface ChecklistWidgetView {
+  status: string;
+  lines: string[];
+}
+
+// Single decision point for the host progress widget: return the status line
+// and rendered rows while the checklist is still open, or null once every item
+// is done (or there is nothing to track) so the host tears the widget down
+// instead of retaining fully struck-through rows.
+export const checklistWidgetView = (checklist: FabricPrewalkChecklist): ChecklistWidgetView | null => {
+  const progress = checklistProgress(checklist);
+  if (progress.total === 0 || progress.done >= progress.total) return null;
+  return {
+    status: `checklist ${progress.done}/${progress.total}`,
+    lines: checklistWidgetLines(checklist),
+  };
+};

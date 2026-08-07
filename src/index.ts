@@ -18,7 +18,7 @@ import {
 } from "./prewalk/continuation.js";
 import { restorePrewalkModel } from "./prewalk/model.js";
 import { prewalkChecklistReminder } from "./prewalk/continuation.js";
-import { checklistProgress, checklistWidgetLines, extractDoneMarkers } from "./prewalk/checklist-progress.js";
+import { checklistWidgetView, extractDoneMarkers } from "./prewalk/checklist-progress.js";
 
 // Concatenated text of the most recent assistant message in the branch, so
 // [DONE:n] progress markers in the executor's last turn reach the controller.
@@ -650,19 +650,21 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
           if (indexes.length > 0) state.prewalk.markChecklistDone(sessionId, indexes);
           // Re-read after marking: the first snapshot predates this turn's
           // mutations, so without a fresh read a freshly completed item would
-          // still render pending and never strike through.
+          // still render pending and never strike through. A completed list
+          // tears the widget down like the idle branch so fully struck-through
+          // rows are not retained on the dashboard.
           const live = state.prewalk.status();
           if (live.state !== "idle" && live.checklist) {
-            const progress = checklistProgress(live.checklist);
-            if (progress.total > 0) {
-              context.ui.setStatus(
-                "fabric-prewalk-progress",
-                `checklist ${progress.done}/${progress.total}`,
-              );
-              context.ui.setWidget(
-                "fabric-prewalk-progress",
-                checklistWidgetLines(live.checklist),
-              );
+            const view = checklistWidgetView(live.checklist);
+            if (view === null) {
+              if (prewalkProgressWidgetShown) {
+                context.ui.setWidget("fabric-prewalk-progress", undefined);
+                context.ui.setStatus("fabric-prewalk-progress", undefined);
+                prewalkProgressWidgetShown = false;
+              }
+            } else {
+              context.ui.setStatus("fabric-prewalk-progress", view.status);
+              context.ui.setWidget("fabric-prewalk-progress", view.lines);
               prewalkProgressWidgetShown = true;
             }
           }
