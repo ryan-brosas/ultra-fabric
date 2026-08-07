@@ -1,5 +1,90 @@
 [
   {
+    "task": "liar... I still don't see any src sources on it",
+    "checklist": {
+      "items": [
+        {
+          "task": "Consolidate the record guard: add an exported isRecord to src/util.ts (generic signature usable as both Record<string,unknown> and JsonRecord guard) with a small unit test written RED first (object/null/array/primitive cases).",
+          "validation": "New test file (or extension of an existing util test) passes; the guard behaves identically to the 8 duplicated bodies: typeof value === 'object' && value !== null && !Array.isArray(value)."
+        },
+        {
+          "task": "Replace the 10 identical/JsonRecord isRecord copies (compaction/hook.ts:505, compaction/instructions.ts:68, compaction/openai-native.ts:32, compaction/trace-events.ts:28, compaction/branch-details.ts:73, compaction/openai-native-replay.ts:27, core/direct-tool-approval.ts:19, core/tool-ownership.ts:37, audit/trace.ts:638, audit/details.ts:136) with imports from src/util.ts. Leave the domain guards in workflows/durable.ts:249 and outcomes/store.ts:120 untouched. fabric-state.ts isPlainObject may also delegate if the body is identical.",
+          "validation": "grep shows zero remaining duplicate isRecord definitions outside the two domain guards; pnpm vitest run stays green; knip reports no new unused exports."
+        },
+        {
+          "task": "Extract the render layer from src/fabric-exec-tool.ts into src/fabric-exec-render.ts: move renderResult and the pure render/preview helpers out of the createFabricExecTool closure, passing their closure captures (theme access, codePreviewSettings, expand state) as explicit parameters. Pure move, no behavior change.",
+          "validation": "Render-related suites (fabric-ui, ui-transcript, core-tool-render, type-error-guidance) pass unchanged; fabric-exec-tool.ts drops materially in line count; cgc re-measure shows createFabricExecTool complexity well below 255."
+        },
+        {
+          "task": "Split FabricExecutionService.execute (src/execution-service.ts:421) into named private phase methods on the class: admission/timeout resolution, run-context creation, guest execution, and settlement/audit. Straight mechanical extraction — same order, same error paths, no new abstractions beyond the method boundaries.",
+          "validation": "tests/execution-service.test.ts and tests/audit-trace.test.ts pass unchanged; execute's cyclomatic complexity re-measures under 100; no public API change."
+        },
+        {
+          "task": "Bounded dead-code verification sample: source-verify the 33 no-caller candidates in src/fabric-state.ts against real usage (reference passing, host callbacks, tests). Delete only symbols proven unused by both grep and knip; record the false-positive rate in the final summary instead of touching the other 768 candidates.",
+          "validation": "Each deletion has zero grep hits outside its own definition; knip stays clean; full vitest run green."
+        },
+        {
+          "task": "Run the staged repository gate: pnpm run typecheck, pnpm run build, pnpm vitest run, pnpm run lint:dead, pnpm run smoke:package, then git diff --check and git status --short --branch.",
+          "validation": "All five stages exit 0; status shows only the refactor files (and the pre-existing dirty runtime state left uncommitted)."
+        },
+        {
+          "task": "Refresh the graph and prove the bloat dropped: cgc update ., then re-run the scoped complexity query for createFabricExecTool and execute and the duplicate-name query for isRecord.",
+          "validation": "Both functions report materially lower complexity than 255/241; isRecord no longer appears in the >3-files duplicate list."
+        }
+      ],
+      "readyAt": 1786081641015
+    },
+    "recordedAt": 1786087814756
+  },
+  {
+    "task": "on cgc or mcp graph we did cgcignore something that we shouldn't can we reingest or ingest the part so we can know what we are on it now? and develop this with guide not on blind",
+    "checklist": {
+      "items": [
+        {
+          "task": "Update the stale init assertion in tests/fabric-command.test.ts to the new copy contract: message says 'copied' and root project.md is created with the legacy .pi content.",
+          "validation": "pnpm vitest run tests/fabric-command.test.ts passes."
+        },
+        {
+          "task": "Run the remaining staged gates: full vitest suite, knip, package smoke.",
+          "validation": "All three exit 0 with no new dead-code findings."
+        },
+        {
+          "task": "Run git diff --check and git status --short --branch; confirm only intended source/test changes are dirty.",
+          "validation": "No whitespace errors; status lists only the files touched by this slice plus pre-existing runtime state."
+        }
+      ],
+      "readyAt": 1786078948877,
+      "easy": true
+    },
+    "recordedAt": 1786079318919
+  },
+  {
+    "task": "can we commit everything, push and publish so we can move to install not local install or whatever",
+    "checklist": {
+      "items": [
+        {
+          "task": "Review git status/diff, stage all modified files (including the deleted tests/codemap-heat-render.test.ts), and commit as one conventional commit reflecting the mixed feat/refactor scope",
+          "validation": "git status --short --branch shows a clean tree on main; git log -1 shows the new commit"
+        },
+        {
+          "task": "Run the repository gate in stages (typecheck, build, tests, knip, package smoke) since pnpm run check exceeds the 120s tool budget",
+          "validation": "Every stage exits 0; tests all pass with no new failures"
+        },
+        {
+          "task": "Load .pi/skills/release/SKILL.md and follow it: bump prerelease version, push main and the release tag, publish to npm",
+          "validation": "npm view <pkg> version returns the new version; git push succeeded for branch and tag"
+        },
+        {
+          "task": "Confirm the published package installs globally so Ryan can switch off the local install",
+          "validation": "Global install of the new version succeeds and the installed entry point loads (smoke: binary/extension resolves from the global path)"
+        }
+      ],
+      "readyAt": 1786075315712,
+      "easy": true
+    },
+    "recordedAt": 1786076091359
+  },
+  {
     "task": "cotninue again for cleaning stuff on project making sure our all of our code smell is clean and high quality....  I think the agent utilization is not good it's still stuck on 0 token, please design this like opencode agent behavior feel free to look on arxiv docs, clone github repo that can help on this initiative",
     "checklist": {
       "items": [
@@ -460,104 +545,5 @@
       "readyAt": 1786012542697
     },
     "recordedAt": 1786014162544
-  },
-  {
-    "task": "go ahead go with scout/explorer for 1..... this is good",
-    "checklist": {
-      "items": [
-        {
-          "task": "Create src/prewalk/scout-brief.ts with buildScoutBrief, SCOUT_BUDGET_CATEGORY, and a scout runner seam",
-          "validation": "module compiles and exports the named symbols"
-        },
-        {
-          "task": "Make armPrewalk async and accept an optional deps.scoutRun injector",
-          "validation": "existing arm tests still pass when awaited"
-        },
-        {
-          "task": "Wire autoScout: when enabled for a non-trivial task, run cheap scout and inject Scout brief block ahead of planning",
-          "validation": "prewalk-scout-brief tests assert injection and scout role"
-        },
-        {
-          "task": "Record scout token spend into budget ledger under SCOUT_BUDGET_CATEGORY",
-          "validation": "ledger detail contains a scout-category entry with input/output tokens"
-        },
-        {
-          "task": "Add prewalk.autoScout config flag (default off) with normalization",
-          "validation": "config tests assert default-off and opt-in parse"
-        },
-        {
-          "task": "Scout failure must not block arming",
-          "validation": "test asserts arm proceeds when scoutRun throws"
-        },
-        {
-          "task": "Run focused vitest for new + arm + config tests, then tsc and knip",
-          "validation": "focused tests green, tsc clean, knip exit 0"
-        }
-      ],
-      "readyAt": 1786010910349
-    },
-    "recordedAt": 1786011840444
-  },
-  {
-    "task": "1. a 2. what do you think? is thisn going to live up to ultra.... it means better fabric even it burns token",
-    "checklist": {
-      "items": [
-        {
-          "task": "Write RED tests for failure-memory store (record/recall/seed/bounds)",
-          "validation": "vitest fails with module-not-found for failure-memory.ts"
-        },
-        {
-          "task": "Implement failure-memory.ts: bounded store, keyword/path scoring, failureSeed",
-          "validation": "failure-memory unit tests pass"
-        },
-        {
-          "task": "Add config flag prewalk.failureMemory default false",
-          "validation": "config.test.ts asserts default + parse"
-        },
-        {
-          "task": "Record on observeVerification blocked + settle verifying-without-pass",
-          "validation": "controller/handoff tests assert recording fires on gate failure only"
-        },
-        {
-          "task": "Seed arm prompt with nearestFailures when enabled; trivial path skips",
-          "validation": "arm tests assert seed present iff enabled and non-trivial"
-        },
-        {
-          "task": "Run focused suites then pnpm run check; only 3 pre-existing failures remain",
-          "validation": "pnpm run check diff vs baseline unchanged"
-        }
-      ],
-      "readyAt": 1786007401921
-    },
-    "recordedAt": 1786008959153
-  },
-  {
-    "task": "what the fuck is that you don't understand this 2 is redundant and should be consolidated....",
-    "checklist": {
-      "items": [
-        {
-          "task": "Introduce single arm?: 'off'|'session'|'task' in config type + parser with legacy autoArm/alwaysRearm normalization",
-          "validation": "tsc + config tests pass"
-        },
-        {
-          "task": "Replace alwaysRearm in lifecycle/rearm/controller with arm === 'task'",
-          "validation": "prewalk lifecycle/controller tests pass"
-        },
-        {
-          "task": "Replace autoArm in arm.ts + index.ts settle with new arm value",
-          "validation": "arm tests pass"
-        },
-        {
-          "task": "Update settings UI + fabric command status labels to show arm mode",
-          "validation": "settings tests pass"
-        },
-        {
-          "task": "Update all tests + .pi/fabric.json to arm: 'never'/'session'/'task'",
-          "validation": "pnpm test suite green for prewalk+config"
-        }
-      ],
-      "readyAt": 1786003444603
-    },
-    "recordedAt": 1786004902719
   }
 ]

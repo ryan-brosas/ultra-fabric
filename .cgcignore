@@ -19,8 +19,3 @@ __pycache__/
 *.zip
 *.tar
 *.gz
-
-# Project-specific: exclude vendored upstream clones and benchmark run artifacts.
-# These are not Ultra Fabric source and dominated the graph (13,577 files, incl. 4,011 vendored .go).
-sources/
-bench/
