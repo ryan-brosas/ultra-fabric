@@ -346,10 +346,6 @@ export class PrewalkController {
     this.#writeScopes.set(sessionId, new Set(paths));
   }
 
-  clearWriteScope(sessionId: string): void {
-    this.#writeScopes.delete(sessionId);
-  }
-
   #enforceWriteScope(sessionId: string, action: FabricPrewalkBoundaryAction): void {
     const scope = this.#writeScopes.get(sessionId);
     if (!scope || scope.size === 0) return;

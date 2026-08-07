@@ -48,6 +48,11 @@ describe("PrewalkController write scope", () => {
     expect(boundary.authorize({ ref: "pi.edit", effect: "workspace", path: "src/anywhere.ts" })).toBe(true);
   });
 
+  it("does not expose the removed clearWriteScope method", () => {
+    const ctrl = new PrewalkController();
+    expect((ctrl as unknown as Record<string, unknown>).clearWriteScope).toBeUndefined();
+  });
+
   it("releases the scope on settleTask so a later write is authorized again", () => {
     const { ctrl, boundary } = setup();
     ctrl.setWriteScope("s1", ["src/config.ts"]);
