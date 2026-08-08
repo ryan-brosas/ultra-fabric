@@ -62,6 +62,16 @@ const enabledEnv = () => ({
   PI_FABRIC_BENCH_SEED: "prewalk-runner-test",
 });
 
+describe("buildPrewalkProjectConfig", () => {
+  it("disables planning escapes only for the research variant", () => {
+    const executor = { provider: "openai-codex", model: "gpt-5.6-sol" };
+    const research = buildPrewalkProjectConfig("research", executor, 900000);
+    expect(research.prewalk.planningEscapes).toBe(false);
+    const inPlace = buildPrewalkProjectConfig("in-place", executor, 900000);
+    expect(inPlace.prewalk.planningEscapes).toBeUndefined();
+  });
+});
+
 describe("real Prewalk runner contract", () => {
   it("is disabled by default and never returns credential values", () => {
     const disabled = prewalkRunnerGate({});

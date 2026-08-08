@@ -6,6 +6,32 @@ export const MIN_EASY_PREWALK_CHECKLIST_ITEMS = 2;
 export const MAX_EASY_PREWALK_CHECKLIST_ITEMS = 4;
 const MAX_PREWALK_CHECKLIST_FIELD_CHARS = 1_000;
 
+// Schema-first planning contract: the accepted checklist is a readable
+// projection of this contract, not an independent progression authority.
+// Intent states the claimed state transition, references name external
+// questions answered through CGC or reference checkouts, localScope names the
+// project files, symbols, and codemap cascade refs the change touches,
+// invariants must survive, and postconditions must hold after implementation.
+export interface FabricPrewalkSchemaReference {
+  repository: string;
+  question: string;
+  evidenceRefs: string[];
+}
+
+export interface FabricPrewalkSchemaLocalScope {
+  files: string[];
+  symbols: string[];
+  cascadeRefs: string[];
+}
+
+export interface FabricPrewalkSchemaContract {
+  intent: string;
+  references: FabricPrewalkSchemaReference[];
+  localScope: FabricPrewalkSchemaLocalScope;
+  invariants: string[];
+  postconditions: string[];
+}
+
 interface FabricPrewalkChecklistItem {
   task: string;
   validation: string;
@@ -23,15 +49,15 @@ export interface FabricPrewalkChecklist {
   // controller suppresses the mutation boundary and the executor handoff
   // instead of forcing the 5-9 item ceremony and a model swap.
   trivial?: boolean;
-  // Easy-path router: a bounded mid-tier task still hands off to the executor
-  // (unlike trivial) but relaxes the planning ceremony to 2-4 items so Main
-  // skips deep research on it.
-  easy?: boolean;
+  // Typed Schema-first planning contract. Present on research plans; parsed
+  // strictly when present — incomplete or unverified contracts are rejected
+  // at planning time.
+  schema?: FabricPrewalkSchemaContract;
 }
 
 const checklistField = (
   value: unknown,
-  field: keyof FabricPrewalkChecklistItem,
+  field: string,
   index: number,
 ): string => {
   if (typeof value !== "string" || !value.trim()) {
@@ -82,7 +108,7 @@ export const parsePrewalkChecklist = (
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new Error("Prewalk checklist requires an object with an items array");
   }
-  const record = input as { trivial?: unknown; easy?: unknown; items?: unknown };
+  const record = input as { trivial?: unknown; easy?: unknown; items?: unknown; schema?: unknown };
   if (record.trivial !== undefined) {
     if (typeof record.trivial !== "boolean") {
       throw new Error("Prewalk trivial flag must be a boolean");
@@ -90,6 +116,9 @@ export const parsePrewalkChecklist = (
     if (record.trivial) {
       if (record.items !== undefined) {
         throw new Error("Prewalk trivial checklist must not carry items");
+      }
+      if (record.schema !== undefined) {
+        throw new Error("Prewalk trivial checklist must not carry a schema contract");
       }
       return { items: [], readyAt, trivial: true };
     }
@@ -122,5 +151,59 @@ export const parsePrewalkChecklist = (
     readyAt,
     ...(easy === true ? { easy: true } : {}),
   };
+  const schema = record.schema;
+  if (schema !== undefined) {
+    if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+      throw new Error("Prewalk schema contract must be an object");
+    }
+    const contract = schema as Record<string, unknown>;
+    const intent = checklistField(contract.intent, "intent", 0);
+    const references = contract.references;
+    if (!Array.isArray(references)) {
+      throw new Error("Prewalk schema contract requires a references array");
+    }
+    const parsedReferences = references.map((entry, index) => {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        throw new Error(`Prewalk schema reference ${index + 1} must be an object`);
+      }
+      const ref = entry as Record<string, unknown>;
+      const repository = checklistField(ref.repository, "repository", index);
+      const question = checklistField(ref.question, "question", index);
+      const evidenceRefs = ref.evidenceRefs;
+      if (!Array.isArray(evidenceRefs) || evidenceRefs.length === 0) {
+        throw new Error(`Prewalk schema reference ${index + 1} requires nonempty evidenceRefs`);
+      }
+      return { repository, question, evidenceRefs: evidenceRefs.map(String) };
+    });
+    const localScope = contract.localScope;
+    if (typeof localScope !== "object" || localScope === null || Array.isArray(localScope)) {
+      throw new Error("Prewalk schema contract requires localScope");
+    }
+    const scope = localScope as Record<string, unknown>;
+    const files = scope.files;
+    if (!Array.isArray(files) || files.length === 0) {
+      throw new Error("Prewalk schema contract localScope.files must list at least one project file");
+    }
+    const symbols = Array.isArray(scope.symbols) ? scope.symbols.map(String) : [];
+    const cascadeRefs = Array.isArray(scope.cascadeRefs) ? scope.cascadeRefs.map(String) : [];
+    const invariants = contract.invariants;
+    if (!Array.isArray(invariants) || invariants.length === 0) {
+      throw new Error("Prewalk schema contract requires nonempty invariants");
+    }
+    const postconditions = contract.postconditions;
+    if (!Array.isArray(postconditions) || postconditions.length === 0) {
+      throw new Error("Prewalk schema contract requires nonempty postconditions");
+    }
+    return {
+      ...parsed,
+      schema: {
+        intent,
+        references: parsedReferences,
+        localScope: { files: files.map(String), symbols, cascadeRefs },
+        invariants: invariants.map(String),
+        postconditions: postconditions.map(String),
+      },
+    };
+  }
   return parsed;
 };

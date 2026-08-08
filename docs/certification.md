@@ -187,7 +187,17 @@ The collector verifies that Pi loaded `/fabric`, disables unrelated context file
 
 The USD limit is an observed stop checked before each next arm, not a provider-side hard cap; one in-flight arm can overshoot. Missing commands, timeouts, malformed evaluator output, absent probe evidence, or unloaded Fabric are benchmark infrastructure failures rather than task failures. Model/task failures remain scored as incomplete acceptance, missed constraints, or unsupported claims.
 
+### Observed real-run findings (2026-08-08)
+
+The first real collector runs on the operator stack were attempted and produced reproducible findings:
+
+- The omniroute provider extension loads headless via `PI_FABRIC_PREWALK_EXTRA_EXTENSIONS`; the probe observes checklist counts because the trace projection now carries `fabric.prewalk.checklist` item structure (counts and dispositions, never plan text); and `prewalk.planningEscapes: false` forces the full 5-9 item protocol in benchmark configs.
+- The research arm still cannot complete headless: the executor continuation is queued with `sendMessage({ deliverAs: "followUp", triggerTurn: true })`, which is interactive-only, and a resume prompt hangs the RPC session. The executor phase never runs, so no research record can reach `comparison_ready`.
+- The bundled 20-task corpus is too small for the research protocol: a capable frontier model correctly trivial-escapes single-function contract fixtures, so those records cannot carry 5-9 item checklists even with escapes disabled.
+- The pinned `openai-codex/gpt-5.6-sol` is rejected by a ChatGPT-account Codex ("not supported when using Codex with a ChatGPT account") and `gpt-5.5` reports "usage limit reached"; the working route is the operator omniroute gateway (`opencode-go/deepseek-v4-flash`), which reports zero USD cost to Pi, so the token budget is the enforced stop.
+
 ### What remains missing
+
 
 - The bundled corpus is source-qualified contract coverage, not an independently sampled set of historical repository changes.
 - Its bundled evaluator scores checklist structure, artifact specificity, and unsupported success claims after oracle failure; it does not establish semantic plan quality.

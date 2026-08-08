@@ -13,6 +13,7 @@ import {
   isFabricExecutionTraceV1,
   readFabricExecutionTraceV1,
 } from "../src/audit/trace.js";
+import { projectFabricAuditArgs } from "../src/audit/projection.js";
 import { FabricActivityStore } from "../src/activity/store.js";
 import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
 import { ActionRegistry } from "../src/core/action-registry.js";
@@ -85,6 +86,24 @@ const execute = (
     context,
     onPartial() {},
   });
+
+describe("projectFabricAuditArgs prewalk checklist", () => {
+  it("keeps checklist structure and drops plan and schema text", () => {
+    const projection = projectFabricAuditArgs("fabric.prewalk.checklist", {
+      items: [
+        { task: "private plan task", validation: "private proof" },
+        { task: "second", validation: "check" },
+        { task: "third", validation: "check" },
+        { task: "fourth", validation: "check" },
+        { task: "fifth", validation: "check" },
+      ],
+      schema: { intent: "private intent", references: [] },
+    });
+    expect(projection.value.itemsCount).toBe(5);
+    expect(projection.value.trivial).toBe(false);
+    expect(JSON.stringify(projection.value)).not.toContain("private");
+  });
+});
 
 describe("Fabric execution trace V1", () => {
   it("records successful calls with the stable V1 envelope and preserves legacy audits", async () => {

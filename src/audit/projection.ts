@@ -208,6 +208,14 @@ export const projectFabricAuditArgs = (
       });
     case "fabric.workflow.event":
       return projected(args, (output) => copyIdentifier(output, args, "level"));
+    case "fabric.prewalk.checklist":
+      // The benchmark probe needs the checklist shape (item count, dispositions)
+      // but never the plan text or Schema contract payload.
+      return projected(args, (output) => {
+        output.itemsCount = Array.isArray(args.items) ? args.items.length : 0;
+        output.trivial = args.trivial === true;
+        output.easy = args.easy === true;
+      });
     case "fabric.workflow.parallel":
     case "fabric.workflow.pipeline":
       return projected(args, (output) => {

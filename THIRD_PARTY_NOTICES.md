@@ -8,6 +8,8 @@ The workflow vocabulary was informed by Anthropic's dynamic workflows documentat
 
 Pi Fabric adapts cooperative shell rendering, core-tool preview, diff, path-list, warning, and word-emphasis logic from the MIT-licensed [`pi-code-previews`](https://github.com/mattleong/pi-code-previews) package.
 
+Fabric compaction adopts deterministic strategies from three MIT-licensed reference projects: tool-output deduplication and diagnostic-preserving pruning concepts from [`pi-dcp`](https://github.com/pi-vault/pi-dcp); structural noise filtering and sectioned summaries from [`pi-vcc`](https://github.com/monotykamary/pi-vcc); and compaction ordinal counting plus proactive-threshold cooldown concepts from [`pi-vcc-tom`](https://github.com/monotykamary/pi-vcc-tom). All three are distributed under the MIT license; see the adopted-concepts section of `docs/compaction.md` for the exact mapping.
+
 ## pi-code-previews
 
 MIT License

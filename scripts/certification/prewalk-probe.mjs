@@ -12,7 +12,12 @@ const operationSummary = (result) => {
   const checklist = operations.find(
     (operation) => operation?.ref === "fabric.prewalk.checklist" && operation?.outcome === "succeeded",
   );
-  const items = Array.isArray(checklist?.args?.items) ? checklist.args.items.length : 0;
+  const rawItems = Array.isArray(checklist?.args?.items)
+    ? checklist.args.items.length
+    : checklist?.args?.itemsCount;
+  const items = typeof rawItems === "number" && Number.isFinite(rawItems)
+    ? Math.max(0, Math.floor(rawItems))
+    : 0;
   const workspaceMutations = operations.filter(
     (operation) => operation?.effect === "workspace" && operation?.outcome === "succeeded",
   ).length;

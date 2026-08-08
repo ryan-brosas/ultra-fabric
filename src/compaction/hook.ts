@@ -490,7 +490,9 @@ export interface FabricCompactionDetailsV2 {
     liveCutEntries: number;
     priorFabricV1: number;
     priorFabricV2: number;
+    intactPairs: number;
   };
+  ordinal: number;
   omittedCounts: ProjectionOmittedCounts & { preserve: number };
   instructionPolicy: CompactionInstructionPolicy;
   stableAddresses: {
@@ -537,6 +539,11 @@ const isFabricV2Details = (value: Record<string, unknown>): boolean => {
       "priorFabricV1",
       "priorFabricV2",
     ])
+    // New fields are additive: entries produced before their introduction stay valid.
+    && (value.counts.intactPairs === undefined
+      || (typeof value.counts.intactPairs === "number" && Number.isFinite(value.counts.intactPairs) && value.counts.intactPairs >= 0))
+    && (value.ordinal === undefined
+      || (typeof value.ordinal === "number" && Number.isInteger(value.ordinal) && value.ordinal >= 1))
     && hasFiniteNumbers(value.omittedCounts, [
       "goal",
       "files",
@@ -549,6 +556,10 @@ const isFabricV2Details = (value: Record<string, unknown>): boolean => {
       || (typeof value.omittedCounts.activity === "number" && Number.isFinite(value.omittedCounts.activity)))
     && (value.omittedCounts.commits === undefined
       || (typeof value.omittedCounts.commits === "number" && Number.isFinite(value.omittedCounts.commits)))
+    && (value.omittedCounts.duplicates === undefined
+      || (typeof value.omittedCounts.duplicates === "number" && Number.isFinite(value.omittedCounts.duplicates)))
+    && (value.omittedCounts.noise === undefined
+      || (typeof value.omittedCounts.noise === "number" && Number.isFinite(value.omittedCounts.noise)))
     && typeof value.instructionPolicy.mode === "string"
     && instructionModes.has(value.instructionPolicy.mode)
     && typeof value.instructionPolicy.canonicalized === "boolean"
@@ -677,6 +688,13 @@ export const compileFabricSummary = (
     };
   }
   const versions = priorFabricVersions(branchEntries);
+  const keptIndex = cut.firstKeptEntryId
+    ? branchEntries.findIndex((entry) => entry.id === cut.firstKeptEntryId)
+    : branchEntries.length;
+  let intactPairs = 0;
+  for (const span of callResultSpans(branchEntries).values()) {
+    if (span.hasCall && span.hasResult && span.last < keptIndex) intactPairs += 1;
+  }
   const sectionHeaders = SECTION_HEADERS
     .filter(({ key }) => sections[key].length > 0)
     .map(({ header }) => header);
@@ -700,7 +718,9 @@ export const compileFabricSummary = (
       liveCutEntries: cut.summarized.length,
       priorFabricV1: versions.v1,
       priorFabricV2: versions.v2,
+      intactPairs,
     },
+    ordinal: versions.v1 + versions.v2 + 1,
     omittedCounts: {
       ...projected.omittedCounts,
       preserve: instructions.policy.omittedPreserveCount,

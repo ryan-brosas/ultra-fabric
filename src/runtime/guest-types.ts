@@ -1183,6 +1183,23 @@ interface FabricPrewalkChecklistItem {
   task: string;
   validation: string;
 }
+interface FabricPrewalkSchemaReference {
+  repository: string;
+  question: string;
+  evidenceRefs: string[];
+}
+interface FabricPrewalkSchemaLocalScope {
+  files: string[];
+  symbols: string[];
+  cascadeRefs: string[];
+}
+interface FabricPrewalkSchemaContract {
+  intent: string;
+  references: FabricPrewalkSchemaReference[];
+  localScope: FabricPrewalkSchemaLocalScope;
+  invariants: string[];
+  postconditions: string[];
+}
 interface FabricPrewalkChecklist {
   items: FabricPrewalkChecklistItem[];
   readyAt: number;
@@ -1195,12 +1212,13 @@ interface FabricPrewalkChecklist {
   // (unlike trivial) but relaxes the planning ceremony to 2-4 items so Main
   // skips deep research on it.
   easy?: boolean;
+  schema?: FabricPrewalkSchemaContract;
 }
 interface FabricPrewalkApi {
   checklist(
     input:
       | { trivial: true }
-      | { items: FabricPrewalkChecklistItem[]; easy?: boolean; trivial?: false },
+      | { items: FabricPrewalkChecklistItem[]; easy?: boolean; trivial?: false; schema?: FabricPrewalkSchemaContract },
   ): Promise<FabricPrewalkChecklist>;
 }
 

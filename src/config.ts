@@ -101,6 +101,10 @@ interface FabricPrewalkConfig {
   verificationMode?: FabricPrewalkVerificationMode;
   maxPhaseRevisions?: number;
   researchAgent?: string;
+  // Enable the easy and trivial checklist escapes in the research arm prompt
+  // (default true). Set false to force the full 5-9 item planning protocol;
+  // the prewalk benchmark disables it so research records carry real checklists.
+  planningEscapes?: boolean;
 }
 
 export interface FabricAgentConfig {
@@ -232,6 +236,10 @@ interface FabricCompactionConfig {
   // never compacting.
   threshold: number;
   thresholds: Record<string, number>;
+  // Minimum interval between threshold-triggered compactions, in milliseconds.
+  // Opt-in throttle: 0 (the default) disables the guard entirely. Adopted
+  // concept: pi-vcc-tom proactive-threshold cooldown / pi-dcp nudge throttling.
+  cooldownMs: number;
   contextQos: FabricContextQosConfig;
 }
 
@@ -422,6 +430,7 @@ export const DEFAULT_FABRIC_CONFIG: FabricConfig = {
     messageThreshold: 700,
     threshold: 0.85,
     thresholds: {},
+    cooldownMs: 0,
     contextQos: {
       enabled: true,
       turnWindow: 2,
@@ -1021,6 +1030,9 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
             ),
           }
         : {}),
+      ...(booleanValue(prewalk.planningEscapes, true) === false
+        ? { planningEscapes: false }
+        : {}),
     },
     agents: {
       enabled: booleanValue(agents.enabled, DEFAULT_FABRIC_CONFIG.agents.enabled),
@@ -1177,6 +1189,12 @@ export const normalizeFabricConfig = (input: Record<string, unknown>): FabricCon
         0.95,
       ),
       thresholds: compactionThresholds,
+      cooldownMs: boundedInteger(
+        compaction.cooldownMs,
+        DEFAULT_FABRIC_CONFIG.compaction.cooldownMs,
+        0,
+        3_600_000,
+      ),
       contextQos: {
         enabled: booleanValue(
           contextQos.enabled,

@@ -209,15 +209,24 @@ Typed v1 limits are enforced before value mapping or canonicalization: instructi
 New summaries emit `details.compactor: "fabric"` and `details.version: 2` with:
 
 - cumulative source and live-cut ranges;
-- branch, source-entry, event, and live-cut counts;
-- prior recognized Fabric v1/v2 marker counts;
-- per-projection omission counts and the typed preserve count (valid v1 requests cannot exceed the preserve limit);
+- branch, source-entry, event, and live-cut counts, plus the number of tool-call/result pairs retained whole inside the summarized window (`counts.intactPairs`);
+- prior recognized Fabric v1/v2 marker counts and the 1-based `ordinal` of this compaction (`priorFabricV1 + priorFabricV2 + 1`);
+- per-projection omission counts, the typed preserve count (valid v1 requests cannot exceed the preserve limit), and the optional `duplicates` (collapsed repeated output) and `noise` (skipped bookkeeping tool pairs) counters;
 - instruction mode, canonicalization, source size, truncation, and preserve counts;
 - stable kept/source entry-id addresses and the source timestamp;
 - when adaptive budgeting is active: advertised window, target ratio/tokens, Pi reserve and recent settings, raw estimate, calibration scale, fixed overhead, retained raw tokens, and Fabric's `projectedTokensAfter`. Pi core independently recomputes its own `estimatedTokensAfter` after persisting the compaction;
 - for successful official OpenAI Responses routing: a versioned `remoteCompaction` envelope with the exact provider/API/model key, bounded recent user items, opaque replacement history, and provider-reported usage/cost.
 
-Only exact Fabric versions 1 and 2 are recognized. v1 details and rendered prose are not reused as truth. On the next compaction, an old session naturally migrates to v2 because the new result is rebuilt from raw active-branch entries. V2 validation accepts the legacy commit-omission counter for old records, but new summaries do not emit a commit projection or counter.
+Only exact Fabric versions 1 and 2 are recognized. v1 details and rendered prose are not reused as truth. On the next compaction, an old session naturally migrates to v2 because the new result is rebuilt from raw active-branch entries. V2 validation accepts the legacy commit-omission counter for old records, but new summaries do not emit a commit projection or counter. `counts.intactPairs` and `ordinal` are additive: entries persisted before their introduction remain valid, and new summaries always emit them.
+
+## Adopted reference concepts
+
+This section records which compaction ideas were adopted from the MIT-licensed reference projects and how each one fits the deterministic core.
+
+- **Tool-output deduplication** (adopted from [`pi-dcp`](https://github.com/pi-vault/pi-dcp)): within the brief transcript, a repeated identical non-error tool result after the first occurrence renders as a stable `(same output as (#N))` reference and is counted in `omittedCounts.duplicates`. Failed diagnostics are never deduplicated, so error signatures survive exactly as in pi-dcp's prune policy.
+- **Structural noise filtering** (adopted from [`pi-vcc`](https://github.com/monotykamary/pi-vcc) `filter-noise`): the bookkeeping tool pair set (`TodoWrite`, `TodoRead`) is skipped before projection and counted in `omittedCounts.noise`, and Pi-injected XML wrapper blocks (`<system-reminder>`, `<ide_opened_file>`, `<command-message>`, `<context-window-usage>`) are stripped from user text during normalization. Both matches are purely structural; no prose is inspected.
+- **Compaction ordinal** (adopted from [`pi-vcc-tom`](https://github.com/monotykamary/pi-vcc-tom) `compaction-count`): `details.ordinal` is the 1-based count of prior recognized Fabric compactions plus one, matching the session-entry-based indexing convention.
+- **Proactive threshold cooldown** (adopted from pi-vcc-tom `proactive-threshold` and pi-dcp nudge throttling): `compaction.cooldownMs` is an opt-in minimum interval between threshold-triggered compactions. The default `0` disables the guard entirely; the timestamp is set at trigger time so a failing compact cannot hammer the provider on consecutive `agent_settled` boundaries. `resetThresholdCooldown()` clears it and runs on `session_start`.
 
 ## Nested Fabric execution traces
 

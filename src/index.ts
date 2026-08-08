@@ -49,7 +49,7 @@ import { applyHandoffRetirement } from "./context/handoff-retirement.js";
 import { prewalkMemoryDir, recordChecklist } from "./prewalk/checklist-memory.js";
 import { prewalkFailureDir, recordFailure } from "./prewalk/failure-memory.js";
 import { applyContextQos } from "./context/qos.js";
-import { compactAtConfiguredThreshold } from "./compaction/threshold.js";
+import { compactAtConfiguredThreshold, resetThresholdCooldown } from "./compaction/threshold.js";
 import {
   FabricToolLifecycle,
   FabricToolOwnership,
@@ -264,6 +264,7 @@ export default async function piFabric(pi: ExtensionAPI): Promise<void> {
   pi.on("session_start", async (_event, context) => {
     pendingHandoffs.clear();
     state.carry.clear();
+    resetThresholdCooldown();
     directToolApproval.clear();
     fabricUi.stop();
     suspendToolCapture();

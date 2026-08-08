@@ -1725,3 +1725,160 @@ describe("compaction section composition", () => {
     expect(compaction.summary).not.toContain("- final review");
   });
 });
+
+describe("adopted output deduplication and noise filtering", () => {
+  it("deduplicates repeated identical non-error tool output in the transcript", () => {
+    resetIds();
+    resetCallIds();
+    resetClock();
+    const c1 = nextCallId();
+    const c2 = nextCallId();
+    const c3 = nextCallId();
+    const session = buildSession(
+      user("goal"),
+      assistant(toolCallPart(c1, "grep", { pattern: "x" })),
+      toolResult(c1, "grep", "same output"),
+      assistant(toolCallPart(c2, "grep", { pattern: "x" })),
+      toolResult(c2, "grep", "same output"),
+      assistant(toolCallPart(c3, "grep", { pattern: "y" })),
+      toolResult(c3, "grep", "different output"),
+    );
+    const result = projectWithMetadata(normalizeEntries(session));
+    expect(result.omittedCounts.duplicates).toBe(1);
+    const transcript = result.sections.transcript.join("\n");
+    expect(transcript).toContain("(same output as");
+    expect(transcript).toContain("different output");
+  });
+
+  it("never deduplicates failed tool diagnostics", () => {
+    resetIds();
+    resetCallIds();
+    resetClock();
+    const c1 = nextCallId();
+    const c2 = nextCallId();
+    const session = buildSession(
+      user("goal"),
+      assistant(toolCallPart(c1, "grep", { pattern: "x" })),
+      toolResult(c1, "grep", "boom", true),
+      assistant(toolCallPart(c2, "grep", { pattern: "x" })),
+      toolResult(c2, "grep", "boom", true),
+    );
+    const result = projectWithMetadata(normalizeEntries(session));
+    expect(result.omittedCounts.duplicates ?? 0).toBe(0);
+    expect(result.sections.transcript.join("\n").match(/boom/g)?.length ?? 0).toBe(2);
+  });
+
+  it("skips bookkeeping tool noise in the transcript and counts it", () => {
+    resetIds();
+    resetCallIds();
+    resetClock();
+    const c1 = nextCallId();
+    const session = buildSession(
+      user("goal"),
+      assistant(toolCallPart(c1, "TodoWrite", { todos: [] })),
+      toolResult(c1, "TodoWrite", "todos updated"),
+    );
+    const result = projectWithMetadata(normalizeEntries(session));
+    expect(result.omittedCounts.noise).toBe(2);
+    expect(result.sections.transcript.join("\n")).not.toContain("TodoWrite");
+  });
+
+  it("strips structural XML wrapper noise from user text during normalization", () => {
+    resetIds();
+    resetClock();
+    const session = buildSession(
+      user("real request\n<system-reminder>You MUST carefully think about the tool results and continue.</system-reminder>"),
+    );
+    const events = normalizeEntries(session);
+    const userEvent = events.find((event) => event.kind === "user");
+    expect(userEvent?.text).toBe("real request");
+  });
+
+  it("drops user entries that contain only wrapper noise", () => {
+    resetIds();
+    resetClock();
+    const session = buildSession(user("<command-message>ignore this message</command-message>"));
+    const events = normalizeEntries(session);
+    expect(events.some((event) => event.kind === "user")).toBe(false);
+  });
+});
+
+describe("adopted ordinal and pair-protection metadata", () => {
+  it("reports a monotonic ordinal and intact pair count in details", () => {
+    resetIds();
+    resetCallIds();
+    resetClock();
+    const c1 = nextCallId();
+    const first = compileFabricSummary(buildSession(
+      user("first goal"),
+      assistant(toolCallPart(c1, "read", { path: "a.ts" })),
+      toolResult(c1, "read", "a"),
+    ), 1000);
+    if (!("compaction" in first)) throw new Error("expected compaction");
+    expect(first.compaction.details?.ordinal).toBe(1);
+    expect(first.compaction.details?.counts.intactPairs).toBe(1);
+
+    resetIds();
+    resetCallIds();
+    resetClock();
+    const keptId = first.compaction.firstKeptEntryId;
+    const c2 = nextCallId();
+    const second = compileFabricSummary(buildSession(
+      user("first goal"),
+      assistant(toolCallPart(c2, "read", { path: "a.ts" })),
+      toolResult(c2, "read", "a"),
+      compactionEntry(keptId, "(prior)", first.compaction.details),
+      user("second goal"),
+      assistant(textPart("reply")),
+    ), 1000);
+    if (!("compaction" in second)) throw new Error("expected compaction");
+    expect(second.compaction.details?.ordinal).toBe(2);
+  });
+
+  it("keeps accepting structurally valid v2 details without the new fields", () => {
+    const oldShape = {
+      compactor: "fabric",
+      version: 2,
+      sections: ["[Session Goal]"],
+      coverage: {
+        cumulativeSourceRange: { first: "e1", last: "e2" },
+        liveCutRange: { first: "e1", last: "e2" },
+      },
+      counts: {
+        branchEntries: 2,
+        cumulativeSourceEntries: 2,
+        sourceEvents: 2,
+        liveCutEntries: 2,
+        priorFabricV1: 0,
+        priorFabricV2: 0,
+      },
+      omittedCounts: {
+        goal: 0,
+        files: 0,
+        activity: 0,
+        outstanding: 0,
+        earlierTurns: 0,
+        transcript: 0,
+        preserve: 0,
+      },
+      instructionPolicy: {
+        mode: "none",
+        canonicalized: false,
+        truncated: false,
+        sourceBytes: 0,
+        preserveCount: 0,
+        omittedPreserveCount: 0,
+      },
+      stableAddresses: {
+        firstKeptEntryId: "e2",
+        cumulativeSourceRange: { first: "e1", last: "e2" },
+        recall: "session-entry-id-range",
+      },
+      timestamp: "2024-01-01T00:00:00Z",
+    };
+    expect(fabricCompactionVersion(oldShape)).toBe(2);
+    expect(fabricCompactionVersion({ ...oldShape, ordinal: 3 })).toBe(2);
+    expect(fabricCompactionVersion({ ...oldShape, ordinal: 0 })).toBeUndefined();
+    expect(fabricCompactionVersion({ ...oldShape, ordinal: 1.5 })).toBeUndefined();
+  });
+});

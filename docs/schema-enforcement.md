@@ -44,6 +44,17 @@ It blocks `pi.edit`, `pi.write`, `pi.bash`, all agent actions across both lifecy
 
 Persistent agents are not restored and host-event dispatch is disabled for an enforce session. Agent execution is disabled and agent actions are blocked. Capture `keepVisible`, descriptor risk, claimed source metadata, or tool visibility cannot authorize a second top-level path. A colliding external or SDK tool named `fabric_exec` is blocked unless Pi's canonical `sourceInfo.path` identifies this extension entry exactly.
 
+## Planning authority
+
+Schema is the progression authority for nontrivial Fabric work. Prewalk research planning projects a typed Schema-first contract onto the accepted checklist; the checklist is a readable rendering of that contract, not an independent source of truth. The contract carries intent, reference questions with evidence refs, local scope (files, symbols, cascade refs), invariants, and postconditions. When present on a checklist it is parsed strictly: incomplete contracts, empty scopes, or unverified reference questions are rejected at planning time.
+
+Graphs are evidence, not progression:
+
+- **CGC** answers reference questions. When the request names CGC, a repository, or a comparison, planning queries each named reference with `codemap({ operation: "explore", mode: "cgc", context: "<repo>" })` and reports unavailable or unregistered contexts explicitly. Selected ideas are source-verified against the reference checkout before adoption.
+- **Local Codemap** (`mode: "ast"`) maps project scope before planning with `search`, `refs`, and `cascade`, and validates structure after commit: rerun `refs` and `cascade` on every changed signature or symbol and confirm no out-of-scope file changed.
+
+Adoption is staged. The typed contract and planning guidance are live. Global `schema.mode` remains `off`, so direct tool behavior is unchanged; promotion to `audit` on the Prewalk path and then `enforce` as the default follows the Slice 8 benchmark and soak gates. The transaction protocol below remains the enforce-mode mechanism.
+
 ## Transaction protocol
 
 Use all steps in one `fabric_exec` invocation. Certificates are bound to its `parentToolCallId` and cannot be transferred to a later call.

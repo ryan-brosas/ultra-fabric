@@ -5,6 +5,14 @@ export const modelCompactionKey = (
   model: Pick<NonNullable<ExtensionContext["model"]>, "provider" | "id"> | undefined,
 ): string | undefined => model ? `${model.provider}/${model.id}` : undefined;
 
+let lastThresholdCompactAt = 0;
+
+// Test/session hook: clear the cooldown timestamp. Wired to session_start so a
+// long-lived extension never carries throttling across sessions.
+export const resetThresholdCooldown = (): void => {
+  lastThresholdCompactAt = 0;
+};
+
 const configuredCompactionThreshold = (
   config: FabricConfig,
   model: ExtensionContext["model"],
@@ -33,6 +41,14 @@ export const compactAtConfiguredThreshold = async (
     if (usage?.percent === null || usage === undefined) return false;
     if (usage.percent / 100 < threshold) return false;
   }
+
+  // Opt-in throttle between threshold-triggered compactions (adopted concept:
+  // pi-vcc-tom proactive-threshold cooldown / pi-dcp nudge throttling). The
+  // timestamp is set at trigger time, so a failing compact cannot hammer the
+  // provider on consecutive agent_settled boundaries. 0 disables the guard.
+  const cooldownMs = Math.max(0, Math.floor(config.compaction.cooldownMs));
+  if (cooldownMs > 0 && Date.now() - lastThresholdCompactAt < cooldownMs) return false;
+  lastThresholdCompactAt = Date.now();
 
   return new Promise<boolean>((resolve) => {
     context.compact({

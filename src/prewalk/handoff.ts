@@ -34,8 +34,19 @@ export const checklistContinuationPrompt = (
   ...checklist.items.map(
     (item, index) => `${index + 1}. ${item.task}\n   Validation: ${item.validation}`,
   ),
+  ...(checklist.schema
+    ? [
+        "This checklist projects the accepted Schema contract:",
+        `Intent: ${checklist.schema.intent}`,
+        `References: ${checklist.schema.references.map((ref) => `${ref.repository}: ${ref.question}`).join("; ")}`,
+        `Scope: ${checklist.schema.localScope.files.join(", ")}`,
+        `Invariants: ${checklist.schema.invariants.join("; ")}`,
+        `Postconditions: ${checklist.schema.postconditions.join("; ")}`,
+      ]
+    : []),
   "As you complete each checklist item above, emit its [DONE:n] marker in the same turn, where n is the item's number above; for example [DONE:2] for item 2. The host advances the checklist and strikes the item through from these markers.",
   "Before claiming completion: sweep every other call site for any pattern, signature, or check you changed and apply the same change; keep the diff minimal and confirm no out-of-scope behavior changed; run the full test module the change lives in, not just the test you expect to flip.",
+  "Acceptance requires executable evidence plus structural validation: rerun codemap refs and cascade on every signature or symbol you changed, confirm no out-of-scope file changed, and pass the full test module and the repository gate.",
   "Finish the implementation, run every listed validation plus the relevant final verification, and only then report completion.",
 ].join("\n");
 
@@ -45,6 +56,7 @@ export const checklistContinuationPrompt = (
 const PREWALK_GATED_VERIFY_PROMPT = [
   "Prewalk execution phase complete. Verify the existing implementation; do not redo it speculatively.",
   "Run the smallest relevant behavioral checks in fabric_exec, then finish that same fabric_exec with workflow.gate().",
+  "Also validate structurally: rerun codemap refs and cascade on changed signatures and confirm no out-of-scope file changed.",
   "Report passed: true with concrete command/artifact evidence when acceptance holds.",
   "If a check fails, report passed: false, disposition: 'revise', the failed evidence ref, and scoped reason; Prewalk will return only that feedback to the executor within its revision cap.",
   "Use disposition: 'abort' only when downstream work must stop. Do not claim completion without a passing gate.",
@@ -64,19 +76,31 @@ const PREWALK_RESEARCH_ENRICHMENT = [
   "When the task depends on an unfamiliar algorithm, technique, or external system, ground it before implementation: find one aligned arXiv paper for the technique and clone the aligned GitHub repository into sources/ for reference, instead of fetching isolated files.",
 ].join(" ");
 
-const researchArmedPrompt = (model: string): string => [
+const researchArmedPrompt = (model: string, planningEscapes = true): string => [
   `Prewalk armed → ${model} (research).`,
   "Before any further mutation, commit to a deep, concrete remaining execution plan grounded in the context already gathered. Cover the target files or symbols, dependencies, edge cases, and proof.",
   PREWALK_RESEARCH_ENRICHMENT,
+  "Schema is the progression authority: the accepted checklist projects a Schema contract carrying intent, reference questions and evidence refs, local scope (files, symbols, cascade refs), invariants, and postconditions. Include the schema object only when the plan carries external reference questions or a multi-file scope.",
+  "Map local scope with local codemap mode \"ast\" (search, refs, cascade) before planning; honor explicit reference research — when the request names CGC or external repositories, query each named reference with codemap({ operation: \"explore\", mode: \"cgc\", context: \"<repo>\" }) and report unavailable or unregistered contexts explicitly.",
   "In that same reply, call prewalk.checklist({ items }) inside fabric_exec with 5-9 ordered items; every item needs a concrete task and specific validation. The host rejects mutation until the checklist is accepted.",
   "Phrase every validation as observable evidence, goal-backward: a command that exits 0, a named test that passes, or a file:line that proves the claim — never intent like \"should work\". If the task needs two checks, list both.",
-  "Easy escape: bounded mid-tier tasks may call prewalk.checklist({ easy: true, items }) with 2-4 items; the host still hands off but Main skips deep research.",
-  "Trivial escape: if the task clearly fits in one or two small edits, call prewalk.checklist({ trivial: true }) inside fabric_exec instead and complete the task directly in this same turn; the host records the trivial disposition, skips the mutation boundary, and makes no model swap or handoff.",
+  ...(planningEscapes
+    ? [
+        "Easy escape: bounded mid-tier tasks may call prewalk.checklist({ easy: true, items }) with 2-4 items; the host still hands off but Main skips deep research.",
+        "Trivial escape: if the task clearly fits in one or two small edits, call prewalk.checklist({ trivial: true }) inside fabric_exec instead and complete the task directly in this same turn; the host records the trivial disposition, skips the mutation boundary, and makes no model swap or handoff.",
+      ]
+    : [
+        "This run disables the easy and trivial escapes: file a checklist with 5-9 ordered items, each with a concrete task and observable validation.",
+      ]),
   "After the checklist is accepted, stop. Do not make any mutation yourself. The host ends fabric_exec at the accepted checklist and switches this session to the executor model.",
   "The executor owns the remaining implementation and verification through completion.",
+  "Before claiming completion the executor runs structural validation: rerun codemap refs and cascade on every signature or symbol changed, confirm no out-of-scope file changed, and pass the full test module and the repository gate.",
 ].join("\n");
 
-export const prewalkArmedPrompt = (model: string): string => researchArmedPrompt(model);
+export const prewalkArmedPrompt = (
+  model: string,
+  options?: { planningEscapes?: boolean },
+): string => researchArmedPrompt(model, options?.planningEscapes ?? true);
 
 const customMessageText = (content: unknown): string | undefined => {
   if (typeof content === "string") return content;

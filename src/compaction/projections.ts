@@ -38,6 +38,29 @@ const MAX_RESOLVED = MAX_OUTSTANDING - MAX_UNRESOLVED;
 export const MAX_EARLIER_TURNS = 32;
 const TRANSCRIPT_WINDOW = 40;
 
+// Structural bookkeeping tools whose call/result pairs carry no task signal.
+// They are skipped before projection and counted as noise. Adopted concept:
+// pi-vcc filter-noise tool-name set; prose inspection stays out of this core.
+export const NOISE_TOOLS = new Set(["TodoWrite", "TodoRead"]);
+
+const filterNoiseEvents = (events: CompactionEvent[]): { events: CompactionEvent[]; noise: number } => {
+  const visible: CompactionEvent[] = [];
+  let noise = 0;
+  for (const event of events) {
+    const name = event.kind === "toolCall"
+      ? event.name
+      : event.kind === "toolResult"
+        ? event.toolName
+        : undefined;
+    if (name !== undefined && NOISE_TOOLS.has(name)) {
+      noise += 1;
+      continue;
+    }
+    visible.push(event);
+  }
+  return { events: visible, noise };
+};
+
 export interface ProjectionOmittedCounts {
   goal: number;
   files: number;
@@ -45,6 +68,8 @@ export interface ProjectionOmittedCounts {
   outstanding: number;
   earlierTurns: number;
   transcript: number;
+  duplicates?: number;
+  noise?: number;
 }
 
 export interface ProjectionResult {
@@ -55,6 +80,7 @@ export interface ProjectionResult {
 interface ProjectedSection {
   lines: string[];
   omitted: number;
+  duplicates?: number;
 }
 
 const truncate = (text: string, max: number): string => {
@@ -563,6 +589,11 @@ const projectTranscript = (events: CompactionEvent[]): ProjectedSection => {
       "transcript events",
     ));
   }
+  // Repeated identical non-error output collapses to a stable reference after
+  // the first occurrence; failed diagnostics are never deduplicated (adopted
+  // pi-dcp tool-output deduplication).
+  const firstOutput = new Map<string, string>();
+  let duplicates = 0;
   for (const e of window) {
     const ref = `(#${e.index})`;
     if (e.kind === "user") {
@@ -577,6 +608,16 @@ const projectTranscript = (events: CompactionEvent[]): ProjectedSection => {
     } else if (e.kind === "toolCall") {
       lines.push(`${ref} ${e.name}(${summarizeArgs(e.name, e.args)})`);
     } else if (e.kind === "toolResult") {
+      if (!e.isError) {
+        const key = `tr\0${e.toolName}\0${e.text}`;
+        const prior = firstOutput.get(key);
+        if (prior !== undefined) {
+          duplicates += 1;
+          lines.push(`${ref} → ok (same output as ${prior})`);
+          continue;
+        }
+        firstOutput.set(key, ref);
+      }
       const status = e.isError ? "error" : "ok";
       lines.push(`${ref} → ${status}: ${truncate(firstLine(e.text), MAX_TRANSCRIPT_LINE)}`);
     } else if (e.kind === "bash") {
@@ -588,16 +629,17 @@ const projectTranscript = (events: CompactionEvent[]): ProjectedSection => {
       lines.push(`${ref} ${e.ref}(${summarizeArgs(e.tool, e.args)}) → ${e.outcome} [${e.address}]`);
     }
   }
-  return { lines, omitted };
+  return { lines, omitted, ...(duplicates > 0 ? { duplicates } : {}) };
 };
 
 export const projectWithMetadata = (events: CompactionEvent[]): ProjectionResult => {
-  const goal = projectGoal(events);
-  const files = projectFiles(events);
-  const activity = projectActivity(events);
-  const outstanding = projectOutstandingWithMetadata(events);
-  const earlierTurns = projectEarlierTurns(events);
-  const transcript = projectTranscript(events);
+  const { events: visible, noise } = filterNoiseEvents(events);
+  const goal = projectGoal(visible);
+  const files = projectFiles(visible);
+  const activity = projectActivity(visible);
+  const outstanding = projectOutstandingWithMetadata(visible);
+  const earlierTurns = projectEarlierTurns(visible);
+  const transcript = projectTranscript(visible);
   return {
     sections: {
       goal: goal.lines,
@@ -605,7 +647,7 @@ export const projectWithMetadata = (events: CompactionEvent[]): ProjectionResult
       activity: activity.lines,
       outstanding: outstanding.lines,
       earlierTurns: earlierTurns.lines,
-      status: projectStatus(events),
+      status: projectStatus(visible),
       transcript: transcript.lines,
     },
     omittedCounts: {
@@ -615,6 +657,8 @@ export const projectWithMetadata = (events: CompactionEvent[]): ProjectionResult
       outstanding: outstanding.omitted,
       earlierTurns: earlierTurns.omitted,
       transcript: transcript.omitted,
+      ...(transcript.duplicates !== undefined ? { duplicates: transcript.duplicates } : {}),
+      ...(noise > 0 ? { noise } : {}),
     },
   };
 };

@@ -22,6 +22,13 @@ const MAX_REPOSITORY_DEPTH = 32;
 const MAX_REPOSITORY_BYTES = 32 * 1024 * 1024;
 const PROBE_EXTENSION = fileURLToPath(new URL("./prewalk-probe.mjs", import.meta.url));
 const PACKAGE_ENTRY = import.meta.resolve("@earendil-works/pi-coding-agent");
+// Optional comma-separated absolute extension paths loaded alongside fabric and
+// the probe (for example the operator omniroute provider extension).
+const EXTRA_EXTENSIONS = (process.env.PI_FABRIC_PREWALK_EXTRA_EXTENSIONS ?? "")
+  .split(",")
+  .map((entry) => entry.trim())
+  .filter(Boolean)
+  .map((entry) => path.resolve(entry));
 const DEFAULT_PI_CLI = fileURLToPath(new URL("./cli.js", PACKAGE_ENTRY));
 const PI_VERSION = JSON.parse(
   fs.readFileSync(fileURLToPath(new URL("../package.json", PACKAGE_ENTRY)), "utf8"),
@@ -250,6 +257,7 @@ const runVariant = async ({ entry, task, config, root, fabricExtension }) => {
       "--no-extensions",
       "--extension", fabricExtension,
       "--extension", PROBE_EXTENSION,
+      ...EXTRA_EXTENSIONS.flatMap((entry) => ["--extension", entry]),
       "--approve",
       "--no-session",
     ],

@@ -42,7 +42,7 @@ export const armPrewalk = async (
     arm: prewalk.arm,
     ...(prewalk.fallbackModels ? { fallbackModels: prewalk.fallbackModels } : {}),
   });
-  const armedPrompt = prewalkArmedPrompt(model);
+  const armedPrompt = prewalkArmedPrompt(model, { planningEscapes: prewalk.planningEscapes ?? true });
   // Checklist memory: seed the planning phase with the nearest prior accepted
   // checklist for a similar task so Main adapts instead of re-deriving.
   const memoryDir = prewalkMemoryDir(runRoot);

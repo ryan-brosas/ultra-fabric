@@ -108,7 +108,8 @@ Configuration documents are versioned with `configVersion`. Fabric migrates each
     "nestedToolDebounceMs": 100
   },
   "compaction": {
-    "engine": "fabric"
+    "engine": "fabric",
+    "cooldownMs": 0
   },
   "quality": {
     "mode": "off",

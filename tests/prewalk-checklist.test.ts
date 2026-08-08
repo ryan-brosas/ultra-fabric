@@ -14,6 +14,24 @@ const items = (count = MIN_PREWALK_CHECKLIST_ITEMS) =>
     validation: `  Run check ${index + 1}  `,
   }));
 
+const schemaContract = {
+  intent: "Adopt the reference compaction strategy without changing unrelated behavior",
+  references: [
+    {
+      repository: "pi-dcp",
+      question: "How are repeated tool outputs reduced?",
+      evidenceRefs: ["cgc:pi-dcp/deduplication"],
+    },
+  ],
+  localScope: {
+    files: ["src/compaction/normalize.ts"],
+    symbols: ["normalizeCompactionMessages"],
+    cascadeRefs: ["codemap:cascade:src/compaction/normalize.ts"],
+  },
+  invariants: ["Protected diagnostics remain available"],
+  postconditions: ["Focused compaction tests and the repository gate pass"],
+};
+
 describe("parsePrewalkChecklist", () => {
   it("accepts and normalizes a bounded planning-and-validation checklist", () => {
     expect(parsePrewalkChecklist({ items: items() }, 42)).toEqual({
@@ -23,6 +41,37 @@ describe("parsePrewalkChecklist", () => {
       })),
       readyAt: 42,
     });
+  });
+
+  it("accepts and normalizes a typed Schema-first planning contract", () => {
+    expect(parsePrewalkChecklist({ items: items(), schema: schemaContract }, 42)).toMatchObject({
+      schema: schemaContract,
+      readyAt: 42,
+    });
+  });
+
+  it("rejects incomplete Schema-first planning contracts", () => {
+    expect(() =>
+      parsePrewalkChecklist({ items: items(), schema: { ...schemaContract, postconditions: [] } }),
+    ).toThrow(/postconditions/);
+    expect(() =>
+      parsePrewalkChecklist({
+        items: items(),
+        schema: { ...schemaContract, localScope: { ...schemaContract.localScope, files: [] } },
+      }),
+    ).toThrow(/localScope.*files/i);
+  });
+
+  it("rejects unverified reference questions", () => {
+    expect(() =>
+      parsePrewalkChecklist({
+        items: items(),
+        schema: {
+          ...schemaContract,
+          references: [{ repository: "pi-dcp", question: "How is output reduced?", evidenceRefs: [] }],
+        },
+      }),
+    ).toThrow(/evidenceRefs/);
   });
 
   it("rejects lists outside the research protocol item bound", () => {

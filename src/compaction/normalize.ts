@@ -4,6 +4,16 @@ import { readFabricProjectionTrace, type FabricProjectionSource } from "./trace-
 import { readFabricBranchSummaryDetailsV1 } from "./branch-details.js";
 import { clipUtf8, utf8Bytes } from "./bounds.js";
 
+// Structural noise removal for user text: strips the wrapper blocks Pi injects
+// for hidden bookkeeping (system reminders, opened-file notices, command
+// messages, context-window usage). The match is purely structural and never
+// inspects the prose inside the wrapper. Adopted concept: pi-vcc filter-noise.
+const XML_WRAPPER_NOISE_RE =
+  /<(system-reminder|ide_opened_file|command-message|context-window-usage)[^>]*>[\s\S]*?<\/\1>/g;
+
+export const stripXmlWrapperNoise = (text: string): string =>
+  text.replace(XML_WRAPPER_NOISE_RE, "").trim();
+
 // A purely structural, typed view of one session window. Every event carries
 // the 1-based `index` it occupied in the normalized stream (stable, used by the
 // brief-transcript `(#N)` references), a stable fact `entryId`, and the actual
@@ -303,7 +313,8 @@ export const normalizeEntries = (entries: SessionEntry[]): CompactionEvent[] => 
     const entryId = entry.id;
 
     if (role === "user") {
-      push({ kind: "user", entryId, sourceEntryId: entryId, text: textOfContent((message as { content: unknown }).content) });
+      const text = stripXmlWrapperNoise(textOfContent((message as { content: unknown }).content));
+      if (text) push({ kind: "user", entryId, sourceEntryId: entryId, text });
       continue;
     }
 

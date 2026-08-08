@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { prewalkArmedPrompt } from "../src/prewalk/handoff.js";
 
 describe("prewalk prompt isolation", () => {
   it("does not add prewalk state or guidance to before_agent_start", () => {
@@ -150,6 +151,32 @@ describe("prewalk prompt isolation", () => {
     const prompt = source.slice(start, end);
     expect(prompt.toLowerCase()).toContain("observable evidence");
     expect(prompt.toLowerCase()).toContain("file:line");
+  });
+
+  it("makes Schema the planning authority with CGC research and local structural validation", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "prewalk", "handoff.ts"),
+      "utf8",
+    );
+    const start = source.indexOf("const researchArmedPrompt");
+    const end = source.indexOf("export const prewalkArmedPrompt", start);
+    const prompt = source.slice(start, end).toLowerCase();
+    expect(prompt).toContain("schema contract");
+    expect(prompt).toContain('mode: \\"cgc\\"');
+    expect(prompt).toContain("explicit");
+    expect(prompt).toContain("local codemap");
+    expect(prompt).toContain("structural validation");
+    expect(prompt).toContain("evidence");
+  });
+
+  it("omits the easy and trivial escapes when planningEscapes is disabled", () => {
+    const withEscapes = prewalkArmedPrompt("anthropic/executor");
+    expect(withEscapes).toContain("Trivial escape");
+    expect(withEscapes).toContain("Easy escape");
+    const strict = prewalkArmedPrompt("anthropic/executor", { planningEscapes: false });
+    expect(strict).not.toContain("Trivial escape");
+    expect(strict).not.toContain("Easy escape");
+    expect(strict).toContain("5-9 ordered items");
   });
 
   it("keeps the research arm prompt free of delegation prose", () => {

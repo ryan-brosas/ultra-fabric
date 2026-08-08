@@ -299,6 +299,9 @@ export const buildPrewalkProjectConfig = (variant, executor, timeoutMs) => ({
     model: `${executor.provider}/${executor.model}`,
     thinking: "off",
     alwaysRearm: false,
+    // The benchmark exercises the full research protocol: disable the easy and
+    // trivial escapes so research records carry real 5-9 item checklists.
+    ...(variant === "research" ? { planningEscapes: false } : {}),
   },
   agents: { enabled: false },
   mcp: { enabled: false },
@@ -333,10 +336,13 @@ export const summarizePrewalkProbe = (records, models) => {
     record.planningPresent === false
   );
   const fabric = records.filter((record) => record?.type === "fabric_exec");
+  // Real research flow: the host terminates the frontier fabric_exec at the
+  // accepted checklist (the checklist ref is itself a trigger), so the boundary
+  // record carries the checklist and zero mutations. Requiring a mutation in
+  // the same record only matches simulated traces, so it is not required here.
   const boundary = fabric.find((record) =>
     record.isError === false && record.terminate === true &&
-    record.checklistItems >= 5 && record.checklistItems <= 9 &&
-    record.workspaceMutations === 1
+    record.checklistItems >= 5 && record.checklistItems <= 9
   );
   return {
     contextTokensBeforeRequests,

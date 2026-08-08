@@ -659,6 +659,33 @@ describe("prewalkArmedPrompt", () => {
     expect(continuation).not.toContain("drip");
   });
 
+  it("renders the Schema contract in the continuation and requires structural validation", () => {
+    const contract = {
+      intent: "Adopt the reference strategy without unrelated changes",
+      references: [
+        { repository: "pi-dcp", question: "How are repeated outputs reduced?", evidenceRefs: ["cgc:pi-dcp/deduplication"] },
+      ],
+      localScope: {
+        files: ["src/compaction/normalize.ts"],
+        symbols: ["normalizeCompactionMessages"],
+        cascadeRefs: [],
+      },
+      invariants: ["Protected diagnostics remain available"],
+      postconditions: ["Focused tests and the repository gate pass"],
+    };
+    const continuation = checklistContinuationPrompt({
+      items: [{ task: "Adopt deduplication", validation: "Run the compaction module" }],
+      readyAt: 1,
+      schema: contract,
+    });
+    expect(continuation).toContain("Schema contract");
+    expect(continuation).toContain(contract.intent);
+    expect(continuation).toContain("src/compaction/normalize.ts");
+    expect(continuation).toContain("pi-dcp");
+    expect(continuation).toContain(contract.postconditions[0]!);
+    expect(continuation).toContain("structural");
+  });
+
 });
 
 const checklistItems = [

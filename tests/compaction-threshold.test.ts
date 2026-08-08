@@ -1,8 +1,8 @@
 import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { registerCompactionHook } from "../src/compaction/hook.js";
-import { compactAtConfiguredThreshold, modelCompactionKey } from "../src/compaction/threshold.js";
-import { DEFAULT_FABRIC_CONFIG } from "../src/config.js";
+import { compactAtConfiguredThreshold, modelCompactionKey, resetThresholdCooldown } from "../src/compaction/threshold.js";
+import { DEFAULT_FABRIC_CONFIG, normalizeFabricConfig } from "../src/config.js";
 
 const contextWithUsage = (
   percent: number | null,
@@ -107,5 +107,46 @@ describe("model-linked compaction thresholds", () => {
     config.compaction.threshold = 0.9;
     await expect(compactAtConfiguredThreshold(contextWithUsage(82), config)).resolves.toBe(true);
     await expect(compactAtConfiguredThreshold(contextWithUsage(88), config)).resolves.toBe(true);
+  });
+});
+
+describe("threshold compaction cooldown (opt-in policy)", () => {
+  it("skips a second trigger inside the cooldown window", async () => {
+    resetThresholdCooldown();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.compaction.cooldownMs = 60_000;
+    const context = contextWithUsage(85);
+    await expect(compactAtConfiguredThreshold(context, config)).resolves.toBe(true);
+    expect(context.compact).toHaveBeenCalledOnce();
+    await expect(compactAtConfiguredThreshold(context, config)).resolves.toBe(false);
+    expect(context.compact).toHaveBeenCalledOnce();
+  });
+
+  it("allows another trigger after the cooldown is reset", async () => {
+    resetThresholdCooldown();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.compaction.cooldownMs = 60_000;
+    const context = contextWithUsage(85);
+    await expect(compactAtConfiguredThreshold(context, config)).resolves.toBe(true);
+    resetThresholdCooldown();
+    await expect(compactAtConfiguredThreshold(context, config)).resolves.toBe(true);
+    expect(context.compact).toHaveBeenCalledTimes(2);
+  });
+
+  it("cooldownMs 0 disables the guard", async () => {
+    resetThresholdCooldown();
+    const config = structuredClone(DEFAULT_FABRIC_CONFIG);
+    config.compaction.cooldownMs = 0;
+    const context = contextWithUsage(85);
+    await expect(compactAtConfiguredThreshold(context, config)).resolves.toBe(true);
+    await expect(compactAtConfiguredThreshold(context, config)).resolves.toBe(true);
+    expect(context.compact).toHaveBeenCalledTimes(2);
+  });
+
+  it("normalizes the cooldown window with bounded defaults", () => {
+    expect(normalizeFabricConfig({ compaction: { cooldownMs: 5_000 } }).compaction.cooldownMs).toBe(5_000);
+    expect(normalizeFabricConfig({ compaction: { cooldownMs: -1 } }).compaction.cooldownMs).toBe(0);
+    expect(normalizeFabricConfig({ compaction: { cooldownMs: 99_999_999 } }).compaction.cooldownMs).toBe(3_600_000);
+    expect(normalizeFabricConfig({}).compaction.cooldownMs).toBe(0);
   });
 });
