@@ -211,6 +211,12 @@ export const reducePrewalkLifecycle = (
       ) {
         return status;
       }
+      // A transient executor-switch failure re-arms the plan in place with its
+      // handoff attempt preserved, so the next matching mutation retries the
+      // switch. That task is still in flight, not settled: only an unfired arm
+      // (attempt 0) or a completed continuation (finished before this event)
+      // clears the task so it rebinds to the next message.
+      if (status.attempt > 0) return status;
       // A single turn may arm prewalk and then settle without firing (for
       // example, the first reply only investigates). Keep that one-shot arm
       // alive so the next mutation can still hand off; only re-arming configs
@@ -311,13 +317,15 @@ export const reducePrewalkLifecycle = (
           }
         : status;
     case "handoff_failed":
+      // The executor switch itself failed (provider unavailable, no auth, or a
+      // routing error). Main never left the frontier model, so there is nothing
+      // to restore and nothing the operator must unblock: re-arm the accepted
+      // plan in place and let the next matching mutation retry the handoff.
       return status.state === "handing_off"
-        ? {
-            ...status,
-            state: "blocked",
-            blockedAt: event.at,
-            error: event.error,
-          }
+        ? toArmed(status, event.at, {
+            preserveTask: true,
+            attempt: status.attempt,
+          })
         : status;
     case "retry_requested":
       return status.state === "blocked" && status.sessionId === event.sessionId

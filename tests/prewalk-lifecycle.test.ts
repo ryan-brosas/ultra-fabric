@@ -63,7 +63,7 @@ describe("reducePrewalkLifecycle", () => {
     ).toBe(state);
   });
 
-  it("blocks a failed handoff with its task and attempt intact", () => {
+  it("re-arms a failed handoff with its task and attempt intact", () => {
     expect(
       reducePrewalkLifecycle(handingOff(), {
         kind: "handoff_failed",
@@ -71,11 +71,27 @@ describe("reducePrewalkLifecycle", () => {
         error: "provider unavailable",
       }),
     ).toEqual({
-      ...handingOff(),
-      state: "blocked",
-      blockedAt: 20,
+      ...armed(),
+      armedAt: 20,
+      attempt: 1,
+    });
+  });
+
+  it("keeps the preserved plan armed when the failed handoff turn settles", () => {
+    const sticky = reducePrewalkLifecycle(handingOff({ arm: "task" }), {
+      kind: "handoff_failed",
+      at: 20,
       error: "provider unavailable",
     });
+
+    expect(
+      reducePrewalkLifecycle(sticky, {
+        kind: "task_settled",
+        sessionId: "session-1",
+        at: 30,
+        rearm: { arm: "task", model: "anthropic/executor" },
+      }),
+    ).toBe(sticky);
   });
 
   it("retries a blocked task only in its owning session", () => {

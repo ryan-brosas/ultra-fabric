@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- prewalk: a transient executor-switch failure (provider unavailable, no authentication, or routing error) no longer blocks the task. The accepted frontier plan re-arms in place with its task, checklist, and attempt, and the next matching mutation retries the handoff automatically; Main never left the frontier model, so no manual `/fabric prewalk --retry` is needed. Verification failures (aborted or crashed gates, missing acceptance evidence, exhausted revision limits) still block with the preserved task and remain retryable.
+
 ## 0.31.1-ultra.22 - 2026-08-08
 
 - setup: remove the `/fabric init` command. A normal `pi install npm:ultra-fabric@<version>` is user-global and loads in every Pi project without repository setup; `pi install -l` remains the opt-in project-only path. `/fabric status` now reports the global and project configuration paths, and `/fabric settings --global` lets trusted projects edit user-wide defaults explicitly.

@@ -105,6 +105,7 @@ const context = (overrides?: { thinkingLevel?: string }) => {
   });
   const target = { provider: "anthropic", id: "executor" };
   const setStatus = vi.fn();
+  const notify = vi.fn();
   return {
     value: {
       cwd: process.cwd(),
@@ -116,9 +117,10 @@ const context = (overrides?: { thinkingLevel?: string }) => {
           provider === target.provider && id === target.id ? target : undefined,
       },
       sessionManager: source,
-      ui: { setStatus, notify: vi.fn() },
+      ui: { setStatus, notify },
     } as unknown as ExtensionContext,
     setStatus,
+    notify,
     target,
   };
 };
@@ -344,14 +346,28 @@ describe("outer-boundary Prewalk", () => {
       error: expect.stringContaining("no authentication"),
     });
     expect(controller.status()).toMatchObject({
-      state: "blocked",
+      state: "armed",
       model: "anthropic/executor",
       sessionId: "session-1",
       task: "Implement the guard",
       attempt: 1,
-      error: expect.stringContaining("no authentication"),
     });
-    expect(controller.isArmed("session-1")).toBe(false);
+    expect(controller.isArmed("session-1")).toBe(true);
+    expect(ctx.setStatus).toHaveBeenCalledWith(
+      "fabric-prewalk",
+      "executor switch failed · plan stays armed",
+    );
+    expect(ctx.notify).toHaveBeenCalledWith(
+      expect.stringContaining("stays armed and retries on the next mutation"),
+      "warning",
+    );
+    // The preserved plan re-claims the next matching mutation and retries.
+    controller.claim([execution().audits[1]!], "session-1");
+    expect(controller.status()).toMatchObject({
+      state: "handing_off",
+      attempt: 2,
+      task: "Implement the guard",
+    });
   });
 
   it("turns a revise gate into a scoped revision handoff", () => {
@@ -525,7 +541,7 @@ describe("outer-boundary Prewalk", () => {
     expect(controller.status()).toEqual({ state: "idle" });
   });
 
-  it("lets an explicit handoff supersede a blocked prewalk task", () => {
+  it("lets an explicit handoff supersede a failed-handoff task", () => {
     const controller = new PrewalkController();
     controller.arm({
       model: "anthropic/automatic",

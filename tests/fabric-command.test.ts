@@ -126,7 +126,7 @@ describe("/fabric command", () => {
     );
   });
 
-  it("retries a blocked prewalk with its preserved task", async () => {
+  it("keeps the plan armed after a transient switch failure and retries on the next mutation", async () => {
     let handler: ((argumentsText: string, context: ExtensionContext) => Promise<void>) | undefined;
     const sendUserMessage = vi.fn();
     const pi = {
@@ -163,6 +163,89 @@ describe("/fabric command", () => {
       },
       prewalk,
     } as unknown as FabricState;
+    const notify = vi.fn();
+    const context = {
+      sessionManager: { getSessionId: () => "session-1", getBranch: () => [] },
+      ui: { setStatus: vi.fn(), notify },
+    } as unknown as ExtensionContext;
+
+    registerFabricCommand(pi, {
+      state,
+      fabricUi: {} as FabricUiController,
+      capturedTools: {} as CapturedToolCatalog,
+      applyFabricMode: vi.fn(),
+      suspendToolCapture: vi.fn(),
+    });
+    await handler!("prewalk --status", context);
+    expect(notify).toHaveBeenCalledWith(
+      [
+        "Fabric prewalk armed → anthropic/executor",
+        "Task: Implement the token guard",
+      ].join("\n"),
+      "info",
+    );
+    expect(notify.mock.calls.join("\n")).not.toContain("--retry");
+
+    // The preserved plan re-claims the next matching mutation and retries.
+    prewalk.claim(
+      [{
+        ref: "pi.edit",
+        nestedToolCallId: "edit-2",
+        startedAt: 3,
+        endedAt: 4,
+        success: true,
+      }],
+      "session-1",
+    );
+    expect(prewalk.status()).toMatchObject({
+      state: "handing_off",
+      attempt: 2,
+      task: "Implement the token guard",
+    });
+  });
+
+  it("retries a verification-blocked prewalk with its preserved task", async () => {
+    let handler: ((argumentsText: string, context: ExtensionContext) => Promise<void>) | undefined;
+    const sendUserMessage = vi.fn();
+    const pi = {
+      sendUserMessage,
+      sendMessage: vi.fn(),
+      registerCommand: vi.fn((_name: string, definition: { handler: typeof handler }) => {
+        handler = definition.handler;
+      }),
+    } as unknown as ExtensionAPI;
+    const prewalk = new PrewalkController();
+    prewalk.arm({
+      model: "anthropic/executor",
+      sessionId: "session-1",
+      task: "Implement the token guard",
+      verificationMode: "gated",
+      maxPhaseRevisions: 0,
+    } as never);
+    prewalk.claim(
+      [{
+        ref: "pi.edit",
+        nestedToolCallId: "edit-1",
+        startedAt: 1,
+        endedAt: 2,
+        success: true,
+      }],
+      "session-1",
+    );
+    prewalk.completeHandoff();
+    prewalk.acceptContinuation("session-1", "edit-1");
+    prewalk.settleContinuation("session-1");
+    expect(prewalk.status()).toMatchObject({ state: "blocked" });
+    const state = {
+      ensure: vi.fn().mockResolvedValue(undefined),
+      config: {
+        fullCodeMode: true,
+        schema: { mode: "off" },
+        prewalk: { model: "anthropic/executor" },
+        agents: { enabled: true },
+      },
+      prewalk,
+    } as unknown as FabricState;
     const context = {
       sessionManager: { getSessionId: () => "session-1", getBranch: () => [] },
       ui: { setStatus: vi.fn(), notify: vi.fn() },
@@ -175,18 +258,6 @@ describe("/fabric command", () => {
       applyFabricMode: vi.fn(),
       suspendToolCapture: vi.fn(),
     });
-    await handler!("prewalk --status", context);
-    expect(context.ui.notify).toHaveBeenCalledWith(
-      [
-        "Fabric prewalk blocked → anthropic/executor",
-        "Task: Implement the token guard",
-        "Error: temporary provider failure",
-        "Run /fabric prewalk --retry to resume this task.",
-      ].join("\n"),
-      "info",
-    );
-    vi.mocked(context.ui.notify).mockClear();
-
     await handler!("prewalk --retry", context);
 
     expect(prewalk.status()).toMatchObject({

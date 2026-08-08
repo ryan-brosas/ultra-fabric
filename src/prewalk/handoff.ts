@@ -455,7 +455,11 @@ export const runFabricHandoffAtBoundary = async (
     pending.audit.success = false;
     pending.audit.error = message;
     pending.audit.endedAt = Date.now();
-    context.ui.setStatus("fabric-prewalk", "prewalk continuation failed");
+    context.ui.setStatus("fabric-prewalk", "executor switch failed · plan stays armed");
+    context.ui.notify(
+      "Prewalk executor switch failed (" + message + "); the accepted plan stays armed and retries on the next mutation.",
+      "warning",
+    );
     return {
       prewalk: true,
       mode: "research",
