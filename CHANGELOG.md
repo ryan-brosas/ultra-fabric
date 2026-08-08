@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.31.1-ultra.22 - 2026-08-08
 
 - setup: remove the `/fabric init` command. A normal `pi install npm:ultra-fabric@<version>` is user-global and loads in every Pi project without repository setup; `pi install -l` remains the opt-in project-only path. `/fabric status` now reports the global and project configuration paths, and `/fabric settings --global` lets trusted projects edit user-wide defaults explicitly.
 
