@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.31.1-ultra.23 - 2026-08-08
 
 - prewalk: a transient executor-switch failure (provider unavailable, no authentication, or routing error) no longer blocks the task. The accepted frontier plan re-arms in place with its task, checklist, and attempt, and the next matching mutation retries the handoff automatically; Main never left the frontier model, so no manual `/fabric prewalk --retry` is needed. Verification failures (aborted or crashed gates, missing acceptance evidence, exhausted revision limits) still block with the preserved task and remain retryable.
 

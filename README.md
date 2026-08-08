@@ -207,14 +207,14 @@ Requires Node.js 24+ and Pi 0.80.6+. Fabric checks the host version at startup a
 Pi installs packages to user settings by default. This one command adds Ultra Fabric to `~/.pi/agent/settings.json`, so it loads in every Pi session. No repository setup command or per-project Fabric files are required.
 
 ```bash
-pi install npm:ultra-fabric@0.31.1-ultra.22
+pi install npm:ultra-fabric@0.31.1-ultra.23
 ```
 
 If `pi-fabric` is installed, replace it rather than loading both:
 
 ```bash
 pi remove npm:pi-fabric
-pi install npm:ultra-fabric@0.31.1-ultra.22
+pi install npm:ultra-fabric@0.31.1-ultra.23
 ```
 
 Restart Pi after changing extension packages. Run `/fabric status` to confirm the loaded mode and configuration paths.
@@ -226,7 +226,7 @@ Fabric works with built-in defaults. To customize all projects, run `/fabric set
 Use Pi's local install flag only when a repository should carry Ultra Fabric without enabling it for every project:
 
 ```bash
-pi install -l npm:ultra-fabric@0.31.1-ultra.22
+pi install -l npm:ultra-fabric@0.31.1-ultra.23
 ```
 
 Pi records that package in `<project>/.pi/settings.json` and installs it after the project is trusted.
