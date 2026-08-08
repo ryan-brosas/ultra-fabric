@@ -33,13 +33,14 @@ const schemaContract = {
 };
 
 describe("parsePrewalkChecklist", () => {
-  it("accepts and normalizes a bounded planning-and-validation checklist", () => {
-    expect(parsePrewalkChecklist({ items: items() }, 42)).toEqual({
+  it("accepts and normalizes a bounded planning-and-validation checklist with a schema contract", () => {
+    expect(parsePrewalkChecklist({ items: items(), schema: schemaContract }, 42)).toEqual({
       items: Array.from({ length: MIN_PREWALK_CHECKLIST_ITEMS }, (_, index) => ({
         task: `Change target ${index + 1}`,
         validation: `Run check ${index + 1}`,
       })),
       readyAt: 42,
+      schema: schemaContract,
     });
   });
 
@@ -115,8 +116,8 @@ describe("parsePrewalkChecklist", () => {
   // Easy-path router: a bounded, mid-tier task still hands off to the executor
   // (unlike trivial), but relaxes the planning ceremony from 5-9 items to a
   // short 2-4 item checklist so Main skips deep research on it.
-  it("accepts a 2-4 item checklist under the easy disposition", () => {
-    const easy = parsePrewalkChecklist({ easy: true, items: items(MIN_EASY_PREWALK_CHECKLIST_ITEMS) }, 42);
+  it("accepts a 2-4 item checklist under the easy disposition with a schema contract", () => {
+    const easy = parsePrewalkChecklist({ easy: true, items: items(MIN_EASY_PREWALK_CHECKLIST_ITEMS), schema: schemaContract }, 42);
     expect(easy).toEqual({
       items: Array.from({ length: MIN_EASY_PREWALK_CHECKLIST_ITEMS }, (_, index) => ({
         task: `Change target ${index + 1}`,
@@ -124,9 +125,14 @@ describe("parsePrewalkChecklist", () => {
       })),
       easy: true,
       readyAt: 42,
+      schema: schemaContract,
     });
     expect(
-      parsePrewalkChecklist({ easy: true, items: items(MAX_EASY_PREWALK_CHECKLIST_ITEMS) }).items,
+      parsePrewalkChecklist({
+        easy: true,
+        items: items(MAX_EASY_PREWALK_CHECKLIST_ITEMS),
+        schema: schemaContract,
+      }).items,
     ).toHaveLength(MAX_EASY_PREWALK_CHECKLIST_ITEMS);
   });
 
@@ -141,6 +147,13 @@ describe("parsePrewalkChecklist", () => {
 
   it("rejects a non-boolean easy flag", () => {
     expect(() => parsePrewalkChecklist({ easy: "yes" })).toThrow(/easy/);
+  });
+
+  it("rejects items-bearing checklists without a schema contract", () => {
+    expect(() => parsePrewalkChecklist({ items: items() })).toThrow(/schema contract/);
+    expect(() =>
+      parsePrewalkChecklist({ easy: true, items: items(MIN_EASY_PREWALK_CHECKLIST_ITEMS) }),
+    ).toThrow(/schema contract/);
   });
 
   it("keeps the full 5-9 item bound without an easy flag", () => {

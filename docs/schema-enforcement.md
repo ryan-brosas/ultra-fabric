@@ -46,14 +46,14 @@ Persistent agents are not restored and host-event dispatch is disabled for an en
 
 ## Planning authority
 
-Schema is the progression authority for nontrivial Fabric work. Prewalk research planning projects a typed Schema-first contract onto the accepted checklist; the checklist is a readable rendering of that contract, not an independent source of truth. The contract carries intent, reference questions with evidence refs, local scope (files, symbols, cascade refs), invariants, and postconditions. When present on a checklist it is parsed strictly: incomplete contracts, empty scopes, or unverified reference questions are rejected at planning time.
+Schema is the progression authority for nontrivial Fabric work. Every non-trivial prewalk checklist requires a typed Schema-first contract; the checklist is a readable rendering of that contract, not an independent source of truth. The contract carries intent, reference questions with evidence refs, local scope (files, symbols, cascade refs), invariants, and postconditions. The contract is parsed strictly: missing, incomplete, empty-scope, or unverified reference contracts are rejected at planning time. Trivial dispositions (one or two small edits) remain schema-free. Schema governs progression; codemap and CGC remain the evidence retrieval sources that answer reference questions, and Schema does not replace them.
 
 Graphs are evidence, not progression:
 
 - **CGC** answers reference questions. When the request names CGC, a repository, or a comparison, planning queries each named reference with `codemap({ operation: "explore", mode: "cgc", context: "<repo>" })` and reports unavailable or unregistered contexts explicitly. Selected ideas are source-verified against the reference checkout before adoption.
 - **Local Codemap** (`mode: "ast"`) maps project scope before planning with `search`, `refs`, and `cascade`, and validates structure after commit: rerun `refs` and `cascade` on every changed signature or symbol and confirm no out-of-scope file changed.
 
-Adoption is staged. The typed contract and planning guidance are live. Global `schema.mode` remains `off`, so direct tool behavior is unchanged; promotion to `audit` on the Prewalk path and then `enforce` as the default follows the Slice 8 benchmark and soak gates. The transaction protocol below remains the enforce-mode mechanism.
+Adoption is staged. The mandatory typed contract and planning guidance are live; global `schema.mode` remains `off`, so direct tool behavior is unchanged. Promotion to `audit` on the Prewalk path and then `enforce` as the default follows the Slice 8 benchmark and soak gates. The transaction protocol below remains the enforce-mode mechanism.
 
 ## Transaction protocol
 

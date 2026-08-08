@@ -214,6 +214,13 @@ await prewalk.checklist({
     task: "Change target " + (index + 1),
     validation: "Run check " + (index + 1),
   })),
+  schema: {
+    intent: "Change the targets",
+    references: [],
+    localScope: { files: ["src/contract.mjs"], symbols: [], cascadeRefs: [] },
+    invariants: ["Protected diagnostics remain available"],
+    postconditions: ["The checks pass"],
+  },
 });
 try {
   await pi.edit({
@@ -1974,6 +1981,13 @@ return runConsult({
     task: "Change target " + (index + 1),
     validation: "Run check " + (index + 1),
   })),
+  schema: {
+    intent: "Change the targets",
+    references: [],
+    localScope: { files: ["src/contract.mjs"], symbols: [], cascadeRefs: [] },
+    invariants: ["Protected diagnostics remain available"],
+    postconditions: ["The checks pass"],
+  },
 });`,
       signal: undefined,
       parentToolCallId: "prewalk-checklist-audit",
@@ -2011,6 +2025,13 @@ return runConsult({
       validation: "Run check " + (index + 2),
     })),
   ],
+  schema: {
+    intent: "Change the targets",
+    references: [],
+    localScope: { files: ["src/contract.mjs"], symbols: [], cascadeRefs: [] },
+    invariants: ["Protected diagnostics remain available"],
+    postconditions: ["The checks pass"],
+  },
 });`,
       signal: undefined,
       parentToolCallId: "prewalk-checklist-warnings",

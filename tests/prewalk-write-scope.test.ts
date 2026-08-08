@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { PrewalkController } from "../src/prewalk/controller.js";
 
+// The parser requires a Schema contract on every items-bearing checklist.
+const schemaContract = {
+  intent: "Adopt the plan without unrelated changes",
+  references: [],
+  localScope: { files: ["src/contract.mjs"], symbols: [], cascadeRefs: [] },
+  invariants: ["Protected diagnostics remain available"],
+  postconditions: ["The focused suite passes"],
+};
+
 describe("PrewalkController write scope", () => {
   const setup = () => {
     const ctrl = new PrewalkController();
@@ -19,6 +28,7 @@ describe("PrewalkController write scope", () => {
         { task: "do last", validation: "check last" },
         { task: "do final", validation: "check final" },
       ],
+      schema: schemaContract,
     });
     return { ctrl, boundary };
   };
@@ -71,6 +81,7 @@ describe("PrewalkController write scope", () => {
         { task: "g", validation: "h" },
         { task: "i", validation: "j" },
       ],
+      schema: schemaContract,
     });
     // No scope set after settle — should be permissive.
     expect(boundary2.authorize({ ref: "pi.edit", effect: "workspace", path: "src/other.ts" })).toBe(true);

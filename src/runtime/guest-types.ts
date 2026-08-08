@@ -1218,7 +1218,7 @@ interface FabricPrewalkApi {
   checklist(
     input:
       | { trivial: true }
-      | { items: FabricPrewalkChecklistItem[]; easy?: boolean; trivial?: false; schema?: FabricPrewalkSchemaContract },
+      | { items: FabricPrewalkChecklistItem[]; easy?: boolean; trivial?: false; schema: FabricPrewalkSchemaContract },
   ): Promise<FabricPrewalkChecklist>;
 }
 

@@ -12,7 +12,19 @@ const items = Array.from({ length: 5 }, (_, index) => ({
   task: "Step " + (index + 1),
   validation: "Check " + (index + 1),
 }));
-const checklist = (doneIndexes?: number[]) => ({ items, readyAt: 1, ...(doneIndexes ? { doneIndexes } : {}) });
+const schemaContract = {
+  intent: "Adopt the plan without unrelated changes",
+  references: [],
+  localScope: { files: ["src/contract.mjs"], symbols: [], cascadeRefs: [] },
+  invariants: ["Protected diagnostics remain available"],
+  postconditions: ["The focused suite passes"],
+};
+const checklist = (doneIndexes?: number[]) => ({
+  items,
+  readyAt: 1,
+  schema: schemaContract,
+  ...(doneIndexes ? { doneIndexes } : {}),
+});
 
 describe("extractDoneMarkers", () => {
   it("extracts 1-based markers bounded by the item count", () => {

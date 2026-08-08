@@ -169,6 +169,14 @@ describe("prewalk prompt isolation", () => {
     expect(prompt).toContain("evidence");
   });
 
+  it("requires the schema contract for every non-trivial checklist call", () => {
+    const text = prewalkArmedPrompt("anthropic/executor");
+    expect(text).toContain("prewalk.checklist({ items, schema })");
+    expect(text).toContain("mandatory for every non-trivial plan");
+    expect(text).not.toContain("only when");
+    expect(text).toContain("prewalk.checklist({ easy: true, items, schema })");
+  });
+
   it("omits the easy and trivial escapes when planningEscapes is disabled", () => {
     const withEscapes = prewalkArmedPrompt("anthropic/executor");
     expect(withEscapes).toContain("Trivial escape");

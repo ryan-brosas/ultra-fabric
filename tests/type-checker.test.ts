@@ -85,6 +85,13 @@ return prewalk.checklist({
     { task: "Flip the flag", validation: "The flag is flipped" },
     { task: "Run the gate", validation: "The gate passes" },
   ],
+  schema: {
+    intent: "Flip the flag",
+    references: [],
+    localScope: { files: ["src/contract.mjs"], symbols: [], cascadeRefs: [] },
+    invariants: ["Protected diagnostics remain available"],
+    postconditions: ["The gate passes"],
+  },
 });
 `,
       GUEST_TYPE_DECLARATIONS,
@@ -92,7 +99,7 @@ return prewalk.checklist({
     expect(easy.errors).toEqual([]);
   });
 
-  it("accepts research-mode prewalk.checklist({ items })", () => {
+  it("accepts research-mode prewalk.checklist({ items, schema })", () => {
     const result = typeCheckFabricCode(
       `
 return prewalk.checklist({
@@ -103,6 +110,13 @@ return prewalk.checklist({
     { task: "Sweep call sites", validation: "No stray consumers" },
     { task: "Run the module tests", validation: "The module is green" },
   ],
+  schema: {
+    intent: "Probe and fix the surface",
+    references: [],
+    localScope: { files: ["src/contract.mjs"], symbols: [], cascadeRefs: [] },
+    invariants: ["Protected diagnostics remain available"],
+    postconditions: ["The module tests pass"],
+  },
 });
 `,
       GUEST_TYPE_DECLARATIONS,

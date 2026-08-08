@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { FabricCallAudit } from "../src/core/action-registry.js";
 import { PrewalkController } from "../src/prewalk/controller.js";
 
+// Valid Schema-first contract required for every items-bearing checklist; the
+// parser rejects items without one (trivial dispositions stay schema-free).
+const schemaContract = {
+  intent: "Adopt the plan without unrelated changes",
+  references: [],
+  localScope: { files: ["src/contract.mjs"], symbols: [], cascadeRefs: [] },
+  invariants: ["Protected diagnostics remain available"],
+  postconditions: ["The focused suite passes"],
+};
+
 const audit = (
   ref: string,
   success: boolean,
@@ -251,6 +261,7 @@ describe("PrewalkController", () => {
         task: `Change target ${index + 1}`,
         validation: `Run check ${index + 1}`,
       })),
+      schema: schemaContract,
     });
     const reservation = boundary!.authorize({
       ref: "pi.write",
@@ -274,6 +285,7 @@ describe("PrewalkController", () => {
         task: `Change target ${index + 1}`,
         validation: `Run check ${index + 1}`,
       })),
+      schema: schemaContract,
     });
     expect(controller.claimChecklistReminder("session-1")).toBeUndefined();
 
@@ -297,6 +309,7 @@ describe("PrewalkController", () => {
         task: "Change target " + (index + 1),
         validation: "Run check " + (index + 1),
       })),
+      schema: schemaContract,
     });
     const claim = controller.claim([audit("pi.edit", true)], "session-1", "handoff-1");
     expect(claim).toBeDefined();
@@ -325,6 +338,7 @@ describe("PrewalkController", () => {
         task: "Change target " + (index + 1),
         validation: "Run check " + (index + 1),
       })),
+      schema: schemaContract,
     });
     const claim = controller.claim([audit("pi.edit", true)], "session-1", "handoff-1");
     expect(claim).toBeDefined();
@@ -346,6 +360,7 @@ describe("PrewalkController", () => {
         task: "Change target " + (index + 1),
         validation: "Run check " + (index + 1),
       })),
+      schema: schemaContract,
     });
     const claim = controller.claim([audit("pi.edit", true)], "session-1", "handoff-1");
     expect(claim).toBeDefined();
@@ -416,6 +431,7 @@ describe("PrewalkController", () => {
         task: `Step ${index + 1}`,
         validation: `Check ${index + 1}`,
       })),
+      schema: schemaContract,
     });
     controller.claim([audit("pi.edit", true)], "session-1", "handoff-2");
     controller.completeHandoff("anthropic/frontier");
@@ -499,6 +515,7 @@ describe("PrewalkController", () => {
         task: `Change target ${index + 1}`,
         validation: `Run check ${index + 1}`,
       })),
+      schema: schemaContract,
     });
     const claim = controller.claim([audit("pi.edit", true)], "session-1", "handoff-1");
     expect(claim).toBeDefined();
@@ -529,6 +546,7 @@ describe("PrewalkController", () => {
         task: `Change target ${index + 1}`,
         validation: `Run check ${index + 1}`,
       })),
+      schema: schemaContract,
     });
 
     const reservation = boundary.authorize({
@@ -606,6 +624,7 @@ describe("PrewalkController no-op mutations", () => {
         task: `Change target ${index + 1}`,
         validation: `Run check ${index + 1}`,
       })),
+      schema: schemaContract,
     });
     const action = { ref: "pi.edit", risk: "write", effect: "workspace" } as const;
 
@@ -658,9 +677,14 @@ describe("PrewalkController no-op mutations", () => {
     expect(() => boundary.authorize({
       ref: "pi.write", risk: "write", effect: "workspace",
     })).toThrow(/checklist/i);
-    boundary.registerChecklist({ trivial: false, items: Array.from({ length: 5 }, (_, index) => ({
-      task: `Change target ${index + 1}`, validation: `Run check ${index + 1}`,
-    })) });
+    boundary.registerChecklist({
+      trivial: false,
+      items: Array.from({ length: 5 }, (_, index) => ({
+        task: `Change target ${index + 1}`,
+        validation: `Run check ${index + 1}`,
+      })),
+      schema: schemaContract,
+    });
     const reservation = boundary.authorize({ ref: "pi.write", risk: "write", effect: "workspace" });
     expect(reservation).toBe(true);
   });

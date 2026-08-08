@@ -6,6 +6,16 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import type { FabricExecutionResult } from "../src/execution-service.js";
 import { PrewalkController } from "../src/prewalk/controller.js";
+
+// Valid Schema-first contract for every items-bearing checklist in these tests;
+// the parser now rejects items without one (trivial dispositions stay schema-free).
+const schemaContract = {
+  intent: "Adopt the plan without unrelated changes",
+  references: [],
+  localScope: { files: ["src/contract.mjs"], symbols: [], cascadeRefs: [] },
+  invariants: ["Protected diagnostics remain available"],
+  postconditions: ["The focused suite passes"],
+};
 import {
   PREWALK_ARMED_MESSAGE_TYPE,
   checklistContinuationPrompt,
@@ -203,7 +213,7 @@ describe("outer-boundary Prewalk", () => {
       task: `Change target ${index + 1}`,
       validation: `Run check ${index + 1}`,
     }));
-    controller.executionBoundary("session-1")!.registerChecklist({ items });
+    controller.executionBoundary("session-1")!.registerChecklist({ items, schema: schemaContract });
     const run = execution();
     run.prewalkBoundary = { ref: "pi.edit", nestedToolCallId: "edit-one" };
     const pending = claimFabricHandoff(controller, run, "session-1", "json");
@@ -613,6 +623,7 @@ describe("prewalk single-path contract", () => {
         task: "Change target " + (index + 1),
         validation: "Run check " + (index + 1),
       })),
+      schema: schemaContract,
     });
     run.prewalkBoundary = { ref: "pi.edit", nestedToolCallId: "edit-one" };
     return { controller, pending: claimFabricHandoff(controller, run, "session-1", "json")! };
@@ -703,7 +714,10 @@ const armedWithChecklist = (): PrewalkController => {
     sessionId: "session-1",
     task: "Implement the guard",
   });
-  controller.executionBoundary("session-1")!.registerChecklist({ items: checklistItems });
+  controller.executionBoundary("session-1")!.registerChecklist({
+    items: checklistItems,
+    schema: schemaContract,
+  });
   return controller;
 };
 
@@ -746,7 +760,10 @@ describe("prewalk checklist handoff", () => {
       verificationMode: "gated",
       maxPhaseRevisions: 1,
     } as never);
-    controller.executionBoundary("session-1")!.registerChecklist({ items: checklistItems });
+    controller.executionBoundary("session-1")!.registerChecklist({
+      items: checklistItems,
+      schema: schemaContract,
+    });
     const first = claimFabricHandoff(controller, execution(), "session-1", "json")!;
     controller.completeHandoff();
     controller.acceptContinuation("session-1", first.audit.nestedToolCallId);
@@ -865,6 +882,7 @@ describe("research return policy", () => {
         task: `Change target ${index + 1}`,
         validation: `Run check ${index + 1}`,
       })),
+      schema: schemaContract,
     });
     run.prewalkBoundary = { ref: "pi.edit", nestedToolCallId: "edit-one" };
     const pending = claimFabricHandoff(controller, run, "session-1", "json")!;

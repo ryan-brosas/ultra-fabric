@@ -49,9 +49,10 @@ export interface FabricPrewalkChecklist {
   // controller suppresses the mutation boundary and the executor handoff
   // instead of forcing the 5-9 item ceremony and a model swap.
   trivial?: boolean;
-  // Typed Schema-first planning contract. Present on research plans; parsed
-  // strictly when present — incomplete or unverified contracts are rejected
-  // at planning time.
+  // Typed Schema-first planning contract. Present on every accepted
+  // items-bearing checklist (trivial dispositions remain schema-free); parsed
+  // strictly — incomplete or unverified contracts are rejected at planning
+  // time.
   schema?: FabricPrewalkSchemaContract;
 }
 
@@ -152,8 +153,12 @@ export const parsePrewalkChecklist = (
     ...(easy === true ? { easy: true } : {}),
   };
   const schema = record.schema;
-  if (schema !== undefined) {
-    if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+  if (schema === undefined) {
+    throw new Error(
+      "Prewalk checklist requires a schema contract for every items-bearing checklist",
+    );
+  }
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
       throw new Error("Prewalk schema contract must be an object");
     }
     const contract = schema as Record<string, unknown>;
@@ -204,6 +209,4 @@ export const parsePrewalkChecklist = (
         postconditions: postconditions.map(String),
       },
     };
-  }
-  return parsed;
 };
