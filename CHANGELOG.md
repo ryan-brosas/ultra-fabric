@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.31.1-ultra.21 - 2026-08-08
+
+- prewalk: every non-trivial checklist now requires the Schema contract. `parsePrewalkChecklist` rejects items without one, the guest API declares `schema` as required so the runtime type-checker rejects `prewalk.checklist({ items })` before execution, and the armed prompt demands `prewalk.checklist({ items, schema })` on research and easy paths. The 5-9 research and 2-4 easy item bounds and per-item task/validation checks still fire first, and trivial dispositions remain schema-free. codemap and CGC remain the evidence retrieval sources that answer reference questions; Schema governs progression.
+
 ## 0.31.1-ultra.20 - 2026-08-08
 
 - compaction: adopted reference concepts from the MIT-licensed pi-dcp and pi-vcc projects — repeated identical non-error tool results render as stable `(same output as (#N))` references counted in `omittedCounts.duplicates` (failed diagnostics are never deduplicated), and the pi-vcc `filter-noise` bookkeeping tool-pair set is skipped before projection and counted in `omittedCounts.noise`. New summaries also emit `counts.intactPairs` and the 1-based `ordinal`; entries persisted before those fields remain valid.
