@@ -1685,9 +1685,14 @@ export interface FabricSettingsDeps {
   capturedTools: CapturedToolCatalog;
 }
 
+export interface FabricSettingsOptions {
+  global?: boolean;
+}
+
 export async function openFabricSettings(
   context: ExtensionContext,
   deps: FabricSettingsDeps,
+  options: FabricSettingsOptions = {},
 ): Promise<void> {
   if (context.mode !== "tui") {
     context.ui.notify("Fabric settings are available in TUI mode", "warning");
@@ -1699,6 +1704,8 @@ export async function openFabricSettings(
   let rootList: SettingsList | undefined;
   const changedSections = new Set<string>();
   let dirty = false;
+  let savedPath: string | undefined;
+  const projectTrusted = !options.global && context.isProjectTrusted();
 
   const activeModelKey = context.model
     ? modelKey(context.model.provider, context.model.id)
@@ -1709,10 +1716,11 @@ export async function openFabricSettings(
       ? { compaction: { thresholds: { [activeModelKey]: value } } }
       : buildPartial(id, value);
     try {
-      saveFabricConfig(
-        { cwd: context.cwd, agentDir, projectTrusted: context.isProjectTrusted() },
+      const saved = saveFabricConfig(
+        { cwd: context.cwd, agentDir, projectTrusted },
         partial,
       );
+      savedPath = saved.path;
     } catch (error) {
       context.ui.notify(
         `Failed to save Fabric settings: ${error instanceof Error ? error.message : String(error)}`,
@@ -1765,11 +1773,14 @@ export async function openFabricSettings(
     const needsReload = [...changedSections].some((section) => RELOAD_SECTIONS.has(section));
     if (needsReload) {
       context.ui.notify(
-        "Fabric settings saved. Run /fabric reload to apply mesh, agent, and MCP changes.",
+        `Fabric ${projectTrusted ? "project" : "global"} settings saved${savedPath ? ` to ${savedPath}` : ""}. Run /fabric reload to apply mesh, agent, and MCP changes.`,
         "info",
       );
     } else {
-      context.ui.notify("Fabric settings saved.", "info");
+      context.ui.notify(
+        `Fabric ${projectTrusted ? "project" : "global"} settings saved${savedPath ? ` to ${savedPath}` : ""}.`,
+        "info",
+      );
     }
   }
 }

@@ -5,7 +5,7 @@ Pi Fabric reads configuration from two JSON files. Project values override globa
 1. `~/.pi/agent/fabric.json` — global defaults.
 2. `<project>/.pi/fabric.json` — project overrides, only for **trusted** projects.
 
-`/fabric settings` writes changes to the same files: trusted projects write to `<project>/.pi/fabric.json`; untrusted sessions write to the global `~/.pi/agent/fabric.json`.
+Fabric needs no repository initialization step. `/fabric settings --global` always writes user-wide defaults to `~/.pi/agent/fabric.json`. `/fabric settings` writes to `<project>/.pi/fabric.json` in a trusted project and to the global file in an untrusted session. `/fabric status` shows both paths. Project values override global defaults.
 
 Configuration documents are versioned with `configVersion`. Fabric migrates each applicable file independently before applying global/project precedence, then atomically rewrites migrated files. Version 0—the historical unversioned format—migrates its removed child-Agent section to `agents`; when both sections exist, `agents` wins conflicts while non-conflicting values are preserved. Trusted project files are migrated, while untrusted project files are neither read nor rewritten. Future schema changes should be added as sequential migrations rather than runtime aliases.
 

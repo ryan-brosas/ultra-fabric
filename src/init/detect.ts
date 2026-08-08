@@ -1,4 +1,4 @@
-// /fabric init environment detection. Pure: probe facts are injected, and the
+// Repository context environment detection. Pure: probe facts are injected, and the
 // module returns structured context used to fill the scaffold templates.
 // No I/O imports; the adapter gathers probes with fs/exec effects.
 

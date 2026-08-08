@@ -202,9 +202,9 @@ The all-113 live matrix under `bench/results/deepswe-all113` (job `20260806-v3b`
 
 Requires Node.js 24+ and Pi 0.80.6+. Fabric checks the host version at startup and warns when an older host may ignore continuation APIs.
 
-### npm prerelease
+### Install once for every project
 
-Pin an exact experimental version so it does not move:
+Pi installs packages to user settings by default. This one command adds Ultra Fabric to `~/.pi/agent/settings.json`, so it loads in every Pi session. No repository setup command or per-project Fabric files are required.
 
 ```bash
 pi install npm:ultra-fabric@0.31.1-ultra.21
@@ -217,7 +217,19 @@ pi remove npm:pi-fabric
 pi install npm:ultra-fabric@0.31.1-ultra.21
 ```
 
-Restart Pi after changing extension packages.
+Restart Pi after changing extension packages. Run `/fabric status` to confirm the loaded mode and configuration paths.
+
+Fabric works with built-in defaults. To customize all projects, run `/fabric settings --global`; it writes `~/.pi/agent/fabric.json`. In a trusted project, `/fabric settings` writes `<project>/.pi/fabric.json`. Project values override global defaults.
+
+### Optional project-only install
+
+Use Pi's local install flag only when a repository should carry Ultra Fabric without enabling it for every project:
+
+```bash
+pi install -l npm:ultra-fabric@0.31.1-ultra.21
+```
+
+Pi records that package in `<project>/.pi/settings.json` and installs it after the project is trusted.
 
 ### Git
 

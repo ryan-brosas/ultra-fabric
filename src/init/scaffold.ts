@@ -1,4 +1,4 @@
-// /fabric init: pure, non-destructive project scaffold planner.
+// Repository context reference: pure, non-destructive project scaffold planner.
 // Context files (AGENTS.md + the durable trio + user.md) live at the ROOT per
 // the agents.md standard and ecosystem convention (see docs/fabric-init.md);
 // settings and role profiles stay under .pi because the host mechanically

@@ -1,12 +1,8 @@
-# Fabric Init: Repository Context Workflow
+# Repository Context Reference
 
-Research-backed placement and content for Fabric project context. `/fabric init`
-is a visible repository workflow, not a silent scaffold: it queues a displayed
-follow-up message for Main that inspects the repository, proposes only grounded
-context changes, and reports created, updated, skipped, and validated artifacts.
-The command itself never writes files. The pure scaffold planner in
-`src/init/scaffold.ts` remains the tested reference for the templates and
-placement decisions below.
+Ultra Fabric no longer exposes a repository init command. Install the package once with `pi install npm:ultra-fabric@<version>`; Pi records it in user settings and loads it in every project. Fabric runs with built-in defaults, user-wide changes live in `~/.pi/agent/fabric.json`, and trusted project overrides live in `<project>/.pi/fabric.json`.
+
+This document retains the research and pure template planner as a reference for agents that the user explicitly asks to create repository context. It is not an installation step and does not run automatically. Preserve existing files and propose consequential context changes before writing them.
 
 ## 1. External research (ranked sources, fetched via mcp.exa.omniroute_web_search / omniroute_web_fetch)
 

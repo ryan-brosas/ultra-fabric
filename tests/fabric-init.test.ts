@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { planInit, applyInitPlan } from "../src/init/scaffold.js";
 
-// /fabric init: root-level context scaffold. Pure planner — no I/O.
+// Repository context reference: root-level scaffold planner. Pure — no I/O.
 
 const V = 7;
 

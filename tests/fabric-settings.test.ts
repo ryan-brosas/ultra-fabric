@@ -723,7 +723,10 @@ describe("FabricSettingsComponent", () => {
         rootList.items.find((item: { id: string }) => item.id === "prewalk").currentValue,
       ).toBe("Ask each time · XHigh · repeat");
       expect(applyFabricMode).toHaveBeenCalledOnce();
-      expect(notify).toHaveBeenCalledWith("Fabric settings saved.", "info");
+      expect(notify).toHaveBeenCalledWith(
+        expect.stringMatching(/^Fabric project settings saved to .+\.pi\/fabric\.json\.$/),
+        "info",
+      );
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
@@ -801,7 +804,10 @@ describe("FabricSettingsComponent", () => {
         "anthropic/claude-sonnet-4-5",
       );
       expect(applyFabricMode).toHaveBeenCalledOnce();
-      expect(notify).toHaveBeenCalledWith("Fabric settings saved.", "info");
+      expect(notify).toHaveBeenCalledWith(
+        expect.stringMatching(/^Fabric project settings saved to .+\.pi\/fabric\.json\.$/),
+        "info",
+      );
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }

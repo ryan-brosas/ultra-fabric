@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- setup: remove the `/fabric init` command. A normal `pi install npm:ultra-fabric@<version>` is user-global and loads in every Pi project without repository setup; `pi install -l` remains the opt-in project-only path. `/fabric status` now reports the global and project configuration paths, and `/fabric settings --global` lets trusted projects edit user-wide defaults explicitly.
+
 ## 0.31.1-ultra.21 - 2026-08-08
 
 - prewalk: every non-trivial checklist now requires the Schema contract. `parsePrewalkChecklist` rejects items without one, the guest API declares `schema` as required so the runtime type-checker rejects `prewalk.checklist({ items })` before execution, and the armed prompt demands `prewalk.checklist({ items, schema })` on research and easy paths. The 5-9 research and 2-4 easy item bounds and per-item task/validation checks still fire first, and trivial dispositions remain schema-free. codemap and CGC remain the evidence retrieval sources that answer reference questions; Schema governs progression.

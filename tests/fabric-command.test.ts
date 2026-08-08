@@ -1,8 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { CapturedToolCatalog } from "../src/capture/catalog.js";
 import { registerFabricCommand } from "../src/commands/fabric.js";
 import {
@@ -539,6 +536,9 @@ describe("/fabric command", () => {
     await run("status");
 
     const message = notify.mock.calls[0]![0] as string;
+    expect(message).toContain("setup: global package · no repository init required");
+    expect(message).toContain("config: global");
+    expect(message).toContain("trusted project overrides /repo/.pi/fabric.json");
     expect(message).toContain("admission: required");
     expect(message).toContain("profiles: inspect");
     expect(message).toContain("quality downgrade: blocked");
@@ -548,72 +548,51 @@ describe("/fabric command", () => {
     expect(message).toContain("context QoS: on");
   });
 
-  const initWorkflowHarness = (scratch: string) => {
+  it("routes --global settings explicitly and rejects unknown settings arguments", async () => {
+    const openSettings = vi.fn().mockResolvedValue(undefined);
     let handler: ((argumentsText: string, context: ExtensionContext) => Promise<void>) | undefined;
-    const sendMessage = vi.fn();
-    const notify = vi.fn();
     const pi = {
-      registerCommand: vi.fn(
-        (_name: string, definition: { handler: typeof handler }) => {
-          handler = definition.handler;
-        },
-      ),
-      sendMessage,
+      registerCommand: vi.fn((_name: string, definition: { handler: typeof handler }) => {
+        handler = definition.handler;
+      }),
     } as unknown as ExtensionAPI;
-    const context = { cwd: scratch, ui: { notify } } as unknown as ExtensionContext;
+    const state = { ensure: vi.fn().mockResolvedValue(undefined) } as unknown as FabricState;
+    const notify = vi.fn();
+    const context = { ui: { notify } } as unknown as ExtensionContext;
     registerFabricCommand(pi, {
-      state: { ensure: vi.fn().mockResolvedValue(undefined) } as unknown as FabricState,
+      state,
       fabricUi: {} as FabricUiController,
       capturedTools: {} as CapturedToolCatalog,
       applyFabricMode: vi.fn(),
       suspendToolCapture: vi.fn(),
+      openSettings,
     });
-    return { handler: handler!, context, notify, sendMessage };
-  };
 
-  it("init queues a visible repository workflow and performs no direct scaffold writes", async () => {
-    const scratch = mkdtempSync(join(tmpdir(), "fabric-init-workflow-"));
-    const { handler, context, notify, sendMessage } = initWorkflowHarness(scratch);
-
-    await handler("init", context);
-
-    expect(readdirSync(scratch)).toEqual([]);
-    expect(sendMessage).toHaveBeenCalledWith(
-      {
-        customType: "pi-fabric-init-workflow",
-        content: expect.stringContaining(`Initialize Fabric for the repository at ${scratch}`),
-        display: true,
-        details: {
-          cwd: scratch,
-          command: "/fabric init",
-          mode: "workflow",
-        },
-      },
-      { deliverAs: "followUp", triggerTurn: true },
+    await handler!("settings --global", context);
+    expect(openSettings).toHaveBeenCalledWith(
+      context,
+      expect.objectContaining({ state }),
+      { global: true },
     );
-    const message = sendMessage.mock.calls[0]![0].content as string;
-    expect(message).toContain("Do not run a blind scaffold");
-    expect(message).toContain("Inspect the repository before proposing changes");
-    expect(message).toContain("created, updated, skipped, and validated");
-    expect(notify).toHaveBeenCalledWith(
-      expect.stringContaining("Fabric init workflow queued"),
-      "info",
-    );
-    rmSync(scratch, { recursive: true, force: true });
+
+    await handler!("settings --project", context);
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenLastCalledWith("Usage: /fabric settings [--global]", "warning");
   });
 
-  it("init rejects trailing text instead of silently ignoring it", async () => {
-    const scratch = mkdtempSync(join(tmpdir(), "fabric-init-args-"));
-    const { handler, context, notify, sendMessage } = initWorkflowHarness(scratch);
+  it("does not expose or dispatch the removed init command", async () => {
+    const state = {
+      ensure: vi.fn().mockResolvedValue(undefined),
+    } as unknown as FabricState;
+    const { run, complete, notify } = registerWith(state);
 
-    await handler("init this project", context);
+    expect(complete().map((item) => item.value)).not.toContain("init");
 
-    expect(sendMessage).not.toHaveBeenCalled();
-    expect(readdirSync(scratch)).toEqual([]);
-    expect(notify).toHaveBeenCalledWith(
-      "Usage: /fabric init (no trailing text)",
+    await run("init");
+
+    expect(notify).toHaveBeenLastCalledWith(
+      expect.stringContaining("Usage: /fabric"),
       "warning",
     );
-    rmSync(scratch, { recursive: true, force: true });
   });
 });

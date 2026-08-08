@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import type { CapturedToolCatalog } from "../capture/catalog.js";
 import type { FabricPersistentAgentHostEvent } from "../agents/persistent/types.js";
@@ -7,7 +7,7 @@ import { armPrewalk } from "../prewalk/arm.js";
 import { scoutBridge, type ScoutRunner } from "../prewalk/scout-brief.js";
 import { truncateMiddle } from "../util.js";
 import type { FabricUiController } from "../ui/controller.js";
-import { openFabricSettings } from "../ui/settings.js";
+import { openFabricSettings, type FabricSettingsOptions } from "../ui/settings.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -17,6 +17,11 @@ interface FabricCommandDeps {
   capturedTools: CapturedToolCatalog;
   applyFabricMode: () => void;
   suspendToolCapture: () => void;
+  openSettings?: (
+    context: ExtensionContext,
+    deps: { state: FabricState; applyFabricMode: () => void; capturedTools: CapturedToolCatalog },
+    options?: FabricSettingsOptions,
+  ) => Promise<void>;
 }
 
 const extractContentText = (content: unknown): string => {
@@ -739,6 +744,8 @@ const runStatus = (deps: FabricCommandDeps, context: ExtensionContext): void => 
       context.ui.notify(
         [
           `cwd: ${state.cwd}`,
+          `setup: global package · no repository init required`,
+          `config: global ${path.join(getAgentDir(), "fabric.json")} · trusted project overrides ${path.join(state.cwd ?? context.cwd, ".pi", "fabric.json")}`,
           `mode: ${config.fullCodeMode ? "full code (Fabric-owned core tools)" : "orchestration-only (native Pi tools)"}`,
           `providers: ${state.registry
             .providers()
@@ -781,41 +788,10 @@ const runStatus = (deps: FabricCommandDeps, context: ExtensionContext): void => 
       );
 };
 
-// /fabric init: visible repository workflow. The command never writes files
-// itself. It queues a displayed follow-up message for Main that inspects the
-// repository, proposes only grounded context changes, and reports the receipt.
-const INIT_WORKFLOW_MESSAGE_TYPE = "pi-fabric-init-workflow";
-
-const initWorkflowPrompt = (cwd: string): string => [
-  `Initialize Fabric for the repository at ${cwd}.`,
-  "Do not run a blind scaffold. Inspect the repository before proposing changes: read AGENTS.md, CLAUDE.md, or README instructions first, then check which of project.md, roadmap.md, tech-stack.md, user.md, .pi/fabric.json, and .pi/agents/*.md exist and which this project actually needs.",
-  "Preserve every existing file. Propose consequential overwrites or migrations to the user before touching them.",
-  "Implement only grounded changes and verify each created, updated, or migrated file (for example: config parses, markdown links resolve, the intended context is present).",
-  "Report the final receipt: created, updated, skipped, and validated artifacts, with the check that proves each.",
-].join("\n");
-
-const runInit = (pi: ExtensionAPI, context: ExtensionContext): void => {
-  pi.sendMessage(
-    {
-      customType: INIT_WORKFLOW_MESSAGE_TYPE,
-      content: initWorkflowPrompt(context.cwd),
-      display: true,
-      details: {
-        cwd: context.cwd,
-        command: "/fabric init",
-        mode: "workflow",
-      },
-    },
-    { deliverAs: "followUp", triggerTurn: true },
-  );
-  context.ui.notify(
-    "Fabric init workflow queued — Main will inspect the repository and propose grounded context changes",
-    "info",
-  );
-};
 
 export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps): void {
   const { state, fabricUi, capturedTools, applyFabricMode } = deps;
+  const showSettings = deps.openSettings ?? openFabricSettings;
   pi.registerCommand("fabric", {
     description: "Open Fabric, arm prewalk, reload, or manage agents across both lifecycles",
     getArgumentCompletions: (argumentPrefix: string): AutocompleteItem[] | null => {
@@ -825,7 +801,6 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         "dashboard",
         "settings",
         "prewalk",
-        "init",
         "reload",
         "providers",
         "captured",
@@ -932,17 +907,20 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
         .trim()
         .split(/\s+/)
         .filter(Boolean);
-      // /fabric init takes no arguments: trailing prose is rejected loudly
-      // instead of being silently ignored by the subcommand dispatch.
-      if (command === "init" && argumentsList.length > 0) {
-        context.ui.notify("Usage: /fabric init (no trailing text)", "warning");
-        return;
-      }
       const handlers: Record<string, () => Promise<void> | void> = {
         reload: () => runReload(deps, context),
-        settings: () => openFabricSettings(context, { state, applyFabricMode, capturedTools }),
+        settings: () => {
+          if (argumentsList.length > 1 || (argumentsList.length === 1 && argumentsList[0] !== "--global")) {
+            context.ui.notify("Usage: /fabric settings [--global]", "warning");
+            return;
+          }
+          return showSettings(
+            context,
+            { state, applyFabricMode, capturedTools },
+            { global: argumentsList[0] === "--global" },
+          );
+        },
         prewalk: () => runPrewalk(pi, state, context, argumentsList, argumentsText.trim().slice(command.length).trim()),
-        init: () => runInit(pi, context),
         dashboard: () => fabricUi.openDashboard(context),
         ui: () => fabricUi.openDashboard(context),
         providers: () => runProviders(state, context),
@@ -968,7 +946,7 @@ export function registerFabricCommand(pi: ExtensionAPI, deps: FabricCommandDeps)
       const run = handlers[command];
       if (!run) {
         context.ui.notify(
-          "Usage: /fabric [status|health|dashboard|settings|prewalk [task]|prewalk --retry|prewalk --off|reload|providers|captured [query]|leases [--release <id...>|--release-all]|outcomes|agents|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>]",
+          "Usage: /fabric [status|health|dashboard|settings [--global]|prewalk [task]|prewalk --retry|prewalk --off|reload|providers|captured [query]|leases [--release <id...>|--release-all]|outcomes|agents|global|import <name> [as <new>]|export <id> [--overwrite]|messages <id>|clear-messages <id>|events <id> [event...]|log <id>|export-log <id>|attach <id>|stop <id>|remove <id>|kill <id>]",
           "warning",
         );
         return;
