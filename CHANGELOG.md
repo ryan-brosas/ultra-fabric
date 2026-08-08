@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.31.1-ultra.20 - 2026-08-08
+
+- compaction: adopted reference concepts from the MIT-licensed pi-dcp and pi-vcc projects — repeated identical non-error tool results render as stable `(same output as (#N))` references counted in `omittedCounts.duplicates` (failed diagnostics are never deduplicated), and the pi-vcc `filter-noise` bookkeeping tool-pair set is skipped before projection and counted in `omittedCounts.noise`. New summaries also emit `counts.intactPairs` and the 1-based `ordinal`; entries persisted before those fields remain valid.
+- prewalk: the accepted checklist projects a Schema contract (intent, reference questions and evidence refs, local scope with files/symbols/cascade refs, invariants, postconditions) through `prewalk.checklist({ items, schema })`; the research arm treats Schema as the progression authority and includes the schema object only when the plan carries external reference questions or multi-file scope.
+- prewalk: new `planningEscapes` config (default true) — set false to force the full 5-9 item research protocol; the benchmark research config disables the easy and trivial escapes so research records carry real checklists.
+- prewalk: the execution trace projection now records `fabric.prewalk.checklist` item counts and easy/trivial dispositions (never plan text), and the benchmark probe boundary matches the real flow where the frontier fabric_exec terminates at the accepted checklist.
+- prewalk: `PI_FABRIC_PREWALK_EXTRA_EXTENSIONS` loads operator provider extensions headless; docs/certification.md records the first real collector findings (omniroute gateway route, harness fixes, remaining RPC executor-continuation blocker) with automatic policy promotion still off.
+
 ## 0.31.1-ultra.19 - 2026-08-08
 
 - codemap: call-site and literal extraction now cache ast-grep scans per file by mtime and re-scan only files whose mtime drifted; source-root discovery skips roots that do not exist.
